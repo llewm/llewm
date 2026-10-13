@@ -556,28 +556,37 @@ rules work in the installed client. Missing rules are warnings, never failures.
 ## Version-pinned developer builds
 
 The public module path is `github.com/llewm/llewm/components/continuity`.
-Forgejo remains the source authority; GitHub is its reviewed source mirror. Until
-a source revision is published there, build from the authorized local checkout.
+Forgejo remains the source authority; GitHub is its reviewed source mirror.
+The initial published root is `0f3acba42abd9a2c0ed7866c9c80a921333270b8`.
 For a reproducible build, check out the selected full commit in a separate clean
 checkout, then run the platform's build command above. Record the commit and
 `llewm version --output json` receipt. Keep binary and plugin source revisions
 aligned.
 
-Once the chosen commit is mirrored, Go can install each command separately,
-using the same published full commit hash in place of `PUBLISHED_COMMIT`:
+Go can install each command separately at that published full commit:
 
 ```sh
-go install github.com/llewm/llewm/components/continuity/cmd/llewm@PUBLISHED_COMMIT
-go install github.com/llewm/llewm/components/reporting/cmd/llewm-report@PUBLISHED_COMMIT
-go install github.com/llewm/llewm/components/action-control/cmd/action-control@PUBLISHED_COMMIT
+go install github.com/llewm/llewm/components/continuity/cmd/llewm@0f3acba42abd9a2c0ed7866c9c80a921333270b8
+go install github.com/llewm/llewm/components/reporting/cmd/llewm-report@0f3acba42abd9a2c0ed7866c9c80a921333270b8
+go install github.com/llewm/llewm/components/action-control/cmd/action-control@0f3acba42abd9a2c0ed7866c9c80a921333270b8
 ```
 
-These are templates, not an assertion that a version is already published.
+These commands passed on Linux/amd64 with Go 1.27.2 and `GOWORK=off` in an isolated
+output directory. An isolated Continuity project also passed init/doctor, checkpoint
+dry-run/save, bootstrap recovery and exact readback. These checks do not establish
+native macOS/Windows or live-client behavior.
 `go install` puts binaries in `GOBIN`, or `GOPATH/bin` by default; inspect
 `go env GOBIN GOPATH` and add the resolved directory to PATH. Separate component
 modules require separate invocations. The command installs the executable only;
 install the matching client plugin from the same source revision or preview
 bundle. Installing the reporting executable does not activate reporting.
+
+Module-cache installs may report `git_commit: unknown`: they do not carry the
+checkout's embedded VCS settings. Retain `go version -m /path/to/llewm` to inspect
+the module version and checksum; this root resolves to
+`v0.0.0-20261013141605-0f3acba42abd`. Use a clean checkout build with
+`-buildvcs=true` when the executable must report the full Git commit for readiness
+verification. An unknown commit must not be relabeled as an observed full revision.
 
 For tagged versions, tags carry the module subdirectory prefix, for example
 `components/continuity/v0.1.0-preview.1`; the package argument uses
@@ -585,7 +594,6 @@ For tagged versions, tags carry the module subdirectory prefix, for example
 See the [Go module installation rules](https://go.dev/ref/mod#go-install) and
 [source publication](../../../docs/source-publication.md).
 
-Remote version-pinned installation still needs qualification after publication.
 A Homebrew tap and signed prebuilt installers are pending; this guide does not
 claim that either exists.
 

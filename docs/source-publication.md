@@ -3,9 +3,11 @@
 Forgejo remains the authoritative Llewm source repository. The public GitHub
 identity is `llewm/llewm`; its source URL is `https://github.com/llewm/llewm`.
 GitHub is a one-way source mirror, separate from every project's private
-Continuity History-sync repository. Public publication is pending. The reviewed
-strategy is a clean initial source snapshot, a private archive of original
-development history, and identical ongoing `main` history on both source remotes.
+Continuity History-sync repository. The initial public source root is
+`0f3acba42abd9a2c0ed7866c9c80a921333270b8`, published on October 13, 2026.
+GitHub's `main` and the authenticated Forgejo push matched that root. Original
+development history and notes are retained in a restore-verified private archive;
+both source remotes now start from the same ongoing `main` history.
 
 ## Module and release identity
 
