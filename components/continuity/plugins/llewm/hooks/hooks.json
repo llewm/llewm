@@ -1,0 +1,79 @@
+{
+  "description": "Restore continuity at startup and record agent lifecycle activity locally.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "llewm hook codex",
+            "timeout": 15,
+            "statusMessage": "Restoring project continuity",
+            "additionalContextLimit": 4000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "llewm hook codex",
+            "timeout": 5,
+            "async": true,
+            "additionalContextLimit": 128
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "llewm hook codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "llewm hook codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "llewm hook codex",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "llewm hook codex", "timeout": 5 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "llewm hook codex", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "llewm",
+  "version": "0.1.27",
+  "description": "Restore compact project continuity and record coding-agent activity across sessions.",
+  "author": {
+    "name": "Llewm contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Llewm Continuity",
+    "shortDescription": "Compact session continuity and activity auditing.",
+    "longDescription": "Restores task state and project rules at session start, records lifecycle activity locally, and exposes checkpoints and audits through MCP.",
+    "developerName": "Llewm contributors",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Show the current llewm status for this project."
+  },
+  "mcpServers": "./.mcp.json"
+}

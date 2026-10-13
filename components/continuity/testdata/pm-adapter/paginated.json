@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "manifest": {
+    "id": "example-adapter", "version": "1", "provider": "example",
+    "contract_versions": [1], "capabilities": ["read_snapshot", "propose_import"],
+    "resource_types": ["work_item"], "mapping_profile": "basic", "mapping_version": "1"
+  },
+  "project": {"provider": "example", "instance": "tenant", "project": "project"},
+  "snapshot": {
+    "complete": false, "cursor": "page-2",
+    "resources": [
+      {
+        "ref": {
+          "project": {"provider": "example", "instance": "tenant", "project": "project"},
+          "type": "work_item", "id": "work-item:42", "revision": "r2",
+          "observed_at": "2026-10-07T00:00:00Z",
+          "url": "https://user:DO_NOT_PRINT@example.test/items/42?token=DO_NOT_PRINT#DO_NOT_PRINT"
+        },
+        "deleted": false,
+        "fields": {"provider_status": "Doing", "token": "DO_NOT_PRINT", "opaque_count": 9007199254740993}
+      },
+      {
+        "ref": {
+          "project": {"provider": "example", "instance": "tenant", "project": "project"},
+          "type": "work_item", "id": "work-item:41", "revision": "r3",
+          "observed_at": "2026-10-07T00:00:00Z"
+        },
+        "deleted": true, "fields": {}
+      }
+    ],
+    "relationships": []
+  },
+  "proposals": [{
+    "id": "map-42", "source": "work-item:42", "source_revision": "r2",
+    "mappings": [{"field": "status", "value": "active", "authority": "neither", "lossy": true}]
+  }]
+}

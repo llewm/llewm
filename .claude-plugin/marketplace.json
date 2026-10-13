@@ -1,0 +1,13 @@
+{
+  "name": "llewm",
+  "owner": {
+    "name": "Llewm contributors"
+  },
+  "description": "Local plugins for Llewm development.",
+  "plugins": [
+    {
+      "name": "llewm",
+      "source": "./components/continuity/plugins/claude-code"
+    }
+  ]
+}

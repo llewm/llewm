@@ -1,0 +1,4 @@
+{
+  "session_id": "fixture-claude-session",
+  "hook_event_name": "SessionEnd"
+}

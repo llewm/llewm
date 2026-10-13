@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "continuity": {
+      "command": "llewm",
+      "args": ["mcp"]
+    }
+  }
+}

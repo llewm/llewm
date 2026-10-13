@@ -1,0 +1,8 @@
+{
+  "name": "llewm",
+  "description": "Restore compact project continuity and record coding-agent activity across sessions.",
+  "version": "0.1.27",
+  "author": {
+    "name": "Llewm contributors"
+  }
+}

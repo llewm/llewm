@@ -1,0 +1,19 @@
+/llewm
+/action-control
+/components/continuity/llewm
+/components/continuity/llewm.exe
+/components/action-control/action-control
+/components/action-control/action-control.exe
+/components/continuity/dist/
+/dist/
+/.continuity/
+*.db
+*.db-shm
+*.db-wal
+coverage.out
+*.log
+.idea/
+.vscode/
+
+# Private, source-project plan projection; maintained docs describe its interface.
+/components/continuity/docs/current-plan.md

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "manifest": {
+    "id": "example-adapter", "version": "1", "provider": "example",
+    "contract_versions": [1], "capabilities": ["read_snapshot"],
+    "resource_types": ["work_item"], "mapping_profile": "basic", "mapping_version": "1"
+  },
+  "project": {"provider": "example", "instance": "tenant", "project": "project"},
+  "snapshot": {"complete": true, "resources": [], "relationships": []},
+  "proposals": []
+}

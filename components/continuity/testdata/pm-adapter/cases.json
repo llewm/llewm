@@ -1,0 +1,5 @@
+[
+  {"file":"minimal.json","valid":true,"codes":[]},
+  {"file":"paginated.json","valid":true,"codes":["incomplete_snapshot_no_deletion_inference","provider_tombstone_only","opaque_provider_fields","lossy_mapping","unresolved_field_authority","redacted"]},
+  {"file":"duplicate-key.json","valid":false,"error":"invalid_json_structure"}
+]

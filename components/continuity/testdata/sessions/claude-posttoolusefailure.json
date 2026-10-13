@@ -1,0 +1,9 @@
+{
+  "session_id": "fixture-claude-session",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "go test ./..."
+  },
+  "error": "Command exited with code 1"
+}

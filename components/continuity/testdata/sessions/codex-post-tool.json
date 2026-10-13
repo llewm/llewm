@@ -1,0 +1,13 @@
+{
+  "session_id": "fixture-codex-session",
+  "turn_id": "fixture-turn",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "go test ./..."
+  },
+  "tool_response": {
+    "output": "ok"
+  },
+  "duration_ms": 125
+}

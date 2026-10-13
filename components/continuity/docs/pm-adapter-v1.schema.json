@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Continuity read-only PM interchange v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest", "project", "snapshot", "proposals"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest": {"$ref": "#/$defs/manifest"},
+    "project": {"$ref": "#/$defs/project"},
+    "snapshot": {"$ref": "#/$defs/snapshot"},
+    "proposals": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/proposal"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$"},
+    "text": {"type": "string", "maxLength": 16384, "pattern": "^[^\u0000]*$"},
+    "opaque": {
+      "oneOf": [
+        {"$ref": "#/$defs/text"}, {"type": "number"}, {"type": "boolean"},
+        {"type": "array", "items": {"$ref": "#/$defs/opaque"}},
+        {"type": "object", "propertyNames": {"$ref": "#/$defs/text"}, "additionalProperties": {"$ref": "#/$defs/opaque"}}
+      ]
+    },
+    "project": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider", "instance", "project"],
+      "properties": {"provider": {"$ref": "#/$defs/id"}, "instance": {"$ref": "#/$defs/id"}, "project": {"$ref": "#/$defs/id"}}
+    },
+    "manifest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "version", "provider", "contract_versions", "capabilities", "resource_types", "mapping_profile", "mapping_version"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "version": {"$ref": "#/$defs/id"}, "provider": {"$ref": "#/$defs/id"},
+        "contract_versions": {"const": [1]},
+        "capabilities": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "contains": {"const": "read_snapshot"}, "items": {"enum": ["read_snapshot", "propose_import"]}},
+        "resource_types": {"type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": {"enum": ["work_item", "initiative", "milestone", "research", "release"]}},
+        "mapping_profile": {"$ref": "#/$defs/id"}, "mapping_version": {"$ref": "#/$defs/id"}
+      }
+    },
+    "reference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["project", "type", "id", "revision", "observed_at"],
+      "properties": {
+        "project": {"$ref": "#/$defs/project"}, "type": {"enum": ["work_item", "initiative", "milestone", "research", "release"]},
+        "id": {"$ref": "#/$defs/id"}, "url": {"$ref": "#/$defs/text"},
+        "revision": {"allOf": [{"$ref": "#/$defs/text"}, {"pattern": "\\S"}]},
+        "observed_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "resource": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "deleted", "fields"],
+      "properties": {
+        "ref": {"$ref": "#/$defs/reference"}, "deleted": {"type": "boolean"},
+        "fields": {"type": "object", "propertyNames": {"$ref": "#/$defs/text"}, "additionalProperties": {"$ref": "#/$defs/opaque"}}
+      }
+    },
+    "relationship": {
+      "type": "object", "additionalProperties": false,
+      "required": ["from", "to", "kind"],
+      "properties": {"from": {"$ref": "#/$defs/id"}, "to": {"$ref": "#/$defs/id"}, "kind": {"enum": ["parent_of", "depends_on", "blocks", "parallel_with", "explores"]}}
+    },
+    "snapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["complete", "resources", "relationships"],
+      "properties": {
+        "complete": {"type": "boolean"}, "cursor": {"$ref": "#/$defs/text"},
+        "resources": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/resource"}},
+        "relationships": {"type": "array", "maxItems": 512, "uniqueItems": true, "items": {"$ref": "#/$defs/relationship"}}
+      }
+    },
+    "mapping": {
+      "type": "object", "additionalProperties": false,
+      "required": ["field", "value", "authority", "lossy"],
+      "properties": {
+        "field": {"enum": ["title", "status", "kind", "parent", "dependency", "release", "target_date"]},
+        "value": {"allOf": [{"$ref": "#/$defs/text"}, {"pattern": "\\S"}]},
+        "authority": {"enum": ["provider", "llewm", "neither"]}, "lossy": {"type": "boolean"}
+      }
+    },
+    "proposal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "source", "source_revision", "mappings"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "source": {"$ref": "#/$defs/id"}, "source_revision": {"$ref": "#/$defs/text"},
+        "mappings": {"type": "array", "minItems": 1, "maxItems": 7, "items": {"$ref": "#/$defs/mapping"}}
+      }
+    }
+  }
+}

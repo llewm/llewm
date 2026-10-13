@@ -1,0 +1,17 @@
+{
+  "name": "llewm",
+  "plugins": [
+    {
+      "name": "llewm",
+      "source": {
+        "source": "local",
+        "path": "./components/continuity/plugins/llewm"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

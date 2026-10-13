@@ -1,0 +1,61 @@
+version: '3'
+
+tasks:
+  fmt:
+    cmds:
+      - for: [components/continuity, components/action-control, components/reporting]
+        task: fmt-component
+        vars: { COMPONENT: '{{.ITEM}}' }
+  fmt-component:
+    internal: true
+    dir: '{{.COMPONENT}}'
+    cmds: [go fmt ./...]
+  test:
+    cmds:
+      - for: [components/continuity, components/action-control, components/reporting]
+        task: test-component
+        vars: { COMPONENT: '{{.ITEM}}' }
+  test-component:
+    internal: true
+    dir: '{{.COMPONENT}}'
+    cmds: [go test ./...]
+  vet:
+    cmds:
+      - for: [components/continuity, components/action-control, components/reporting]
+        task: vet-component
+        vars: { COMPONENT: '{{.ITEM}}' }
+  vet-component:
+    internal: true
+    dir: '{{.COMPONENT}}'
+    cmds: [go vet ./...]
+  check:
+    cmds:
+      - task: fmt
+      - task: test
+      - task: vet
+  build:
+    cmds:
+      - task: build-continuity
+      - task: build-action-control
+      - task: build-reporting
+  build-continuity:
+    internal: true
+    dir: components/continuity
+    cmds: [go build -buildvcs=true -o ../../dist/llewm ./cmd/llewm]
+  build-action-control:
+    internal: true
+    dir: components/action-control
+    cmds: [go build -buildvcs=true -o ../../dist/action-control ./cmd/action-control]
+  build-reporting:
+    internal: true
+    dir: components/reporting
+    cmds: [go build -buildvcs=true -o ../../dist/llewm-report ./cmd/llewm-report]
+  package-preview:
+    dir: components/continuity
+    requires:
+      vars: [VERSION]
+    env:
+      LLEWM_PREVIEW_VERSION: '{{.VERSION}}'
+      LLEWM_PREVIEW_TARGETS: '{{.TARGETS | default "all"}}'
+    cmds:
+      - go run ./cmd/package-preview --version "$LLEWM_PREVIEW_VERSION" --targets "$LLEWM_PREVIEW_TARGETS"

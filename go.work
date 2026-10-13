@@ -1,0 +1,7 @@
+go 1.25.0
+
+use (
+	./components/action-control
+	./components/continuity
+	./components/reporting
+)
