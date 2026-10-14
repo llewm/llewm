@@ -594,8 +594,25 @@ For tagged versions, tags carry the module subdirectory prefix, for example
 See the [Go module installation rules](https://go.dev/ref/mod#go-install) and
 [source publication](../../../docs/source-publication.md).
 
-A Homebrew tap and signed prebuilt installers are pending; this guide does not
-claim that either exists.
+### Homebrew source preview
+
+A [pinned source formula](../packaging/homebrew/README.md) is prepared for a
+local preview tap. It installs `llewm`, Bash/Zsh/Fish completions, and license
+notices; client plugins remain a separate matching-revision installation.
+It preserves Git metadata and builds the published clean commit `43adc25`
+with package version `0.1.0-preview.20261013`.
+
+On Linux/amd64, the formula's dependency-fetch and offline build commands passed
+with Go 1.27.2; CLI and embedded executable metadata identify the clean full
+commit. Bash/Zsh/Fish completion generation and isolated init/doctor passed.
+A checkpoint survived replacement of the initial public-root binary by this
+build, package-file removal, and restoration; global guidance was retained.
+This checked a binary update with the same schema and writer floor, not a
+migration or Homebrew-managed upgrade.
+
+Actual Homebrew install/audit/test, native macOS/Windows, and live-client
+qualification remain pending. A public Homebrew tap and signed prebuilt
+installers are not yet available.
 
 ## Remove or disable an installation
 
