@@ -32,7 +32,10 @@ project in ordinary language. Fresh-client skill routing still needs qualificati
    `doctor` expects root `AGENTS.md`; root `CLAUDE.md` is optional and its absence
    does not fail the check. Keep applicable component guidance referenced from
    the root instructions.
-4. **Enable the client.** Follow [client integrations](client-integrations.md).
+4. **Enable the client.** Preview `llewm install --client codex --dry-run` (or
+   `--client claude-code`), then run `llewm install --client CLIENT --permissions`
+   yourself at a terminal. The binary carries its matching plugin package; no
+   separate source checkout is needed. See [client integrations](client-integrations.md).
    Plugin installation, hook trust, tool approvals, and filesystem/network
    sandbox permissions are separate. Preview generated permission rules; apply
    them yourself at a terminal as described in [client permissions](installation.md#client-permissions).

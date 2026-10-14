@@ -64,7 +64,11 @@ func clientCommand() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					return writeClaudeSettings(out, path, rules)
+					if err := writeClaudeSettings(out, path, rules); err != nil {
+						return err
+					}
+					setPermissionResult(cmd, "applied_or_current")
+					return nil
 				}
 				if format == "json" {
 					return writeJSON(out, rules)
@@ -202,6 +206,7 @@ func writeCodexSettings(cmd *cobra.Command, rules clientperm.Rules) error {
 	}
 	if !changed {
 		fmt.Fprintln(out, "Managed permissions are current; nothing changed.")
+		setPermissionResult(cmd, "current")
 		return nil
 	}
 	fmt.Fprint(out, "Apply these read/write approvals? Type yes to continue: ")
@@ -211,6 +216,7 @@ func writeCodexSettings(cmd *cobra.Command, rules clientperm.Rules) error {
 	}
 	if strings.TrimSpace(answer) != "yes" {
 		fmt.Fprintln(out, "Cancelled; no files changed.")
+		setPermissionResult(cmd, "declined")
 		return nil
 	}
 	backups, err := plan.Apply()
@@ -221,7 +227,16 @@ func writeCodexSettings(cmd *cobra.Command, rules clientperm.Rules) error {
 		return err
 	}
 	fmt.Fprintln(out, "Updated managed permissions. Start a new Codex session to use them. Filesystem and network restrictions are unchanged.")
+	setPermissionResult(cmd, "applied")
 	return nil
+}
+
+// The installer consumes this semantic result without parsing interactive text.
+func setPermissionResult(cmd *cobra.Command, result string) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations["llewm_permission_result"] = result
 }
 func printPermissionChanges(out io.Writer, before, after string) {
 	lines := func(s string) map[string]int {

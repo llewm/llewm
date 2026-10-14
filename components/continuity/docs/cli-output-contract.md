@@ -39,10 +39,22 @@ A successful write receipt is not independent verification of caller-supplied
 claims.
 
 See [checkpoint semantics](checkpoints.md),
-[client write receipts](client-integrations.md#write-tool-receipts), and
+[client write receipts](client-integration-reference.md#write-tool-receipts), and
 [console JSON reads](console.md#versioned-reads-for-editor-clients).
 
 ## Changes before public release
+
+`llewm install --output json` returns a selected setup receipt, not raw client
+settings. `state` is `preview`, `blocked`, `installed`, `partial`, or `failed`.
+It records bundled package identity, executable/client versions, fixed client
+argv, completed steps and any retained package backup. `plugin_installed` means
+the client reported the expected enabled package version. Permission outcomes
+distinguish `needs_review`, `declined`, `current`, `applied`, and
+`applied_or_current`; none proves effective runtime policy. Hook trust remains
+`needs_client_review`, and `live_verified` remains false. Errors return nonzero
+even when a partial receipt is printed. With `--permissions`, human review text
+uses stderr so stdout remains JSON. Invalid arguments and terminal refusals can
+fail before a receipt is available.
 
 Prefer one correct command and record model over overlapping interfaces.
 Retired aliases and migration-era command spellings are not supported.

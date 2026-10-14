@@ -304,8 +304,10 @@ It never loads tool results, invokes a model, blocks a checkpoint, or claims to
 judge semantic quality. See [Checkpoints](checkpoints.md#research-capture-advisory).
 
 Then follow
-[Client integrations](client-integrations.md) to enable the plugins, and add the
-[client permissions](#client-permissions) Continuity needs. These commands
+[Client integrations](client-integrations.md): preview `llewm install --client codex --dry-run`
+or `--client claude-code`, then run it yourself with `--permissions` to install
+the bundled plugin and apply the reviewed [client permissions](#client-permissions).
+Project initialization stays separate. These commands
 verify executable access and local state; they do not verify live hook activation.
 
 When a shell, IDE, or MCP launcher cannot guarantee its working directory, pass
@@ -577,9 +579,11 @@ dry-run/save, bootstrap recovery and exact readback. These checks do not establi
 native macOS/Windows or live-client behavior.
 `go install` puts binaries in `GOBIN`, or `GOPATH/bin` by default; inspect
 `go env GOBIN GOPATH` and add the resolved directory to PATH. Separate component
-modules require separate invocations. The command installs the executable only;
-install the matching client plugin from the same source revision or preview
-bundle. Installing the reporting executable does not activate reporting.
+modules require separate invocations. The command installs the executable only.
+Builds containing `llewm install` carry their matching plugin assets; run it for
+the chosen client after installing the binary. The earlier published root above
+predates this installer, so use its matching source or preview plugin package
+instead. Installing the reporting executable does not activate reporting.
 
 Module-cache installs may report `git_commit: unknown`: they do not carry the
 checkout's embedded VCS settings. Retain `go version -m /path/to/llewm` to inspect

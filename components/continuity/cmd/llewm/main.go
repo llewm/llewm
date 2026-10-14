@@ -74,6 +74,7 @@ func newRootCommand(name string) *cobra.Command {
 	root.AddCommand(pmCommand())
 	root.AddCommand(versionCommand(), initCommand(), databaseCommand(), projectCommand(), workspaceCommand(), syncCommand(), globalCommand(), doctorCommand(), clientCommand(), briefCommand(), workCommand(), presenceCommand(), tuiCommand(), consoleCommand(), hookCommand(), coverageCommand(), usageCommand(), statsCommand(), checkpointCommand(), procedureCommand(), resourceCommand(), pinCommand(), leaseCommand(), standingGrantCommand(), forkCommand(), contractCommand(), bootstrapCommand(), activityCommand(), roadmapCommand(), releaseCommand(), trackPlanCommand(), decisionCommand(), historyCommand(), topicCommand(), narrativeCommand(), itemCommand(), memoryCommand(), mcpCommand())
 	root.AddCommand(modeCommand())
+	root.AddCommand(installCommand())
 	return root
 }
 

@@ -255,7 +255,7 @@ See [multi-repository projects and sync](../../docs/multi-repo-and-sync.md).
 - `internal/workstate`: deterministic current-work summaries and state findings
 - `internal/mcpserver`: MCP resources and tools
 - `internal/procedures`: deterministic procedure-candidate model
-- `plugins`: generated client integration templates
+- `plugins`: matching client packages bundled into the executable for `llewm install`
 - `migrations`: embedded, append-only database migrations
 - `schemas`: versioned external event schemas
 

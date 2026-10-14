@@ -25,6 +25,8 @@ See the
 Start with [guided onboarding](components/continuity/docs/onboarding.md) for an
 agent-assisted setup and verified first checkpoint. Follow [Continuity installation](components/continuity/docs/installation.md) for
 Linux, macOS, Windows, and WSL, then [client integrations](components/continuity/docs/client-integrations.md).
+The installed binary bundles its matching plugins: run `llewm init` in the project,
+then `llewm install --client codex --permissions` (or `--client claude-code`).
 
 [Preview distribution](components/continuity/docs/preview-distribution.md) builds
 versioned binaries and matching client packages. Automatic private product bug

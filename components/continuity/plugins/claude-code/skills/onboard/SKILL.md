@@ -6,8 +6,9 @@ description: Set up or verify Llewm Continuity for a chosen Git project and codi
 # Guide Continuity onboarding
 
 Help the user reach a verified first checkpoint and fresh-session recovery. This
-skill guides the coding agent; Llewm itself does not execute an installation plan
-or require a model. Preserve existing configuration and project history.
+skill guides project adoption and live verification; the scoped installer registers
+its bundled plugin through supported client managers. Preserve existing configuration
+and project history. No model or arbitrary execution plan is required.
 
 Establish the intended Git root, execution environment (including WSL or a remote
 host), and client from context; ask only for missing choices. Inspect Git state,
@@ -28,8 +29,11 @@ From the chosen project, or with `llewm --project-root PATH` before each command
   `llewm database status`. Init is idempotent; existing state is retained.
 - If migrations are pending, follow the documented backup/verify/migrate flow.
   Do not let a build, hook, or MCP startup substitute for migration verification.
-- Register the matching plugin using the client's supported workflow. Review
-  hook activation separately from tool approvals; preserve unrelated settings.
+- Preview `llewm install --client CLIENT --dry-run` with `codex` or `claude-code`.
+  A person runs installation at a terminal; `--permissions` can reuse the existing
+  reviewed permission setup after project init. Builds predating this command use
+  their matching source-package workflow. Never simulate terminal input to install.
+  Review hook activation separately from approvals; preserve unrelated settings.
 - Preview `llewm client permissions --client codex` or
   `llewm client permissions --client claude-code`. Explain the actual proposed
   read/write approvals. The user runs `--write` at a terminal and reviews them;

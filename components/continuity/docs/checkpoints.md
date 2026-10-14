@@ -139,7 +139,7 @@ open; this avoids inventing a large unresolved backlog.
 <!-- continuity:roadmap-node continuity-checkpoint-readiness -->
 ## MCP input
 
-Both client plugins include a [checkpoint skill](client-integrations.md#checkpoint-skill)
+Both client plugins include a [checkpoint skill](client-integration-reference.md#checkpoint-skill)
 that builds this structured payload and checks the saved bootstrap.
 
 `continuity_checkpoint` accepts `task`, `summary`, `next_action`, optional `status`,
