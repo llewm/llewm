@@ -19,6 +19,7 @@ import (
 // just sent: what to cite, what state the write produced, and the record's
 // hash. The read tools return whole records.
 type Receipt struct {
+	PlanChange *trackplan.Change         `json:"plan_change,omitempty"`
 	Ref        string                    `json:"ref" jsonschema:"the written record as kind:id, with @revision for revisioned records"`
 	Status     string                    `json:"status,omitempty" jsonschema:"the record's status, disposition, state, operation, or link relationship"`
 	Authority  string                    `json:"authority,omitempty"`
@@ -59,7 +60,7 @@ func decisionReceipt(value decision.Record) Receipt {
 }
 
 func planReceipt(value trackplan.Plan) Receipt {
-	return Receipt{Ref: revisionRef("plan", value.ID, value.Revision), Status: value.Status, Authority: value.Authority, RecordedAt: value.RecordedAt, Lease: leaseState(value.Lease)}
+	return Receipt{PlanChange: value.Change, Ref: revisionRef("plan", value.ID, value.Revision), Status: value.Status, Authority: value.Authority, RecordedAt: value.RecordedAt, Lease: leaseState(value.Lease)}
 }
 
 func itemReceipt(value workitem.Item) Receipt {

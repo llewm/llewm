@@ -34,8 +34,12 @@ func TestTrackPlanRecordsRoundTripReplayCollisionAndDependencies(t *testing.T) {
 	second := first
 	second.Revision = 0
 	second.Status = "active"
+	second.BaseRevision = first.Revision
+	second.Creator, second.Model = "agent", "fixture-model"
 	second.Items = append([]trackplan.Item{}, first.Items...)
 	second.Items[0].Status = "completed"
+	second.Items[0].ProgressNote = "Codec checks passed"
+	second.Items[0].EvidenceRefs = []string{"commit:0123456789abcdef0123456789abcdef01234567"}
 	second.Items[1].Status = "ready"
 	if _, err := service.AppendPlan(ctx, second); err != nil {
 		t.Fatal(err)
@@ -73,6 +77,9 @@ func TestTrackPlanRecordsRoundTripReplayCollisionAndDependencies(t *testing.T) {
 	history, err := (trackplan.Service{DB: targetDB}).PlanHistory(targetCtx, targetProject, first.ID)
 	if err != nil || len(history) != 2 || history[1].Items[0].Status != "completed" || history[1].Items[1].DependsOn[0] != "codec" || len(history[0].WorkItemIDs) != 1 || history[0].Items[0].WorkItemIDs[0] != source.ID {
 		t.Fatalf("imported plan history differs: %#v %v", history, err)
+	}
+	if history[1].Model != "fixture-model" || history[1].Change.Kind != "progress" || history[1].Change.BaselineRevision != first.Revision || history[1].Items[0].ProgressNote != "Codec checks passed" {
+		t.Fatal("autonomous progress provenance did not round trip")
 	}
 	reloaded, err := LoadOperationalRecords(targetCtx, targetDB, targetProject)
 	if err != nil {
@@ -119,5 +126,34 @@ func TestTrackPlanRecordsRoundTripReplayCollisionAndDependencies(t *testing.T) {
 	}
 	if result, err := ApplyOperationalImport(dependencyCtx, dependencyDB, dependencyProject, missingBundle.ManifestBytes, missingBundle.RecordsBytes, recorded.Add(11*time.Minute)); err == nil || result.Receipt != nil || tableCount(t, dependencyDB, "track_plan_revisions") != 0 {
 		t.Fatalf("missing work item dependency was not rejected atomically: %#v %v", result, err)
+	}
+}
+
+func TestLegacyTrackPlanPayloadRetainsItsHash(t *testing.T) {
+	ctx, db, project := operationalProject(t, "legacy-plan")
+	value := trackplan.Plan{ProjectID: project, ID: "legacy", Revision: 1, RoadmapNodeID: "track", Title: "Old intent", Summary: "Retain original", Status: "active", Creator: "person", Authority: "caller_asserted", RecordedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), SchemaVersion: 1, Items: []trackplan.Item{{ID: "one", Title: "One", Detail: "Original scope", Status: "active", EvidenceRefs: []string{}, WorkItemIDs: []string{}}}}
+	// A pre-075 row has no change metadata or separate note/criteria values.
+	_, err := db.ExecContext(ctx, `INSERT INTO track_plan_revisions(project_id,id,revision,roadmap_node_id,title,summary,status,creator,authority,recorded_at,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, project, value.ID, 1, value.RoadmapNodeID, value.Title, value.Summary, value.Status, value.Creator, value.Authority, value.RecordedAt.Format(time.RFC3339Nano), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO track_plan_items(project_id,plan_id,plan_revision,id,position,title,detail,status,evidence_refs_json,work_item_refs_json) VALUES(?,?,1,'one',0,'One','Original scope','active','[]','[]')`, project, value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := trackPlanSpec("lineage:55555555555555555555555555555555", project, "/project", value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadTrackPlan(ctx, db, project, value.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := trackPlanSpec("lineage:55555555555555555555555555555555", project, "/project", loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(original.Payload, current.Payload) {
+		t.Fatal("legacy plan payload changed")
 	}
 }

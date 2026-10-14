@@ -19,9 +19,10 @@ const (
 )
 
 type Service struct {
-	DB   *sql.DB
-	Now  func() time.Time
-	Root string
+	Policy Policy
+	DB     *sql.DB
+	Now    func() time.Time
+	Root   string
 }
 
 type planQueryer interface {
@@ -101,9 +102,7 @@ func (service Service) AppendPlan(ctx context.Context, value Plan) (Plan, error)
 	value.Authority = "caller_asserted"
 	if value.Model != "" {
 		value.Authority = "model_suggested"
-		if value.Status != "proposed" {
-			return Plan{}, fmt.Errorf("model-suggested plan revisions must remain proposed until explicit review")
-		}
+
 	}
 	if len(value.Items) == 0 || len(value.Items) > 100 {
 		return Plan{}, fmt.Errorf("plan must contain between 1 and 100 items")
@@ -146,16 +145,102 @@ func (service Service) AppendPlan(ctx context.Context, value Plan) (Plan, error)
 	if value.Revision != latest+1 {
 		return Plan{}, fmt.Errorf("plan revision must be the next revision %d", latest+1)
 	}
+	if value.BaseRevision != 0 && value.BaseRevision != latest {
+		return Plan{}, fmt.Errorf("stale plan baseline: latest revision is %d", latest)
+	}
+	var base *Plan
+	if latest > 0 {
+		base, err = getPlan(ctx, tx, value.ProjectID, value.ID, latest)
+		if err != nil {
+			return Plan{}, err
+		}
+	}
+	if value.Model != "" && base != nil && base.Status == "proposed" {
+		var operative int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM track_plan_revisions WHERE project_id=? AND id=? AND status!='proposed'`, value.ProjectID, value.ID).Scan(&operative); err != nil {
+			return Plan{}, err
+		}
+		base = nil
+		if operative > 0 {
+			base, err = getPlan(ctx, tx, value.ProjectID, value.ID, operative)
+			if err != nil {
+				return Plan{}, err
+			}
+		}
+	}
+	if err := service.Policy.Validate(); err != nil {
+		return Plan{}, err
+	}
+	policyNode := value.RoadmapNodeID
+	if base != nil {
+		policyNode = base.RoadmapNodeID
+	}
+	rule := service.Policy.For(policyNode)
+	changes := categories(base, value)
+	baseline := 0
+	if base != nil {
+		if base.Model == "" && oneOf(base.Status, "accepted", "active", "completed") {
+			baseline = base.Revision
+		}
+		if base.Model != "" && base.Change != nil {
+			baseline = base.Change.BaselineRevision
+		}
+	}
+	if value.Model != "" && latest > 0 && value.BaseRevision == 0 && ((base != nil && oneOf(base.Status, "accepted", "active", "completed") && len(changes) == 0 && rule.Progress == "auto") || (len(changes) > 0 && permits(rule, changes))) {
+		return Plan{}, fmt.Errorf("autonomous revisions require base_revision equal to latest revision %d", latest)
+	}
+	value.Change = &Change{Kind: "revision", ParentRevision: latest, BaselineRevision: baseline, Categories: changes, Policy: rule}
+	if base != nil {
+		value.Change.ComparisonRevision = base.Revision
+	}
+	if value.Model != "" {
+		approved := base != nil && oneOf(base.Status, "accepted", "active", "completed")
+		if approved && len(changes) == 0 && rule.Progress == "auto" {
+			value.Authority = "model_suggested"
+			value.Change.Kind = "progress"
+			if value.Status == "proposed" {
+				value.Status = base.Status
+			}
+		} else if len(changes) > 0 && permits(rule, changes) {
+			value.Authority = "model_suggested"
+			value.Change.Kind = "delegated"
+			if value.Status == "proposed" {
+				value.Status = "active"
+			}
+		} else {
+			value.Change.Kind = "proposal"
+			if value.Status != "proposed" {
+				return Plan{}, fmt.Errorf("substantive model revisions require review under this plan policy; record as proposed")
+			}
+		}
+	}
+	if value.Status == "completed" {
+		for _, item := range value.Items {
+			if !oneOf(item.Status, "completed", "superseded") {
+				return Plan{}, fmt.Errorf("item %s is unfinished", item.ID)
+			}
+		}
+	}
+	if err := ValidateChange(value, base); err != nil {
+		return Plan{}, err
+	}
+	if encoded, err := json.Marshal(value); err != nil {
+		return Plan{}, err
+	} else if len(encoded) > maxPlanBytes {
+		return Plan{}, fmt.Errorf("plan exceeds 256 KiB limit")
+	}
+	value.BaseRevision = 0
 	value.RecordedAt = service.now()
 	value.SchemaVersion = SchemaVersion
-	if _, err := tx.ExecContext(ctx, `INSERT INTO track_plan_revisions(project_id,id,revision,roadmap_node_id,task_id,title,summary,status,creator,model,authority,recorded_at,schema_version) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,NULLIF(?,''),?,?,?)`, value.ProjectID, value.ID, value.Revision, value.RoadmapNodeID, value.TaskID, value.Title, value.Summary, value.Status, value.Creator, value.Model, value.Authority, value.RecordedAt.Format(time.RFC3339Nano), value.SchemaVersion); err != nil {
+	changeJSON, _ := json.Marshal(value.Change)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO track_plan_revisions(project_id,id,revision,roadmap_node_id,task_id,title,summary,status,creator,model,authority,recorded_at,schema_version,change_json) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,NULLIF(?,''),?,?,?,?)`, value.ProjectID, value.ID, value.Revision, value.RoadmapNodeID, value.TaskID, value.Title, value.Summary, value.Status, value.Creator, value.Model, value.Authority, value.RecordedAt.Format(time.RFC3339Nano), value.SchemaVersion, string(changeJSON)); err != nil {
 		return Plan{}, err
 	}
 	for index := range value.Items {
 		item := &value.Items[index]
 		evidence, _ := json.Marshal(item.EvidenceRefs)
 		workItems, _ := json.Marshal(item.WorkItemIDs)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO track_plan_items(project_id,plan_id,plan_revision,id,position,title,detail,status,parent_id,evidence_refs_json,work_item_refs_json) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?)`, value.ProjectID, value.ID, value.Revision, item.ID, item.Position, item.Title, item.Detail, item.Status, item.ParentID, string(evidence), string(workItems)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO track_plan_items(project_id,plan_id,plan_revision,id,position,title,detail,status,parent_id,evidence_refs_json,work_item_refs_json,progress_note,acceptance_criteria) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?,?,?)`, value.ProjectID, value.ID, value.Revision, item.ID, item.Position, item.Title, item.Detail, item.Status, item.ParentID, string(evidence), string(workItems), item.ProgressNote, item.AcceptanceCriteria); err != nil {
 			return Plan{}, err
 		}
 	}
@@ -193,6 +278,14 @@ func validateItems(items []Item) error {
 			return err
 		}
 		item.Title, err = clean("item title", item.Title, true)
+		if err != nil {
+			return err
+		}
+		item.ProgressNote, err = clean("progress note", item.ProgressNote, false)
+		if err != nil {
+			return err
+		}
+		item.AcceptanceCriteria, err = clean("acceptance criteria", item.AcceptanceCriteria, false)
 		if err != nil {
 			return err
 		}
@@ -306,12 +399,23 @@ func (service Service) Accept(ctx context.Context, projectID, id, status, review
 	}
 	next := *latest
 	next.Revision, next.Status, next.Creator, next.Model, next.Authority = 0, status, reviewer, "", ""
+	next.BaseRevision = latest.Revision
 	next.RecordedAt, next.Fence, next.Lease = time.Time{}, fence, nil
 	return service.AppendPlan(ctx, next)
 }
 
 func (service Service) Plan(ctx context.Context, projectID, id string, revision int) (*Plan, error) {
 	return getPlan(ctx, service.DB, projectID, id, revision)
+}
+
+// EffectivePlan keeps a proposal from displacing the last operative baseline.
+// A superseded baseline stays superseded; it never revives older work.
+func (service Service) EffectivePlan(ctx context.Context, projectID, id string) (*Plan, error) {
+	var revision int
+	if err := service.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(CASE WHEN status!='proposed' THEN revision END),MAX(revision),0) FROM track_plan_revisions WHERE project_id=? AND id=?`, projectID, id).Scan(&revision); err != nil {
+		return nil, err
+	}
+	return service.Plan(ctx, projectID, id, revision)
 }
 
 func getPlan(ctx context.Context, db planQueryer, projectID, id string, revision int) (*Plan, error) {
@@ -323,18 +427,24 @@ func getPlan(ctx context.Context, db planQueryer, projectID, id string, revision
 	}
 	var value Plan
 	var recorded string
-	err := db.QueryRowContext(ctx, `SELECT project_id,id,revision,roadmap_node_id,COALESCE(task_id,''),title,summary,status,creator,COALESCE(model,''),authority,recorded_at,schema_version FROM track_plan_revisions WHERE project_id=? AND id=? AND revision=?`, projectID, id, revision).Scan(&value.ProjectID, &value.ID, &value.Revision, &value.RoadmapNodeID, &value.TaskID, &value.Title, &value.Summary, &value.Status, &value.Creator, &value.Model, &value.Authority, &recorded, &value.SchemaVersion)
+	var change sql.NullString
+	err := db.QueryRowContext(ctx, `SELECT project_id,id,revision,roadmap_node_id,COALESCE(task_id,''),title,summary,status,creator,COALESCE(model,''),authority,recorded_at,schema_version,change_json FROM track_plan_revisions WHERE project_id=? AND id=? AND revision=?`, projectID, id, revision).Scan(&value.ProjectID, &value.ID, &value.Revision, &value.RoadmapNodeID, &value.TaskID, &value.Title, &value.Summary, &value.Status, &value.Creator, &value.Model, &value.Authority, &recorded, &value.SchemaVersion, &change)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	if change.Valid {
+		if err := json.Unmarshal([]byte(change.String), &value.Change); err != nil {
+			return nil, err
+		}
+	}
 	value.RecordedAt, err = time.Parse(time.RFC3339Nano, recorded)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id,position,title,detail,status,COALESCE(parent_id,''),evidence_refs_json,work_item_refs_json FROM track_plan_items WHERE project_id=? AND plan_id=? AND plan_revision=? ORDER BY position,id`, projectID, id, revision)
+	rows, err := db.QueryContext(ctx, `SELECT id,position,title,detail,status,COALESCE(parent_id,''),evidence_refs_json,work_item_refs_json,progress_note,acceptance_criteria FROM track_plan_items WHERE project_id=? AND plan_id=? AND plan_revision=? ORDER BY position,id`, projectID, id, revision)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +452,7 @@ func getPlan(ctx context.Context, db planQueryer, projectID, id string, revision
 	for rows.Next() {
 		var item Item
 		var evidence, workItems string
-		if err := rows.Scan(&item.ID, &item.Position, &item.Title, &item.Detail, &item.Status, &item.ParentID, &evidence, &workItems); err != nil {
+		if err := rows.Scan(&item.ID, &item.Position, &item.Title, &item.Detail, &item.Status, &item.ParentID, &evidence, &workItems, &item.ProgressNote, &item.AcceptanceCriteria); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(evidence), &item.EvidenceRefs); err != nil {
@@ -493,14 +603,17 @@ func (service Service) ListPlansPage(ctx context.Context, projectID string, opti
 		if err != nil {
 			return PlanListPage{}, err
 		}
-		if value.Status == "accepted" || value.Status == "active" {
-			plan, err := service.Plan(ctx, projectID, value.ID, value.Revision)
+		{
+			plan, err := service.EffectivePlan(ctx, projectID, value.ID)
 			if err != nil {
 				return PlanListPage{}, err
 			}
-			for _, item := range readyItems(*plan) {
-				if item.PlanID == plan.ID {
-					value.ReadyCount++
+			value.EffectiveRevision, value.EffectiveStatus = plan.Revision, plan.Status
+			if plan.Status == "accepted" || plan.Status == "active" {
+				for _, item := range readyItems(*plan) {
+					if item.PlanID == plan.ID {
+						value.ReadyCount++
+					}
 				}
 			}
 		}
@@ -521,10 +634,10 @@ func (service Service) Ready(ctx context.Context, projectID string, options Plan
 	}
 	result := []ReadyItem{}
 	for _, summary := range plans {
-		if summary.Status != "accepted" && summary.Status != "active" {
+		if summary.EffectiveStatus != "accepted" && summary.EffectiveStatus != "active" {
 			continue
 		}
-		plan, err := service.Plan(ctx, projectID, summary.ID, summary.Revision)
+		plan, err := service.Plan(ctx, projectID, summary.ID, summary.EffectiveRevision)
 		if err != nil {
 			return nil, err
 		}

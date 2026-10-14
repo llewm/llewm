@@ -14,16 +14,17 @@ import (
 const trackPlanTextMaxBytes = 16 << 10
 
 type trackPlanPayload struct {
-	RoadmapNodeID            string           `json:"roadmap_node_id"`
-	TaskID                   string           `json:"task_id,omitempty"`
-	Title                    string           `json:"title"`
-	Summary                  string           `json:"summary"`
-	Status                   string           `json:"status"`
-	Creator                  string           `json:"creator"`
-	Model                    string           `json:"model,omitempty"`
-	WorkItemIDs              []string         `json:"work_item_ids"`
-	Items                    []trackplan.Item `json:"items"`
-	OperationalSchemaVersion int              `json:"operational_schema_version"`
+	Change                   *trackplan.Change `json:"change,omitempty"`
+	RoadmapNodeID            string            `json:"roadmap_node_id"`
+	TaskID                   string            `json:"task_id,omitempty"`
+	Title                    string            `json:"title"`
+	Summary                  string            `json:"summary"`
+	Status                   string            `json:"status"`
+	Creator                  string            `json:"creator"`
+	Model                    string            `json:"model,omitempty"`
+	WorkItemIDs              []string          `json:"work_item_ids"`
+	Items                    []trackplan.Item  `json:"items"`
+	OperationalSchemaVersion int               `json:"operational_schema_version"`
 }
 
 type portableTrackPlanRecords struct {
@@ -69,8 +70,14 @@ func loadTrackPlanSpecs(ctx context.Context, source queryer, projectID, projectR
 func loadTrackPlan(ctx context.Context, source queryer, projectID, id string, revision int) (trackplan.Plan, error) {
 	var value trackplan.Plan
 	var recorded string
-	if err := source.QueryRowContext(ctx, `SELECT id,revision,roadmap_node_id,COALESCE(task_id,''),title,summary,status,creator,COALESCE(model,''),authority,recorded_at,schema_version FROM track_plan_revisions WHERE project_id=? AND id=? AND revision=?`, projectID, id, revision).Scan(&value.ID, &value.Revision, &value.RoadmapNodeID, &value.TaskID, &value.Title, &value.Summary, &value.Status, &value.Creator, &value.Model, &value.Authority, &recorded, &value.SchemaVersion); err != nil {
+	var change []byte
+	if err := source.QueryRowContext(ctx, `SELECT id,revision,roadmap_node_id,COALESCE(task_id,''),title,summary,status,creator,COALESCE(model,''),authority,recorded_at,schema_version,change_json FROM track_plan_revisions WHERE project_id=? AND id=? AND revision=?`, projectID, id, revision).Scan(&value.ID, &value.Revision, &value.RoadmapNodeID, &value.TaskID, &value.Title, &value.Summary, &value.Status, &value.Creator, &value.Model, &value.Authority, &recorded, &value.SchemaVersion, &change); err != nil {
 		return value, err
+	}
+	if len(change) > 0 {
+		if err := json.Unmarshal(change, &value.Change); err != nil {
+			return value, err
+		}
 	}
 	value.ProjectID = projectID
 	var err error
@@ -78,14 +85,14 @@ func loadTrackPlan(ctx context.Context, source queryer, projectID, id string, re
 	if err != nil {
 		return value, err
 	}
-	rows, err := source.QueryContext(ctx, `SELECT id,position,title,detail,status,COALESCE(parent_id,''),evidence_refs_json,work_item_refs_json FROM track_plan_items WHERE project_id=? AND plan_id=? AND plan_revision=? ORDER BY position,id`, projectID, id, revision)
+	rows, err := source.QueryContext(ctx, `SELECT id,position,title,detail,status,COALESCE(parent_id,''),evidence_refs_json,work_item_refs_json,progress_note,acceptance_criteria FROM track_plan_items WHERE project_id=? AND plan_id=? AND plan_revision=? ORDER BY position,id`, projectID, id, revision)
 	if err != nil {
 		return value, err
 	}
 	for rows.Next() {
 		var item trackplan.Item
 		var evidence, workItems string
-		if err := rows.Scan(&item.ID, &item.Position, &item.Title, &item.Detail, &item.Status, &item.ParentID, &evidence, &workItems); err != nil {
+		if err := rows.Scan(&item.ID, &item.Position, &item.Title, &item.Detail, &item.Status, &item.ParentID, &evidence, &workItems, &item.ProgressNote, &item.AcceptanceCriteria); err != nil {
 			rows.Close()
 			return value, err
 		}
@@ -158,12 +165,14 @@ func trackPlanSpec(lineageID, projectID, projectRoot string, value trackplan.Pla
 				return EnvelopeSpec{}, fmt.Errorf("track plan %q contains a non-portable item reference", value.ID)
 			}
 		}
+		items[index].ProgressNote = portableTrackText(items[index].ProgressNote, projectID, projectRoot)
+		items[index].AcceptanceCriteria = portableTrackText(items[index].AcceptanceCriteria, projectID, projectRoot)
 		items[index].Title = portableTrackText(items[index].Title, projectID, projectRoot)
 		items[index].Detail = portableTrackText(items[index].Detail, projectID, projectRoot)
 		items[index].EvidenceRefs = portableTrackStrings(items[index].EvidenceRefs, projectID, projectRoot)
 		items[index].WorkItemIDs = portableTrackStrings(items[index].WorkItemIDs, projectID, projectRoot)
 	}
-	payload := trackPlanPayload{RoadmapNodeID: value.RoadmapNodeID, TaskID: portableTrackText(value.TaskID, projectID, projectRoot), Title: portableTrackText(value.Title, projectID, projectRoot), Summary: portableTrackText(value.Summary, projectID, projectRoot), Status: value.Status, Creator: portableTrackText(value.Creator, projectID, projectRoot), Model: portableTrackText(value.Model, projectID, projectRoot), WorkItemIDs: portableTrackStrings(value.WorkItemIDs, projectID, projectRoot), Items: items, OperationalSchemaVersion: value.SchemaVersion}
+	payload := trackPlanPayload{Change: value.Change, RoadmapNodeID: value.RoadmapNodeID, TaskID: portableTrackText(value.TaskID, projectID, projectRoot), Title: portableTrackText(value.Title, projectID, projectRoot), Summary: portableTrackText(value.Summary, projectID, projectRoot), Status: value.Status, Creator: portableTrackText(value.Creator, projectID, projectRoot), Model: portableTrackText(value.Model, projectID, projectRoot), WorkItemIDs: portableTrackStrings(value.WorkItemIDs, projectID, projectRoot), Items: items, OperationalSchemaVersion: value.SchemaVersion}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return EnvelopeSpec{}, err
@@ -191,20 +200,23 @@ func validateTrackPlanSpec(spec EnvelopeSpec, payload any) error {
 }
 
 func decodeTrackPlan(envelope Envelope, payload trackPlanPayload) (trackplan.Plan, error) {
-	if envelope.RecordRevision < 1 || !portableIncomingIdentifier(envelope.RecordID) || payload.OperationalSchemaVersion != trackplan.SchemaVersion || !portableIncomingIdentifier(payload.RoadmapNodeID) || !validTrackPlanText(payload.TaskID, false) || !validTrackPlanText(payload.Title, true) || !validTrackPlanText(payload.Summary, true) || !validTrackPlanText(payload.Creator, true) || !validTrackPlanText(payload.Model, false) || !oneOfValue(payload.Status, "proposed", "accepted", "active", "completed", "superseded") || !oneOfValue(envelope.Authority, "model_suggested", "caller_asserted") || (envelope.Authority == "model_suggested" && (payload.Model == "" || payload.Status != "proposed")) || (envelope.Authority == "caller_asserted" && payload.Model != "") || !validTrackPlanStrings(payload.WorkItemIDs) || len(payload.Items) == 0 || len(payload.Items) > 100 {
+	if envelope.RecordRevision < 1 || !portableIncomingIdentifier(envelope.RecordID) || payload.OperationalSchemaVersion != trackplan.SchemaVersion || !portableIncomingIdentifier(payload.RoadmapNodeID) || !validTrackPlanText(payload.TaskID, false) || !validTrackPlanText(payload.Title, true) || !validTrackPlanText(payload.Summary, true) || !validTrackPlanText(payload.Creator, true) || !validTrackPlanText(payload.Model, false) || !oneOfValue(payload.Status, "proposed", "accepted", "active", "completed", "superseded") || !oneOfValue(envelope.Authority, "model_suggested", "caller_asserted") || (envelope.Authority == "model_suggested" && (payload.Model == "" || (payload.Status != "proposed" && (payload.Change == nil || !oneOfValue(payload.Change.Kind, "progress", "delegated"))))) || (envelope.Authority == "caller_asserted" && payload.Model != "") || !validTrackPlanStrings(payload.WorkItemIDs) || len(payload.Items) == 0 || len(payload.Items) > 100 {
 		return trackplan.Plan{}, fmt.Errorf("track plan %s/%d is invalid", envelope.RecordID, envelope.RecordRevision)
 	}
 	if !validPortablePlanItems(payload.Items) || !sameReferences(envelope.Refs, trackPlanRefs(payload)) || !checkpointIndexMatches(envelope.Index, envelopeIndex{Title: payload.Title, Status: payload.Status, TaskID: payload.TaskID}) {
 		return trackplan.Plan{}, fmt.Errorf("track plan %s/%d metadata or items are invalid", envelope.RecordID, envelope.RecordRevision)
 	}
 	recorded, err := parsePortableTime(envelope.RecordedAt)
-	return trackplan.Plan{ID: envelope.RecordID, Revision: envelope.RecordRevision, RoadmapNodeID: payload.RoadmapNodeID, TaskID: payload.TaskID, Title: payload.Title, Summary: payload.Summary, Status: payload.Status, Creator: payload.Creator, Model: payload.Model, Authority: envelope.Authority, WorkItemIDs: append([]string{}, payload.WorkItemIDs...), Items: append([]trackplan.Item{}, payload.Items...), RecordedAt: recorded, SchemaVersion: payload.OperationalSchemaVersion}, err
+	if (payload.Change != nil && oneOfValue(payload.Change.Kind, "progress", "delegated")) && (payload.Model == "" || !oneOfValue(payload.Status, "accepted", "active", "completed", "superseded")) {
+		return trackplan.Plan{}, fmt.Errorf("autonomous plan provenance missing")
+	}
+	return trackplan.Plan{Change: payload.Change, ID: envelope.RecordID, Revision: envelope.RecordRevision, RoadmapNodeID: payload.RoadmapNodeID, TaskID: payload.TaskID, Title: payload.Title, Summary: payload.Summary, Status: payload.Status, Creator: payload.Creator, Model: payload.Model, Authority: envelope.Authority, WorkItemIDs: append([]string{}, payload.WorkItemIDs...), Items: append([]trackplan.Item{}, payload.Items...), RecordedAt: recorded, SchemaVersion: payload.OperationalSchemaVersion}, err
 }
 
 func validPortablePlanItems(items []trackplan.Item) bool {
 	ids, positions := map[string]bool{}, map[int]bool{}
 	for _, item := range items {
-		if !portableIncomingIdentifier(item.ID) || item.Position < 0 || positions[item.Position] || !validTrackPlanText(item.Title, true) || !validTrackPlanText(item.Detail, false) || !oneOfValue(item.Status, "pending", "ready", "active", "blocked", "completed", "superseded") || !validTrackPlanText(item.ParentID, false) || !validTrackPlanStrings(item.DependsOn) || !validTrackPlanStrings(item.EvidenceRefs) || !validTrackPlanStrings(item.WorkItemIDs) || ids[item.ID] {
+		if !portableIncomingIdentifier(item.ID) || item.Position < 0 || positions[item.Position] || !validTrackPlanText(item.Title, true) || !validTrackPlanText(item.ProgressNote, false) || !validTrackPlanText(item.AcceptanceCriteria, false) || !validTrackPlanText(item.Detail, false) || !oneOfValue(item.Status, "pending", "ready", "active", "blocked", "completed", "superseded") || !validTrackPlanText(item.ParentID, false) || !validTrackPlanStrings(item.DependsOn) || !validTrackPlanStrings(item.EvidenceRefs) || !validTrackPlanStrings(item.WorkItemIDs) || ids[item.ID] {
 			return false
 		}
 		positions[item.Position], ids[item.ID] = true, true

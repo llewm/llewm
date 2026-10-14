@@ -28,3 +28,7 @@ unrelated task. `--summary` provides the joined work/plan/finding view.
 MCP `continuity_work` exposes the corresponding work views.
 See [track continuity](track-continuity.md), [checkpoints](checkpoints.md) and
 [current-work views](project-state-hygiene.md).
+
+Plan progress and substantive revisions follow [plan agency](plan-agency.md):
+progress is autonomous by default; configured delegation controls intent changes.
+Readiness remains separate from action authorization.

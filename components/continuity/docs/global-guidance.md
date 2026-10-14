@@ -174,3 +174,9 @@ new location or set `CONTINUITY_GLOBAL_HOME` to the retained directory in every
 client launcher. Do not initialize empty replacements over existing engineer
 instructions. This path change does not rename `CONTINUITY_*` environment
 variables or the project's `.continuity/` store.
+
+## Planning delegation
+
+Global `config.toml` can provide `[plan_policy]` defaults and per-track overrides.
+Project policy overlays them. See [plan agency](plan-agency.md) for autonomous
+progress, bounded/full planning delegation, provenance and execution boundaries.

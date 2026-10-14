@@ -636,7 +636,7 @@ func (service Service) latestPlanStates(ctx context.Context, projectID string) (
 	rows, err := service.DB.QueryContext(ctx, `SELECT p.roadmap_node_id, p.status,
 		(SELECT COUNT(*) FROM track_plan_items i WHERE i.project_id=p.project_id AND i.plan_id=p.id AND i.plan_revision=p.revision AND i.status NOT IN ('completed','superseded'))
 		FROM track_plan_revisions p
-		JOIN (SELECT id, MAX(revision) revision FROM track_plan_revisions WHERE project_id=? GROUP BY id) latest ON latest.id=p.id AND latest.revision=p.revision
+		JOIN (SELECT id, COALESCE(MAX(CASE WHEN status!='proposed' THEN revision END),MAX(revision)) revision FROM track_plan_revisions WHERE project_id=? GROUP BY id) latest ON latest.id=p.id AND latest.revision=p.revision
 		WHERE p.project_id=?`, projectID, projectID)
 	if err != nil {
 		return nil, err

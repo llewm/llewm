@@ -906,6 +906,14 @@ item finished); --creator names the reviewing human.`, Args: cobra.MaximumNArgs(
 	check.Flags().StringVar(&checkOutput, "output", "text", "text or json")
 
 	parent.AddCommand(record, show, check)
+	var policyNode string
+	policy := &cobra.Command{Use: "policy", Short: "Read effective planning delegation for a track", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return withApp(cmd, func(application *app.App) error {
+			return writeJSON(cmd.OutOrStdout(), application.TrackPlans.Policy.For(policyNode))
+		})
+	}}
+	policy.Flags().StringVar(&policyNode, "node", "", "roadmap node ID; omitted reads the default policy")
+	parent.AddCommand(policy)
 	return parent
 }
 

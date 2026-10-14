@@ -10,6 +10,8 @@ import (
 const SchemaVersion = 1
 
 type Plan struct {
+	BaseRevision  int       `json:"base_revision,omitempty"`
+	Change        *Change   `json:"change,omitempty"`
 	ProjectID     string    `json:"project_id"`
 	ID            string    `json:"id"`
 	Revision      int       `json:"revision"`
@@ -32,15 +34,17 @@ type Plan struct {
 }
 
 type Item struct {
-	ID           string   `json:"id"`
-	Position     int      `json:"position"`
-	Title        string   `json:"title"`
-	Detail       string   `json:"detail"`
-	Status       string   `json:"status"`
-	ParentID     string   `json:"parent_id,omitempty"`
-	DependsOn    []string `json:"depends_on"`
-	EvidenceRefs []string `json:"evidence_refs"`
-	WorkItemIDs  []string `json:"work_item_ids"`
+	ProgressNote       string   `json:"progress_note,omitempty"`
+	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
+	ID                 string   `json:"id"`
+	Position           int      `json:"position"`
+	Title              string   `json:"title"`
+	Detail             string   `json:"detail"`
+	Status             string   `json:"status"`
+	ParentID           string   `json:"parent_id,omitempty"`
+	DependsOn          []string `json:"depends_on"`
+	EvidenceRefs       []string `json:"evidence_refs"`
+	WorkItemIDs        []string `json:"work_item_ids"`
 }
 
 type PlanListOptions struct {
@@ -73,15 +77,17 @@ type PlanHistoryPage struct {
 }
 
 type PlanSummary struct {
-	ID            string    `json:"id"`
-	Revision      int       `json:"revision"`
-	RoadmapNodeID string    `json:"roadmap_node_id"`
-	TaskID        string    `json:"task_id,omitempty"`
-	Title         string    `json:"title"`
-	Status        string    `json:"status"`
-	ItemCount     int       `json:"item_count"`
-	ReadyCount    int       `json:"ready_count"`
-	RecordedAt    time.Time `json:"recorded_at"`
+	EffectiveRevision int       `json:"effective_revision"`
+	EffectiveStatus   string    `json:"effective_status"`
+	ID                string    `json:"id"`
+	Revision          int       `json:"revision"`
+	RoadmapNodeID     string    `json:"roadmap_node_id"`
+	TaskID            string    `json:"task_id,omitempty"`
+	Title             string    `json:"title"`
+	Status            string    `json:"status"`
+	ItemCount         int       `json:"item_count"`
+	ReadyCount        int       `json:"ready_count"`
+	RecordedAt        time.Time `json:"recorded_at"`
 }
 
 type PlanListPage struct {
@@ -103,6 +109,7 @@ type ReadyItem struct {
 // Outline is a plan revision without item detail, evidence, or work items: what
 // most plan reads need. Plan reads return it unless detail is requested.
 type Outline struct {
+	Change           *Change       `json:"change,omitempty"`
 	ID               string        `json:"id"`
 	Revision         int           `json:"revision"`
 	RoadmapNodeID    string        `json:"roadmap_node_id"`
@@ -133,7 +140,7 @@ const OutlineSummaryBytes = 512
 
 func (p Plan) Outline() Outline {
 	summary, truncated := truncateBytes(p.Summary, OutlineSummaryBytes)
-	outline := Outline{ID: p.ID, Revision: p.Revision, RoadmapNodeID: p.RoadmapNodeID, TaskID: p.TaskID, Title: p.Title, Summary: summary, SummaryTruncated: truncated, Status: p.Status, Creator: p.Creator, Model: p.Model, Authority: p.Authority, RecordedAt: p.RecordedAt, Items: make([]ItemOutline, 0, len(p.Items))}
+	outline := Outline{Change: p.Change, ID: p.ID, Revision: p.Revision, RoadmapNodeID: p.RoadmapNodeID, TaskID: p.TaskID, Title: p.Title, Summary: summary, SummaryTruncated: truncated, Status: p.Status, Creator: p.Creator, Model: p.Model, Authority: p.Authority, RecordedAt: p.RecordedAt, Items: make([]ItemOutline, 0, len(p.Items))}
 	for _, item := range p.Items {
 		outline.Items = append(outline.Items, ItemOutline{ID: item.ID, Position: item.Position, Title: item.Title, Status: item.Status, ParentID: item.ParentID, DependsOn: item.DependsOn})
 	}

@@ -795,6 +795,23 @@ func validateApplyDependencies(ctx context.Context, tx *sql.Tx, projectID string
 				}
 			}
 		}
+		if value.Change != nil {
+			var base *trackplan.Plan
+			if value.Change.ComparisonRevision > 0 {
+				if v, ok := decoded.trackPlans.Plans[roadmapRecordKey(value.ID, value.Change.ComparisonRevision)]; ok {
+					base = &v
+				} else {
+					v, err := loadTrackPlan(ctx, tx, projectID, value.ID, value.Change.ComparisonRevision)
+					if err != nil {
+						return err
+					}
+					base = &v
+				}
+			}
+			if err := trackplan.ValidateChange(value, base); err != nil {
+				return err
+			}
+		}
 		for _, itemID := range value.WorkItemIDs {
 			exists, err := workItemExists(itemID)
 			if err != nil {
@@ -1039,7 +1056,21 @@ func appendTrackPlanRecords(ctx context.Context, tx *sql.Tx, projectID string, v
 		if _, appendRecord := appendKeys[identityKey("track_plan", value.ID, value.Revision)]; !appendRecord {
 			continue
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO track_plan_revisions(project_id,id,revision,roadmap_node_id,task_id,title,summary,status,creator,model,authority,recorded_at,schema_version) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,NULLIF(?,''),?,?,?)`, projectID, value.ID, value.Revision, value.RoadmapNodeID, value.TaskID, value.Title, value.Summary, value.Status, value.Creator, value.Model, value.Authority, value.RecordedAt.Format(time.RFC3339Nano), value.SchemaVersion)
+		if value.Change != nil {
+			var base *trackplan.Plan
+			if value.Change.ComparisonRevision > 0 {
+				v, err := loadTrackPlan(ctx, tx, projectID, value.ID, value.Change.ComparisonRevision)
+				if err != nil {
+					return err
+				}
+				base = &v
+			}
+			if err := trackplan.ValidateChange(value, base); err != nil {
+				return err
+			}
+		}
+		changeJSON, _ := json.Marshal(value.Change)
+		_, err := tx.ExecContext(ctx, `INSERT INTO track_plan_revisions(project_id,id,revision,roadmap_node_id,task_id,title,summary,status,creator,model,authority,recorded_at,schema_version,change_json) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,NULLIF(?,''),?,?,?,?)`, projectID, value.ID, value.Revision, value.RoadmapNodeID, value.TaskID, value.Title, value.Summary, value.Status, value.Creator, value.Model, value.Authority, value.RecordedAt.Format(time.RFC3339Nano), value.SchemaVersion, string(changeJSON))
 		if err != nil {
 			return fmt.Errorf("append track plan %s/%d: %w", value.ID, value.Revision, err)
 		}
@@ -1052,7 +1083,7 @@ func appendTrackPlanRecords(ctx context.Context, tx *sql.Tx, projectID string, v
 			if err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO track_plan_items(project_id,plan_id,plan_revision,id,position,title,detail,status,parent_id,evidence_refs_json,work_item_refs_json) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?)`, projectID, value.ID, value.Revision, item.ID, item.Position, item.Title, item.Detail, item.Status, item.ParentID, string(evidence), string(workItemRefs))
+			_, err = tx.ExecContext(ctx, `INSERT INTO track_plan_items(project_id,plan_id,plan_revision,id,position,title,detail,status,parent_id,evidence_refs_json,work_item_refs_json,progress_note,acceptance_criteria) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?,?,?)`, projectID, value.ID, value.Revision, item.ID, item.Position, item.Title, item.Detail, item.Status, item.ParentID, string(evidence), string(workItemRefs), item.ProgressNote, item.AcceptanceCriteria)
 			if err != nil {
 				return fmt.Errorf("append track plan item %s/%d/%s: %w", value.ID, value.Revision, item.ID, err)
 			}

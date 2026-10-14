@@ -212,7 +212,12 @@ func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, 
 		db.Close()
 		return nil, err
 	}
-	work := workstate.Service{Root: root, Pulse: projectpulse.Service{Checkpoints: checkpoints, Roadmap: roadmapService}, Roadmap: roadmapService, Plans: trackplan.Service{DB: db, Root: root}}
+	planPolicy, err := config.LoadPlanPolicy(globalRoot, cfg.PlanPolicy)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	work := workstate.Service{Root: root, Pulse: projectpulse.Service{Checkpoints: checkpoints, Roadmap: roadmapService}, Roadmap: roadmapService, Plans: trackplan.Service{DB: db, Root: root, Policy: planPolicy}}
 	leasePolicy, err := lease.ParsePolicy(cfg.Leases.Required)
 	if err != nil {
 		db.Close()
@@ -347,7 +352,7 @@ func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, 
 		Friction:    friction.Service{DB: db},
 		WorkItems:   workitem.Service{DB: db},
 		Coverage:    coverage.Service{DB: db, Root: root},
-		TrackPlans:  trackplan.Service{DB: db, Root: root},
+		TrackPlans:  trackplan.Service{DB: db, Root: root, Policy: planPolicy},
 		Portable:    portable.Service{DB: db},
 		Pulse:       projectpulse.Service{Checkpoints: checkpoints, Roadmap: roadmapService},
 		Readiness: readiness.Service{Root: root, DatabasePath: cfg.Storage.Database, DB: db, ProjectID: projectID, Narratives: narratives, InstalledPath: buildinfo.Current().Executable, ExpectedMCPAPI: buildinfo.MCPAPIVersion, ExpectedMigration: expectedMigration, ClientWarnings: func() []string {

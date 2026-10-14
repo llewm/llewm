@@ -14,7 +14,7 @@ import (
 )
 
 // latestMigration is the newest migration this build embeds.
-const latestMigration = "074_stable_revision_fork_heads.sql"
+const latestMigration = "075_plan_agency.sql"
 
 func migrationsBefore(to string) []string {
 	names := []string{}

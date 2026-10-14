@@ -30,6 +30,15 @@ func (a *App) AppendPlan(ctx context.Context, value trackplan.Plan) (trackplan.P
 	if err != nil || created.TaskID == "" || created.RoadmapNodeID == "" {
 		return created, err
 	}
+	if created.Status == "proposed" {
+		operative, err := a.TrackPlans.EffectivePlan(ctx, a.ProjectID, created.ID)
+		if err != nil {
+			return created, err
+		}
+		if operative != nil && operative.Status != "proposed" {
+			return created, nil
+		}
+	}
 	// A plan naming its task and node binds them, so the track shows the
 	// task without a separate step. Best-effort: the plan stands either way,
 	// and work check reports a task left unbound.
@@ -41,7 +50,11 @@ func (a *App) AppendPlan(ctx context.Context, value trackplan.Plan) (trackplan.P
 // AcceptPlan records a human review of a plan's latest revision under the
 // writer's lease claim.
 func (a *App) AcceptPlan(ctx context.Context, id, status, reviewer string, claim lease.Claim) (trackplan.Plan, error) {
-	return a.TrackPlans.Accept(ctx, a.ProjectID, id, status, reviewer, a.Fence("track_plan", id, claim))
+	created, err := a.TrackPlans.Accept(ctx, a.ProjectID, id, status, reviewer, a.Fence("track_plan", id, claim))
+	if err == nil && created.TaskID != "" && created.RoadmapNodeID != "" {
+		_, _ = a.Roadmap.EnsureTaskBinding(ctx, a.ProjectID, created.RoadmapNodeID, created.TaskID, "bound by plan:"+created.ID, fmt.Sprintf("plan-%s-%d-binds-%s", created.ID, created.Revision, created.TaskID))
+	}
+	return created, err
 }
 
 // UnnarratedCommits is the best-effort narrative coverage check reported after

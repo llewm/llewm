@@ -424,6 +424,7 @@ type ItemDispositionInput struct {
 }
 
 type TrackPlanRecordInput struct {
+	BaseRevision  int              `json:"base_revision,omitempty" jsonschema:"exact latest revision; required for autonomous writes"`
 	ID            string           `json:"id"`
 	Revision      int              `json:"revision,omitempty"`
 	RoadmapNodeID string           `json:"roadmap_node_id,omitempty" jsonschema:"required with items"`
@@ -432,21 +433,22 @@ type TrackPlanRecordInput struct {
 	Summary       string           `json:"summary,omitempty" jsonschema:"required with items"`
 	Status        string           `json:"status"`
 	Creator       string           `json:"creator"`
-	Model         string           `json:"model,omitempty" jsonschema:"set for model-written revisions, which stay proposed"`
+	Model         string           `json:"model,omitempty" jsonschema:"model identity for agent writes"`
 	WorkItemIDs   []string         `json:"work_item_ids,omitempty"`
-	Items         []trackplan.Item `json:"items,omitempty" jsonschema:"every item; omit to record a human review of the latest revision"`
+	Items         []trackplan.Item `json:"items,omitempty" jsonschema:"full item set; omit for human review"`
 	LeaseHolder   string           `json:"lease_holder,omitempty" jsonschema:"holder of your lease on this scope"`
 	LeaseSession  string           `json:"lease_session,omitempty"`
 	LeaseToken    int64            `json:"lease_token,omitempty"`
 }
 
 type TrackPlanShowInput struct {
+	Policy        bool   `json:"policy,omitempty" jsonschema:"read effective policy for roadmap_node_id"`
 	ID            string `json:"id,omitempty" jsonschema:"omit to list"`
 	Revision      int    `json:"revision,omitempty"`
 	History       bool   `json:"history,omitempty"`
 	Detail        bool   `json:"detail,omitempty" jsonschema:"include item detail and evidence"`
 	Item          string `json:"item,omitempty" jsonschema:"one item in full"`
-	Ready         bool   `json:"ready,omitempty" jsonschema:"dependency-satisfied items of accepted or active plans"`
+	Ready         bool   `json:"ready,omitempty" jsonschema:"dependency-ready items"`
 	Status        string `json:"status,omitempty"`
 	RoadmapNodeID string `json:"roadmap_node_id,omitempty"`
 	TaskID        string `json:"task_id,omitempty"`
@@ -456,6 +458,7 @@ type TrackPlanShowInput struct {
 // TrackPlanResult holds one revision (outlined, in full, or one item), a
 // revision chain, the plan list, or ready items.
 type TrackPlanResult struct {
+	Policy    *trackplan.Rule                 `json:"policy,omitempty"`
 	Outline   *trackplan.Outline              `json:"outline,omitempty"`
 	Plan      *trackplan.Plan                 `json:"plan,omitempty"`
 	Item      *trackplan.Item                 `json:"item,omitempty"`
@@ -960,15 +963,22 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		record, note, err := application.Narratives.RecordCommit(ctx, value, input.Commit, input.Repo, input.SkipNote)
 		return nil, narrativeReceipt(worknarrative.RecordResult{Record: record, Note: &note}), err
 	})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_track_plan_record", Description: "Append a complete track-plan revision; model-written revisions stay proposed. Without items, record the user's explicit review of the latest revision as accepted, active, or completed, with the user as creator."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanRecordInput) (*mcp.CallToolResult, Receipt, error) {
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_track_plan_record", Description: "Record revisions under progress/delegation policy. Without items, record explicit human review."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanRecordInput) (*mcp.CallToolResult, Receipt, error) {
 		if input.Items == nil {
 			value, err := application.AcceptPlan(ctx, input.ID, input.Status, input.Creator, lease.Claim{Holder: input.LeaseHolder, SessionID: input.LeaseSession, Token: input.LeaseToken})
 			return nil, planReceipt(value), err
 		}
-		value, err := application.AppendPlan(ctx, trackplan.Plan{Fence: lease.Fence{Claim: lease.Claim{Holder: input.LeaseHolder, SessionID: input.LeaseSession, Token: input.LeaseToken}}, ProjectID: application.ProjectID, ID: input.ID, Revision: input.Revision, RoadmapNodeID: input.RoadmapNodeID, TaskID: input.TaskID, Title: input.Title, Summary: input.Summary, Status: input.Status, Creator: input.Creator, Model: input.Model, WorkItemIDs: input.WorkItemIDs, Items: input.Items})
+		value, err := application.AppendPlan(ctx, trackplan.Plan{Fence: lease.Fence{Claim: lease.Claim{Holder: input.LeaseHolder, SessionID: input.LeaseSession, Token: input.LeaseToken}}, ProjectID: application.ProjectID, ID: input.ID, Revision: input.Revision, BaseRevision: input.BaseRevision, RoadmapNodeID: input.RoadmapNodeID, TaskID: input.TaskID, Title: input.Title, Summary: input.Summary, Status: input.Status, Creator: input.Creator, Model: input.Model, WorkItemIDs: input.WorkItemIDs, Items: input.Items})
 		return nil, planReceipt(value), err
 	})
-	addTool(server, &mcp.Tool{Name: "continuity_track_plan", Description: "Read track plans. With id, an outline of one revision (default latest); detail adds item detail and evidence, item returns one item, history lists revisions. Without id, each plan's latest revision, or with ready the dependency-satisfied items."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanShowInput) (*mcp.CallToolResult, TrackPlanResult, error) {
+	addTool(server, &mcp.Tool{Name: "continuity_track_plan", Description: "Read plans: outline by default; detail/item/history expand. Without id list plans; ready reads dependency-ready items; policy reads delegation."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanShowInput) (*mcp.CallToolResult, TrackPlanResult, error) {
+		if input.Policy {
+			if input.ID != "" || input.Ready || input.History || input.Item != "" {
+				return nil, TrackPlanResult{}, fmt.Errorf("policy read does not select plan content")
+			}
+			value := application.TrackPlans.Policy.For(input.RoadmapNodeID)
+			return nil, TrackPlanResult{Policy: &value}, nil
+		}
 		options := trackplan.PlanListOptions{Status: input.Status, RoadmapNodeID: input.RoadmapNodeID, TaskID: input.TaskID, Limit: input.Limit}
 		switch {
 		case input.Ready:

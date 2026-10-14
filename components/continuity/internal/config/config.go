@@ -13,12 +13,14 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/llewm/llewm/components/continuity/internal/trackplan"
 	"github.com/llewm/llewm/components/continuity/internal/usage"
 )
 
 const FileName = "config.toml"
 
 type Config struct {
+	PlanPolicy         trackplan.Policy   `toml:"plan_policy,omitempty"`
 	SchemaVersion      int                `toml:"schema_version"`
 	Mode               string             `toml:"mode"`
 	Project            Project            `toml:"project"`
@@ -315,4 +317,27 @@ func SetSync(root string, value Sync) (string, error) {
 		return "", err
 	}
 	return path, os.Rename(temporary, path)
+}
+
+// LoadPlanPolicy applies project overrides to engineer-wide planning defaults.
+func LoadPlanPolicy(globalRoot string, project trackplan.Policy) (trackplan.Policy, error) {
+	var global struct {
+		Policy trackplan.Policy `toml:"plan_policy"`
+	}
+	path := filepath.Join(globalRoot, GlobalFileName)
+	if _, err := os.Stat(path); err == nil {
+		if _, err := toml.DecodeFile(path, &global); err != nil {
+			return trackplan.Policy{}, err
+		}
+	} else if !os.IsNotExist(err) {
+		return trackplan.Policy{}, err
+	}
+	if err := global.Policy.Validate(); err != nil {
+		return trackplan.Policy{}, err
+	}
+	if err := project.Validate(); err != nil {
+		return trackplan.Policy{}, err
+	}
+	p := trackplan.MergePolicy(global.Policy, project)
+	return p, p.Validate()
 }
