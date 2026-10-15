@@ -444,7 +444,7 @@ func Notice(ctx context.Context, db *sql.DB, projectID string, now time.Time) (s
 		parts = append(parts, strings.Join(active, "; ")+". Run these without asking when the trigger occurs. First read standing-grant show GRANT_ID --commands and preserve bound parameters and steps. Include grant ID, procedure revision, trigger, exact target and effect in any escalation. Harness permission is separate: record a denial without invalidating the grant; never route around it.")
 	}
 	if void > 0 {
-		parts = append(parts, fmt.Sprintf("%d void because a covered procedure changed; ask the person to grant it again (llewm standing-grant list --all).", void))
+		parts = append(parts, fmt.Sprintf("%d void because a covered procedure changed. Proactively report any affected planned work; inspect llewm standing-grant list --all and the current procedures, prepare exact repairs for review, then request renewal only if no active grant covers that work. Continue unaffected work; never silently skip an expected installation or renew a grant yourself.", void))
 	}
 	return strings.Join(parts, " "), nil
 }

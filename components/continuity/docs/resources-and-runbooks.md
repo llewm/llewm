@@ -95,6 +95,17 @@ revision. If the desired runbook does not exist, define and review it first;
 model-created runbooks remain proposed until a person accepts their exact effects
 and steps.
 
+Agents should surface grant and procedure problems as soon as they affect planned
+work, including at session continuation and before ending a slice that normally
+includes installation. Explain the affected step and cause, inspect current
+procedures and all grants, and prepare the exact repair for review. Check whether
+another active grant already covers the work before requesting renewal. Report
+invalidation in the same turn as a procedure revision; a notice in a saved next
+action is not a substitute for telling the user. Continue unaffected work, and
+explicitly report whether installation and verification happened or what remains.
+Only the person creates a replacement grant at a terminal after accepting the
+revised procedure; agents never grant themselves permission.
+
 Before running a granted procedure, read its bound command preview:
 
 ```sh

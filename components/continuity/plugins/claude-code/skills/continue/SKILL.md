@@ -84,3 +84,11 @@ new evidence. Keep relevant commit preferences and constraints in effect. At the
 next meaningful handoff, save and confirm a checkpoint using the available
 checkpoint skill or the connected MCP schema. Do not copy evaluation instructions
 into task state or claim this workflow provides automatic checkpointing.
+
+Check the bootstrap's standing-grant notice against the next action. If a grant
+is void, expired, or missing for an expected installation, tell the user what
+work is affected before that work is silently omitted. Inspect current procedures
+and grants, check whether another active grant already covers the work, and
+prepare any procedure repair and exact renewal scope for review. Continue
+unaffected work. A procedure revision invalidates its grants; when revising one,
+report that impact in the same turn. Never create or renew a grant for the user.

@@ -85,7 +85,10 @@ func TestCreateCoversNamedProceduresAndVoidsOnRevision(t *testing.T) {
 		t.Fatalf("active after void: %+v %v", active, err)
 	}
 	notice, err = Notice(ctx, db, projectID, *clock)
-	if err != nil || !strings.HasPrefix(notice, "1 void because a covered procedure changed") {
+	if err != nil || !strings.HasPrefix(notice, "1 void because a covered procedure changed") ||
+		!strings.Contains(notice, "Proactively report any affected planned work") ||
+		!strings.Contains(notice, "only if no active grant covers that work") ||
+		!strings.Contains(notice, "Continue unaffected work") {
 		t.Fatalf("void notice %q %v", notice, err)
 	}
 }

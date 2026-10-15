@@ -79,6 +79,16 @@ roadmap node, confirm with the `track` skill that its track plan is persisted,
 reviewed, and current, and report any `track_plan` findings from
 `llewm work check`.
 
+Before ending a slice that normally includes installation, account for the
+installation explicitly: installed and verified, awaiting a named client restart,
+or blocked by a specific prerequisite. Check grant coverage and current procedure
+revisions before the handoff. If a grant or procedure prevents expected work,
+notify the user and prepare a concrete repair or renewal request now; do not leave
+it only in the next action or wait for the user to ask why installation stopped.
+A revised procedure voids its grants even when the revision narrows its effects.
+Do not renew grants yourself or treat build/test authorization as live upgrade
+permission. Continue all work that does not depend on the missing authorization.
+
 ## Lease credentials
 
 A save with `session_id` takes or renews this session's advisory lease on the
