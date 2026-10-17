@@ -91,6 +91,14 @@ review: when sync authentication, the memory repository layout, or the commit po
 
 ## Commits and content
 
+Writer API 124 retains each canonical envelope in an append-only local table
+at its first memory export or successful import (migration 076). Later exports
+reuse that form, including after a root move. Imported prose is already portable;
+the destination's roots and project ID must not redact it a second time. Import
+planning compares retained envelopes too. This prevents new transport variants;
+it does not settle historical collisions or revision forks. Keep automatic sync
+paused during recovery, and preserve exact procedure definitions and grants.
+
 - Memory commits are automated and self-describing (`continuity: <instance> +N
   records`). They run with repository hooks and signing disabled and a fallback
   committer identity when the user has none. They are exempt from the engineer's

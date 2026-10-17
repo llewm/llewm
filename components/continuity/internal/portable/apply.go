@@ -171,6 +171,15 @@ func applyOperationalImport(ctx context.Context, db *sql.DB, projectID string, m
 	if err := appendWorkNarratives(ctx, tx, projectID, decoded, appendKeys); err != nil {
 		return result, err
 	}
+	// Retain the exact incoming form atomically with its operational rows. Do
+	// not adopt a differing schema-equivalent observation over a local record.
+	for _, encoded := range bundle.Records {
+		if _, appended := appendKeys[recordKey(encoded.Envelope)]; appended {
+			if err := retainEnvelope(ctx, tx, projectID, "import", encoded); err != nil {
+				return result, err
+			}
+		}
+	}
 	if appliedAt.IsZero() {
 		appliedAt = time.Now().UTC()
 	} else {

@@ -60,19 +60,38 @@ type MemoryExport struct {
 
 // EncodeMemoryExport encodes every curated record of the project.
 func EncodeMemoryExport(ctx context.Context, db *sql.DB, projectID string) (MemoryExport, error) {
-	loaded, err := LoadOperationalRecords(ctx, db, projectID)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return MemoryExport{}, err
 	}
-	result := MemoryExport{Identity: loaded.Identity, DatabaseSchema: loaded.DatabaseSchema}
-	for _, spec := range loaded.Records {
+	defer tx.Rollback()
+	identity, err := identityFrom(ctx, tx, projectID)
+	if err != nil {
+		return MemoryExport{}, err
+	}
+	root, err := projectRootFrom(ctx, tx, projectID)
+	if err != nil {
+		return MemoryExport{}, err
+	}
+	result := MemoryExport{Identity: identity}
+	if err := tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&result.DatabaseSchema); err != nil {
+		return MemoryExport{}, err
+	}
+	specs, _, err := loadOperationalSpecs(ctx, tx, projectID, root, identity.LineageID, false)
+	if err != nil {
+		return MemoryExport{}, err
+	}
+	for _, spec := range specs {
 		encoded, err := EncodeEnvelope(spec)
 		if err != nil {
 			return MemoryExport{}, fmt.Errorf("encode %s %s: %w", spec.RecordType, spec.RecordID, err)
 		}
+		if err := retainEnvelope(ctx, tx, projectID, "export", encoded); err != nil {
+			return MemoryExport{}, err
+		}
 		result.Envelopes = append(result.Envelopes, encoded)
 	}
-	return result, nil
+	return result, tx.Commit()
 }
 
 // MemoryFileBytes is the on-disk form of one envelope: its canonical line.

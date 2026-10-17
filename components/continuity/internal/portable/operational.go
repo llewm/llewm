@@ -292,7 +292,8 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 		}
 	}
 	sort.Slice(missing, func(i, j int) bool { return lessUTF16(missing[i].ID, missing[j].ID) })
-	return records, missing, nil
+	records, err = retainedSpecs(ctx, source, projectID, lineageID, records)
+	return records, missing, err
 }
 
 func formatOptionalPortableTime(value *time.Time) string {
