@@ -5,6 +5,17 @@ description: Set up or verify Llewm Continuity for a chosen Git project and codi
 
 # Guide Continuity onboarding
 
+For a request to try the product, use the matching `docs/trials.md` workflow.
+Prefer a disposable Git demo with no plugin setup for a first look. For a real
+project, run `llewm trial start --prose PATHS` before client setup and list the
+project prose that must survive. Keep prose in control; do not delete instructions
+or replace them with Continuity queries. Trial hooks are silent and automatic
+task bootstrap is refused. Save client setup receipts separately because shared
+configuration is not owned by the trial. The review point requires explicit
+`trial adopt --reviewed` or a reviewed handback and fresh prose-only verification.
+Do not treat trial expiry as consent or skip the handback review. Full adoption
+steps below apply only when adoption is requested.
+
 Help the user reach a verified first checkpoint and fresh-session recovery. This
 skill guides project adoption and live verification; the scoped installer registers
 its bundled plugin through supported client managers. Preserve existing configuration

@@ -1,6 +1,9 @@
 package app
 
 import (
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
+	"github.com/llewm/llewm/components/continuity/internal/config"
+
 	"context"
 	"errors"
 	"fmt"
@@ -132,6 +135,9 @@ func (a *App) ApplyCheckpointRecovery(ctx context.Context, id string) (checkpoin
 // CheckWriter refuses writes from a process older than the newest build that
 // has opened the store (a long-running MCP server started before an upgrade).
 func (a *App) CheckWriter(ctx context.Context) error {
+	if err := adoption.CheckActive(config.StateDir(a.Root)); err != nil {
+		return err
+	}
 	if a.DB == nil {
 		return nil
 	}

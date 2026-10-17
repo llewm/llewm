@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -73,7 +75,7 @@ func newRootCommand(name string) *cobra.Command {
 	root.PersistentFlags().String("project-root", "", "explicit Git project root or path within it")
 	root.AddCommand(pmCommand())
 	root.AddCommand(versionCommand(), initCommand(), databaseCommand(), projectCommand(), workspaceCommand(), syncCommand(), globalCommand(), doctorCommand(), clientCommand(), briefCommand(), workCommand(), presenceCommand(), tuiCommand(), consoleCommand(), hookCommand(), coverageCommand(), usageCommand(), statsCommand(), checkpointCommand(), procedureCommand(), resourceCommand(), pinCommand(), leaseCommand(), standingGrantCommand(), forkCommand(), contractCommand(), bootstrapCommand(), activityCommand(), roadmapCommand(), releaseCommand(), trackPlanCommand(), decisionCommand(), historyCommand(), topicCommand(), narrativeCommand(), itemCommand(), memoryCommand(), mcpCommand())
-	root.AddCommand(modeCommand())
+	root.AddCommand(modeCommand(), trialCommand())
 	root.AddCommand(installCommand())
 	return root
 }
@@ -1235,6 +1237,9 @@ func initCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := adoption.CheckActive(config.StateDir(root)); err != nil {
+				return err
+			}
 			cfg, err := config.Load(root)
 			if err != nil {
 				return err
@@ -1406,8 +1411,19 @@ func hookCommand() *cobra.Command {
 					return err
 				}
 			}
+			root, err := projectRoot(cmd)
+			if err != nil {
+				return err
+			}
+			phase, err := adoption.Load(config.StateDir(root))
+			if err != nil {
+				return err
+			}
+			if phase.Phase() == "exited" {
+				return nil
+			}
 			return withApp(cmd, func(application *app.App) error {
-				if auditOnly || application.Config.Mode == "audit-only" {
+				if phase.Phase() == "trial" || auditOnly || application.Config.Mode == "audit-only" {
 					return auditHook(cmd, application, args[0], body)
 				}
 				var codexEnvelope clients.HookEnvelope

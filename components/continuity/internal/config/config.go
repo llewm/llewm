@@ -1,6 +1,8 @@
 package config
 
 import (
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
+
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -295,6 +297,14 @@ func portableDefault(root string) Config {
 // SetSync records the sync settings in the project's config file, creating the
 // file with defaults when absent. Other settings are preserved as written.
 func SetSync(root string, value Sync) (string, error) {
+	phase, err := adoption.Load(StateDir(root))
+	if err != nil {
+		return "", err
+	}
+	if phase.Phase() == "trial" || phase.Phase() == "exited" {
+		return "", fmt.Errorf("History sync is unavailable during trial or after exit; adopt explicitly first")
+	}
+
 	path, err := WriteDefault(root)
 	if err != nil {
 		return "", err

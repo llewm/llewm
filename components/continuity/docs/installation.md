@@ -620,6 +620,11 @@ installers are not yet available.
 
 ## Remove or disable an installation
 
+For a trial or adopted trial project, first use the [reviewed prose handback](trials.md)
+to preserve new knowledge and verify continuation without Continuity. Removing the
+binary or state directory is not a restoration of project prose control.
+
+
 Disable or uninstall the Llewm plugin in each client's supported plugin manager,
 then stop its long-running MCP processes and restart the client. Review the
 permission generator's managed entries and any older hand-added rules; preserve

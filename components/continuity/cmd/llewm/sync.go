@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
 	"io"
 	"os"
 	"path/filepath"
@@ -26,7 +27,21 @@ func syncCommand() *cobra.Command {
 	var output string
 	var allowPrompt bool
 	parent := &cobra.Command{
-		Use:   "sync",
+		Use: "sync",
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			root, err := projectRoot(cmd)
+			if err != nil {
+				return err
+			}
+			phase, err := adoption.Load(config.StateDir(root))
+			if err != nil {
+				return err
+			}
+			if phase.Phase() == "trial" || phase.Phase() == "exited" {
+				return errors.New("History sync is unavailable during trial or after exit; adopt explicitly first")
+			}
+			return nil
+		},
 		Short: "Sync curated history with the project's memory repository",
 		Long:  "Export new records, commit, rebase onto the remote, import what arrived, and push. When the remote is unreachable the local commit is kept and the push is retried next time.",
 		Args:  cobra.NoArgs,

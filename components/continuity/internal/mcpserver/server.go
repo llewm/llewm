@@ -1,6 +1,9 @@
 package mcpserver
 
 import (
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
+	"github.com/llewm/llewm/components/continuity/internal/config"
+
 	"cmp"
 	"context"
 	"errors"
@@ -548,6 +551,9 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
 			if method == "tools/call" {
+				if err := adoption.CheckActive(config.StateDir(application.Root)); err != nil {
+					return nil, err
+				}
 				observeMCPPresence(ctx, application, startedAt, "toolcall")
 			}
 			return next(ctx, method, request)

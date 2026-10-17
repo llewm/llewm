@@ -17,6 +17,16 @@ Once installed, the plugin's `onboard` skill supports the same process. In Codex
 invoke `$onboard`; in Claude Code, invoke `/llewm:onboard`, or ask to onboard this
 project in ordinary language. Fresh-client skill routing still needs qualification.
 
+## Choose a trial before adoption
+
+Start with a [disposable demo or reversible project trial](trials.md). For a real
+trial run `llewm trial start --prose PATHS` before changing client setup. Existing
+prose remains in control, task bootstrap is suppressed and History sync is disabled.
+At the review point, choose `trial adopt --reviewed` or the reviewed prose-handback
+workflow. A review reminder never automatically adopts or deletes anything.
+The steps below describe full adoption; do not silently perform that cutover for
+someone who only asked to try the product.
+
 ## Setup and verification
 
 1. **Choose the project and environment.** Use the Git root of the project to

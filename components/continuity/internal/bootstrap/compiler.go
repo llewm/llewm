@@ -1,6 +1,9 @@
 package bootstrap
 
 import (
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
+	"github.com/llewm/llewm/components/continuity/internal/config"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -329,6 +332,14 @@ func (c Compiler) BuildSelected(ctx context.Context, projectID, root, name strin
 // BuildForSession compiles the bootstrap for a caller session: with an empty
 // selection, the task where that session has live presence comes first.
 func (c Compiler) BuildForSession(ctx context.Context, projectID, root, name string, selection checkpoint.Selection, sessionID string) (Packet, error) {
+	phase, err := adoption.Load(config.StateDir(root))
+	if err != nil {
+		return Packet{}, err
+	}
+	if phase.Phase() == "trial" || phase.Phase() == "exited" {
+		return Packet{}, fmt.Errorf("Continuity %s: existing project prose controls work; automatic task bootstrap is disabled", phase.Phase())
+	}
+
 	if c.MaxBytes <= 0 {
 		c.MaxBytes = 16_384
 	}

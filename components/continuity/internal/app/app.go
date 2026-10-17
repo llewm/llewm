@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -113,9 +115,21 @@ func OpenReadOnly(ctx context.Context, root string) (*App, error) {
 
 func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, error) {
 	root := checkout.Root
+	if !readOnly {
+		if err := adoption.CheckActive(config.StateDir(root)); err != nil {
+			return nil, err
+		}
+	}
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
+	}
+	phase, err := adoption.Load(config.StateDir(root))
+	if err != nil {
+		return nil, err
+	}
+	if phase.Phase() == "trial" || phase.Phase() == "exited" {
+		cfg.Sync = config.Sync{}
 	}
 	globalRoot, err := config.GlobalDir()
 	if err != nil {
