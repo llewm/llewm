@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/config"
@@ -14,6 +17,21 @@ import (
 func TestTrialHandbackPreservesLearningAndConcurrentProse(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "trial", "start", "--prose", "plan.md")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child.Dir = t.TempDir()
+	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "trial-recovery", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	beforeCall, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "continuity_info", Arguments: map[string]any{}})
+	if err != nil || beforeCall.IsError {
+		t.Fatalf("trial MCP unavailable: %v %+v", err, beforeCall)
+	}
+
 	// Startup must not direct work from stored task state, even after checkpointing.
 	runCLI(t, "", "checkpoint", "create", "--task-id", "learned", "--task", "Trial learning", "--summary", "Keep the newly discovered recovery requirement", "--next", "Review new recovery knowledge")
 	if out := runCLI(t, `{"session_id":"trial-session","hook_event_name":"SessionStart"}`, "hook", "codex"); out != "" {
@@ -47,7 +65,7 @@ func TestTrialHandbackPreservesLearningAndConcurrentProse(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(root, "HANDBACK.md"), []byte(handback), 0600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"trial", "exit", "--review", "review1", "--handback", "HANDBACK.md", "--reviewed", "--verification", "Fresh session with integrations disabled read HANDBACK.md and identified next work"}
+	args := []string{"trial", "exit", "--review", "review1", "--handback", "HANDBACK.md", "--reviewed", "--writers-stopped", "--verification", "Fresh session with integrations disabled read HANDBACK.md and identified next work"}
 	requireCLIError(t, "changed since review", args...)
 	runCLI(t, "", "trial", "prepare", "--out", "review2")
 	args[3] = "review2"
@@ -58,6 +76,11 @@ func TestTrialHandbackPreservesLearningAndConcurrentProse(t *testing.T) {
 	}
 	defer old.Close()
 	runCLI(t, "", args...)
+	afterCall, callErr := session.CallTool(ctx, &mcp.CallToolParams{Name: "continuity_info", Arguments: map[string]any{}})
+	if callErr == nil && !afterCall.IsError {
+		t.Fatal("already-open MCP served after exit")
+	}
+
 	if err = old.CheckWriter(context.Background()); err == nil {
 		t.Fatal("old app remained writable")
 	}
@@ -108,7 +131,7 @@ func TestTrialExplicitAdoptionAndReviewSafety(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "HAND.md"), []byte("Reviewed handback\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	requireCLIError(t, "changed since review", "trial", "exit", "--review", "review", "--handback", "HAND.md", "--reviewed", "--verification", "Fresh session read HAND.md without integrations")
+	requireCLIError(t, "changed since review", "trial", "exit", "--review", "review", "--handback", "HAND.md", "--reviewed", "--writers-stopped", "--verification", "Fresh session read HAND.md without integrations")
 }
 func requireCLIError(t *testing.T, want string, args ...string) {
 	t.Helper()

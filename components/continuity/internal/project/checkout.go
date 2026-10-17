@@ -15,7 +15,7 @@ const (
 )
 
 // StateDirName is the per-checkout Continuity state directory.
-const StateDirName = ".continuity"
+const StateDirName = ".llewm"
 
 // Checkout identifies the Git working tree that contains a path and the project
 // root whose store and identity apply to it.
@@ -146,6 +146,11 @@ func within(path, dir string) bool {
 }
 
 func hasStateDir(path string) bool {
+	// A legacy store still establishes scope so config loading can refuse it
+	// instead of silently selecting a parent store.
+	if info, err := os.Stat(filepath.Join(path, ".continuity")); err == nil && info.IsDir() {
+		return true
+	}
 	info, err := os.Stat(filepath.Join(path, StateDirName))
 	return err == nil && info.IsDir()
 }

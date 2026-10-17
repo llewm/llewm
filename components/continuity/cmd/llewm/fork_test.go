@@ -162,7 +162,7 @@ func TestSupersessionForkThroughTheCLI(t *testing.T) {
 	record("base", "")
 	record("from-a", "base")
 	// A second successor arrives only through sync; seed it as import would.
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(root, ".continuity", "continuity.db"))+"?_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(root, ".llewm/continuity", "continuity.db"))+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
 	}

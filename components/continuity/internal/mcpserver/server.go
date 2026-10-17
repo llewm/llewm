@@ -1070,6 +1070,10 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 // delivery when that association is unambiguous. MCP does not carry the host
 // client's Continuity session ID, so ambiguity deliberately records nothing.
 func observeMCPPresence(ctx context.Context, application *app.App, startedAt time.Time, eventType string) {
+	if adoption.CheckActive(config.StateDir(application.Root)) != nil {
+		return
+	}
+
 	deliveries, err := bootstrap.DeliveredSince(ctx, application.DB, application.ProjectID, "", startedAt.Add(-deliveryWindowSlack))
 	if err != nil || len(deliveries) == 0 {
 		return

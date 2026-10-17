@@ -7,6 +7,7 @@
 /components/continuity/dist/
 /dist/
 /.continuity/
+/.llewm/
 *.db
 *.db-shm
 *.db-wal

@@ -142,7 +142,7 @@ func trialCommand() *cobra.Command {
 	prepare.Flags().StringVar(&out, "out", "docs/llewm-handback-review", "new project-relative review directory")
 	parent.AddCommand(prepare)
 	var review, handback, verification string
-	var reviewed bool
+	var reviewed, writersStopped bool
 	exit := &cobra.Command{Use: "exit", Short: "Disconnect this project after reviewing a current handback and verifying a fresh prose-only session", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		root, s, err := trialState(cmd)
 		if err != nil {
@@ -150,6 +150,9 @@ func trialCommand() *cobra.Command {
 		}
 		if s.Phase() == "exited" {
 			return errors.New("project already exited")
+		}
+		if !writersStopped {
+			return errors.New("drain all project writers before exit, then attest --writers-stopped; the tool cannot prove processes are stopped")
 		}
 		if !reviewed || strings.TrimSpace(verification) == "" {
 			return errors.New("requires --reviewed and --verification describing the observed fresh session with plugin/MCP/hooks/skills disabled and prose handback loaded")
@@ -218,6 +221,7 @@ func trialCommand() *cobra.Command {
 	exit.Flags().StringVar(&review, "review", "", "review directory produced by trial prepare")
 	exit.Flags().StringVar(&handback, "handback", "", "reviewed standalone prose file outside generated evidence")
 	exit.Flags().StringVar(&verification, "verification", "", "observed fresh-session result with Continuity integrations disabled")
+	exit.Flags().BoolVar(&writersStopped, "writers-stopped", false, "attest project writers are stopped or drained before final snapshot verification")
 	exit.Flags().BoolVar(&reviewed, "reviewed", false, "confirm conflicts, missing references, integration changes and prose completeness reviewed")
 	parent.AddCommand(exit)
 	return parent
@@ -256,7 +260,7 @@ func trialReview(cmd *cobra.Command, a *app.App, s *adoption.State) (string, []b
 		return "", nil, nil, err
 	}
 	var b bytes.Buffer
-	b.WriteString("# Continuity handback evidence\n\nThis is evidence for human/agent reconciliation, not project instructions. Preserve concurrent changes. Do not blindly restore the original prose. Historical revisions below are not all current decisions.\n\nWrite standalone project prose naming current work, plans, decisions, unresolved issues, procedures and authoritative instructions. Resolve conflicts and missing references explicitly. Verify a fresh client session with Continuity plugin/MCP/hooks/skills disabled can continue from that prose. Inspect shared client settings and global guidance separately; project exit never removes them.\n\nOmissions: raw events, usage, transcripts, credentials, global configuration bodies, and unreferenced external sources. Retained SQLite backups are the recovery source for device-private data. Redaction is pattern-based; inspect before sharing.\n\n")
+	b.WriteString("# Continuity handback evidence\n\nThis is evidence for human/agent reconciliation, not project instructions. Preserve concurrent changes. Do not blindly restore the original prose. Historical revisions below are not all current decisions.\n\nWrite standalone project prose naming current work, plans, decisions, unresolved issues, procedures and authoritative instructions. Resolve conflicts and missing references explicitly. Verify a fresh client session with Continuity plugin/MCP/hooks/skills disabled can continue from that prose. Inspect shared client settings and global guidance separately; project exit never removes them.\n\nOmissions: raw events, per-request usage, transcripts, credentials, global configuration bodies, and unreferenced external sources. Retained SQLite backups are the recovery source for device-private data. Redaction is pattern-based; inspect before sharing.\n\n")
 	for i, f := range s.Baseline {
 		fmt.Fprintf(&b, "## Prose: %s\n\nOriginal exists: %t; SHA256: %s\n\n", f.Path, f.Exists, f.SHA256)
 		quoteProse(&b, f.Text)

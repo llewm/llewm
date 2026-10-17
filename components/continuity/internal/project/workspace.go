@@ -58,6 +58,12 @@ func LoadWorkspace(root string) (*Workspace, error) {
 // LoadWorkspaceWithDigest reads and validates one manifest snapshot and returns
 // the digest of those exact bytes.
 func LoadWorkspaceWithDigest(root string) (*Workspace, string, error) {
+	if _, err := os.Lstat(filepath.Join(root, ".continuity", WorkspaceFileName)); err == nil {
+		return nil, "", fmt.Errorf("legacy workspace at %s: stop old writers and run llewm --project-root ROOT project migrate-layout", root)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, "", err
+	}
+
 	path := WorkspacePath(root)
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {

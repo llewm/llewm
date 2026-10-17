@@ -85,7 +85,7 @@ func TestWorktreesAndSubmodulesShareTheirProjectsStore(t *testing.T) {
 		if view.ProjectID != main.ProjectID || view.Root != root || view.Checkout.Kind != dir.kind || view.Checkout.Path != dir.path {
 			t.Fatalf("%s view: %#v", dir.kind, view)
 		}
-		if _, err := os.Stat(filepath.Join(dir.path, ".continuity")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(dir.path, ".llewm/continuity")); !os.IsNotExist(err) {
 			t.Fatalf("%s gained its own store: %v", dir.kind, err)
 		}
 	}
@@ -125,7 +125,7 @@ func TestUnifiedWorkspaceGroupsItsMembersIntoOneProject(t *testing.T) {
 	if !strings.Contains(proposal, "Nothing written") || !strings.Contains(proposal, `path = "joncy-agent"`) {
 		t.Fatalf("proposal:\n%s", proposal)
 	}
-	if _, err := os.Stat(filepath.Join(ws, ".continuity", "workspace.toml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws, ".llewm", "workspace.toml")); !os.IsNotExist(err) {
 		t.Fatalf("proposal wrote the manifest: %v", err)
 	}
 	runCLI(t, "", "workspace", "init", "--write")
@@ -208,7 +208,7 @@ func TestUnifiedWorkspaceGroupsItsMembersIntoOneProject(t *testing.T) {
 		t.Fatalf("commit narrative with --repo: %#v %v", commitNarrative, err)
 	}
 	t.Chdir(filepath.Join(ws, "joncyd"))
-	if _, err := os.Stat(filepath.Join(ws, "joncyd", ".continuity")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws, "joncyd", ".llewm/continuity")); !os.IsNotExist(err) {
 		t.Fatalf("member gained its own store: %v", err)
 	}
 }
@@ -251,7 +251,7 @@ func TestFederatedWorkspaceRegistersIndependentMemberProjects(t *testing.T) {
 	t.Chdir(ws)
 	shown := runCLI(t, "", "workspace", "show")
 	for name, projectID := range projects {
-		if !strings.Contains(shown, name) || !strings.Contains(shown, projectID) || !strings.Contains(shown, filepath.Join(ws, name, ".continuity", "continuity.db")) {
+		if !strings.Contains(shown, name) || !strings.Contains(shown, projectID) || !strings.Contains(shown, filepath.Join(ws, name, ".llewm/continuity", "continuity.db")) {
 			t.Fatalf("workspace show omitted %s route:\n%s", name, shown)
 		}
 	}

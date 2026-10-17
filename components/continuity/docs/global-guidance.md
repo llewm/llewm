@@ -146,7 +146,7 @@ The text is versioned with the binary that serves the tools it names.
 
 Configuration can turn a rule off or reword it, engineer-wide in
 `config.toml` in the global guidance directory and per project in
-`.continuity/config.toml`; the project layer applies after the global one, and a
+`.llewm/continuity/config.toml`; the project layer applies after the global one, and a
 rule disabled in either stays disabled:
 
 ```toml
@@ -173,7 +173,7 @@ new directory also exists. Before upgrading, explicitly preserve its files at th
 new location or set `CONTINUITY_GLOBAL_HOME` to the retained directory in every
 client launcher. Do not initialize empty replacements over existing engineer
 instructions. This path change does not rename `CONTINUITY_*` environment
-variables or the project's `.continuity/` store.
+variables or the project's `.llewm/continuity/` store.
 
 ## Planning delegation
 

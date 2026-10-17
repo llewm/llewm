@@ -39,7 +39,7 @@ func run(since string, asJSON bool) error {
 		return fmt.Errorf("find repository root: %w", err)
 	}
 	root := strings.TrimSpace(string(top))
-	db, err := database.OpenReadOnly(ctx, filepath.Join(root, ".continuity", "continuity.db"))
+	db, err := database.OpenReadOnly(ctx, filepath.Join(root, ".llewm/continuity", "continuity.db"))
 	if err != nil {
 		return err
 	}

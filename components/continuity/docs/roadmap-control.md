@@ -180,7 +180,7 @@ never write `CHANGELOG.md` and never publish externally.
 
 The `SessionStart` hook handler can run the deterministic status comparison above
 before delivering the bootstrap, but only when explicitly enabled in the local
-project `.continuity/config.toml`:
+project `.llewm/continuity/config.toml`:
 
 ```toml
 [roadmap_scan]

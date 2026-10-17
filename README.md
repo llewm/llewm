@@ -70,7 +70,7 @@ module. Build output goes in root `dist/`.
 - `AGENTS.md` and `CLAUDE.md`: project-wide development guidance.
 - `go.work`, `Taskfile.yml`, and `.forgejo/workflows/`: coordinated local and CI entry points.
 
-Local `.continuity/` state belongs to the detected Git root, including when commands
+Local `.llewm/continuity/` state belongs to the detected Git root, including when commands
 run from a component directory. It is ignored by Git.
 
 ## License

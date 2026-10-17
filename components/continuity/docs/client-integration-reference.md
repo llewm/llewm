@@ -81,7 +81,7 @@ versions and modes observed; detailed trial logs remain in the private archive.
 
 API 15 provides the deterministic read needed by a client integration, but the
 hook integration surfaces reminders only when explicitly enabled in the local
-project `.continuity/config.toml`. Both thresholds remain disabled by default:
+project `.llewm/continuity/config.toml`. Both thresholds remain disabled by default:
 
 ```toml
 [checkpoint_reminder]

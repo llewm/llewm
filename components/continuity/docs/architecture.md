@@ -67,6 +67,22 @@ payload-free event metadata, explicit machine-observed authority and uncertainty
 and directions to targeted checkpoint/freshness reads. It does not reconstruct a
 task from activity.
 
+## Trial and project layout
+
+[Reversible trials](trials.md) retain existing prose control, suppress task bootstrap
+and History sync, and require explicit adoption or a reviewed prose handback.
+Device-local receipts preserve baseline/current evidence and transition history;
+semantic completeness and fresh-session results remain attributed review claims.
+Exit requires drained writers, makes project hooks inert and refuses current MCP
+calls without deleting knowledge or shared client settings.
+
+Project state uses [`.llewm/continuity/`](project-layout.md), with a common layout
+manifest and optional workspace membership at `.llewm/`. Legacy directories fail
+closed until an explicit verified-backup migration. MCP/writer API 123 carries the
+new layout and adoption semantics; the SQLite schema and portable format do not
+change. Coordinated old-writer shutdown and actual fresh-client recovery remain
+installation requirements.
+
 ## Trust boundaries
 
 - Claims retain separate machine-observed, user-reported and caller-asserted

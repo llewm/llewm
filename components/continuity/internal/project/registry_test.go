@@ -19,8 +19,8 @@ func TestRegistryRoutesFederatedMembersWithoutProjectBodies(t *testing.T) {
 	}
 	workspace := Workspace{Mode: ModeFederated, Name: "fleet", Root: group, Members: []Member{{Path: "a"}, {Path: "b"}}}
 	entries := []RegistryEntry{
-		{Fingerprint: "root-b", RepositoryID: "repo-b", ProjectID: "project-b", LineageID: "lineage:b", Root: filepath.Join(group, "b"), Store: filepath.Join(group, "b", ".continuity", "continuity.db"), GroupRoot: group, GroupName: "fleet", Member: "b"},
-		{Fingerprint: "root-a", RepositoryID: "repo-a", ProjectID: "project-a", LineageID: "lineage:a", Root: filepath.Join(group, "a"), Store: filepath.Join(group, "a", ".continuity", "continuity.db"), GroupRoot: group, GroupName: "fleet", Member: "a"},
+		{Fingerprint: "root-b", RepositoryID: "repo-b", ProjectID: "project-b", LineageID: "lineage:b", Root: filepath.Join(group, "b"), Store: filepath.Join(group, "b", ".llewm/continuity", "continuity.db"), GroupRoot: group, GroupName: "fleet", Member: "b"},
+		{Fingerprint: "root-a", RepositoryID: "repo-a", ProjectID: "project-a", LineageID: "lineage:a", Root: filepath.Join(group, "a"), Store: filepath.Join(group, "a", ".llewm/continuity", "continuity.db"), GroupRoot: group, GroupName: "fleet", Member: "a"},
 	}
 	for _, entry := range entries {
 		if err := ObserveRegistry(ctx, global, entry); err != nil {

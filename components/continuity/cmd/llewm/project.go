@@ -33,6 +33,7 @@ type projectView struct {
 
 func projectCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "project", Short: "Inspect project identity and explicitly rebind a moved checkout"}
+	addLayoutCommands(parent)
 
 	var showOutput string
 	var limit int

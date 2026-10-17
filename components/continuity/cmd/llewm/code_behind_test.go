@@ -24,7 +24,7 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 // own Continuity store.
 func useProject(t *testing.T, root string) {
 	t.Helper()
-	t.Setenv("CONTINUITY_HOME", filepath.Join(root, ".continuity"))
+	t.Setenv("CONTINUITY_HOME", filepath.Join(root, ".llewm/continuity"))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Chdir(root)
 }

@@ -88,7 +88,7 @@ func validateGitReviewedRoot(projectRoot, root string) error {
 		return fmt.Errorf("Git-reviewed export root must be a project subdirectory")
 	}
 	first := strings.Split(filepath.ToSlash(relative), "/")[0]
-	if first == ".git" || first == ".continuity" {
+	if first == ".git" || first == ".llewm" || first == ".continuity" {
 		return fmt.Errorf("Git-reviewed export root cannot be inside %s", first)
 	}
 	current := projectAbsolute

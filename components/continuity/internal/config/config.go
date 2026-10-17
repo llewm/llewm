@@ -228,10 +228,28 @@ func StateDir(root string) string {
 	if value := os.Getenv("CONTINUITY_HOME"); value != "" {
 		return value
 	}
-	return filepath.Join(root, ".continuity")
+	return filepath.Join(root, ".llewm", "continuity")
 }
 
 func Load(root string) (Config, error) {
+	if os.Getenv("CONTINUITY_HOME") == "" {
+		if _, err := os.Lstat(filepath.Join(root, ".continuity")); err == nil {
+			return Config{}, fmt.Errorf("legacy .continuity state exists; stop old writers, back up and run llewm project migrate-layout (no automatic fallback or initialization)")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return Config{}, err
+		}
+		if _, err := os.Lstat(filepath.Join(root, ".llewm", "layout.lock")); err == nil {
+			return Config{}, fmt.Errorf("layout operation pending; inspect .llewm/layout.lock and use project restore-layout with its backup receipt")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return Config{}, err
+		}
+		if body, err := os.ReadFile(filepath.Join(root, ".llewm", "project.toml")); err == nil && string(body) != "layout_version = 1\n" {
+			return Config{}, fmt.Errorf("unknown .llewm project layout")
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Config{}, err
+		}
+	}
+
 	path := filepath.Join(StateDir(root), FileName)
 	cfg := Default(root)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
@@ -264,6 +282,10 @@ func Load(root string) (Config, error) {
 }
 
 func WriteDefault(root string) (string, error) {
+	if _, err := Load(root); err != nil {
+		return "", err
+	}
+
 	dir := StateDir(root)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err

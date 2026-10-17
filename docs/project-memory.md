@@ -85,7 +85,7 @@ See [work items](../components/continuity/docs/work-items.md).
 
 ### Private project-local runtime
 
-The default store lives under the Git root's ignored `.continuity/`.
+The default store lives under the Git root's ignored `.llewm/continuity/`.
 Configured paths and `CONTINUITY_HOME` can select another local location.
 A project-local database is not a Git artifact or a mergeable collaboration file.
 

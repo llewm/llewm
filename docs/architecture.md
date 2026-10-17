@@ -139,7 +139,8 @@ for shared action references, actor provenance, and non-destructive analysis run
 ## Project identity and instruction scope
 
 The Git root identifies the user's project. Moving the executable's source into a
-component does not change that identity or migrate `.continuity/` state. Existing
+component does not change that identity. Project state lives in `.llewm/continuity/`;
+legacy `.continuity/` stores use the explicit backup-gated layout migration. Existing
 checkpoints and observations remain append-only at the original Git root.
 
 The bootstrap compiler combines engineer-wide sources from the user's configuration

@@ -134,7 +134,7 @@ qualification. Offline collection remains available independently of hooks.
 
 `llewm mode audit-only` sets the project's hooks to passive observation;
 `llewm mode full` restores normal behavior and `llewm mode` reads the
-setting. The persisted top-level `mode` in `.continuity/config.toml` defaults to
+setting. The persisted top-level `mode` in `.llewm/continuity/config.toml` defaults to
 `"full"`; unknown values are rejected. The `hook --audit-only` flag forces passive
 observation for that hook without changing project configuration.
 

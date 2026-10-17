@@ -14,7 +14,7 @@ func TestCoreRulesAreBuiltInAndConfigurable(t *testing.T) {
 	if got := runCLI(t, "", "bootstrap"); !strings.Contains(got, "## Continuity rules (built in)\n\n- discovery: Before diagnosing") {
 		t.Fatalf("built-in rules missing:\n%s", got)
 	}
-	configPath := filepath.Join(root, ".continuity", "config.toml")
+	configPath := filepath.Join(root, ".llewm/continuity", "config.toml")
 	base, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestMemoryRepositoryRuleAppearsOnlyWithSync(t *testing.T) {
 	if got := runCLI(t, "", "bootstrap"); strings.Contains(got, "memory-repository") {
 		t.Fatalf("memory rule shown without sync:\n%s", got)
 	}
-	configPath := filepath.Join(root, ".continuity", "config.toml")
+	configPath := filepath.Join(root, ".llewm/continuity", "config.toml")
 	base, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)

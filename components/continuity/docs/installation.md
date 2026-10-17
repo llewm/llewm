@@ -14,8 +14,9 @@ These instructions cover Linux, macOS, native Windows, and WSL. Linux has been
 verified locally; macOS and Windows runtime and client integration remain unverified.
 
 `llewm` is the canonical executable and plugin name. Continuity remains the internal
-component name. Existing `.continuity/` stores, `CONTINUITY_*` environment variables,
-and internal MCP tool names remain unchanged. Portable format 3 requires the
+component name. Project state now lives in `.llewm/continuity/`; legacy
+`.continuity/` stores require the explicit [layout migration](project-layout.md).
+`CONTINUITY_*` environment variables and internal MCP tool names remain unchanged. Portable format 3 requires the
 explicit history-preserving conversion described in [memory repository rules](memory-repository.md#format-3-conversion); it is separate from SQL migrations.
 Install the executable on PATH so hooks and MCP launchers can resolve it.
 
@@ -322,7 +323,7 @@ To update, build and verify the candidate at a separate path from the installed
 executable. Stop clients/hooks and long-running MCP processes before replacing
 the identified installed file. Follow the backup-gated workflow below when the
 candidate contains pending migrations, then restart and verify the live client.
-Updating the executable does not remove project state in `.continuity`.
+Updating the executable does not remove project state in `.llewm/continuity`.
 
 ### Migration-bearing updates
 
@@ -357,7 +358,7 @@ For a verified migration-bearing release:
    llewm database migrate \
      --from 026_procedure_monitoring.sql \
      --to 027_track_plans.sql \
-     --backup .continuity/backups/continuity-before-027.db
+     --backup .llewm/continuity/backups/continuity-before-027.db
    ```
 
 6. Retain the JSON receipt. Confirm `backup_integrity` and `database_integrity` are
@@ -404,14 +405,14 @@ llewm database backup
 
 The command prints a JSON receipt with the database path, backup path, applied
 migration, and integrity result. By default it writes a new timestamped file
-under `.continuity/backups` and never overwrites an existing file. Use
+under `.llewm/continuity/backups` and never overwrites an existing file. Use
 `--backup PATH` for an explicit destination.
 
-Configure the default directory and retention policy in `.continuity/config.toml`:
+Configure the default directory and retention policy in `.llewm/continuity/config.toml`:
 
 ```toml
 [backups]
-dir = ".continuity/backups"
+dir = ".llewm/continuity/backups"
 keep_last = 3
 keep_days = 30
 pinned = ["continuity-release-baseline.db"]
@@ -637,7 +638,7 @@ completion file and PATH/startup line only if they were added for this install
 and no other program needs that directory. Go's module/build caches are shared
 and do not need removal.
 
-Project `.continuity/` stores, backups, global guidance, and History-sync memory
+Project `.llewm/continuity/` stores, backups, global guidance, and History-sync memory
 are retained. Removing the executable does not delete project knowledge. Review
 and back up data before any separately requested data deletion.
 

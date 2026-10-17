@@ -10,7 +10,7 @@ still requires its own reviewed slice before it ships.
 ## Why
 
 Continuity currently equates a project with one Git working tree: the project ID is
-looked up by root path, `.continuity/` state lives at that root, and services such
+looked up by root path, `.llewm/continuity/` state lives at that root, and services such
 as evidence, narratives, roadmap bindings, contracts, and track plans hold a single
 `Root`. That breaks for common real-world setups:
 
@@ -153,7 +153,7 @@ Accepted design (decision `history-sync-design`, 2026-09-27):
 - **No SQLite in Git.** Git and Git LFS cannot merge a binary database, and LFS
   locking would serialize every writer. Exact SQLite snapshots remain a separate
   disaster-recovery path.
-- **Configuration.** Each project names its remote in `.continuity/config.toml`
+- **Configuration.** Each project names its remote in `.llewm/continuity/config.toml`
   (`[sync] remote = "..."`; untracked, so each machine opts in).
   `llewm sync init --remote URL` records it and clones once per remote under
   `~/.local/share/llewm/memory/`, shared by every project using that remote.
@@ -463,5 +463,5 @@ source fixtures. See [the roadmap](roadmap.md) for remaining product direction.
 
 A live Continuity database inside a file-sync folder (for example Syncthing or
 Dropbox) can be copied mid-transaction or diverge across devices, and WAL/SHM files
-can arrive out of step with the main file. Exclude `.continuity/*.db*` from file
+can arrive out of step with the main file. Exclude `.llewm/continuity/*.db*` from file
 sync; History sync is the supported cross-device path.

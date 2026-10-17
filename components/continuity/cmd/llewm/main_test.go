@@ -44,13 +44,13 @@ func testProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("CONTINUITY_GLOBAL_HOME", t.TempDir())
-	t.Setenv("CONTINUITY_HOME", filepath.Join(root, ".continuity"))
+	t.Setenv("CONTINUITY_HOME", filepath.Join(root, ".llewm/continuity"))
 	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("# Rules\n\nRun tests.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".continuity/\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".llewm/continuity/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "AGENTS.md", "CLAUDE.md", ".gitignore"}, {"-c", "user.name=Continuity Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "Initialize test project"}} {
@@ -118,8 +118,8 @@ func TestInitReportsCreatedAndExistingState(t *testing.T) {
 	initialized := runCLI(t, "", "init")
 	for _, expected := range []string{
 		"Initialized " + projectName + "\n",
-		"Config: " + filepath.Join(root, ".continuity", "config.toml") + " (created)\n",
-		"Database: " + filepath.Join(root, ".continuity", "continuity.db") + " (created)\n",
+		"Config: " + filepath.Join(root, ".llewm/continuity", "config.toml") + " (created)\n",
+		"Database: " + filepath.Join(root, ".llewm/continuity", "continuity.db") + " (created)\n",
 	} {
 		if !strings.Contains(initialized, expected) {
 			t.Fatalf("initial init output missing %q:\n%s", expected, initialized)
@@ -129,8 +129,8 @@ func TestInitReportsCreatedAndExistingState(t *testing.T) {
 	repeated := runCLI(t, "", "init")
 	for _, expected := range []string{
 		"Already initialized " + projectName + "\n",
-		"Config: " + filepath.Join(root, ".continuity", "config.toml") + " (existing)\n",
-		"Database: " + filepath.Join(root, ".continuity", "continuity.db") + " (existing)\n",
+		"Config: " + filepath.Join(root, ".llewm/continuity", "config.toml") + " (existing)\n",
+		"Database: " + filepath.Join(root, ".llewm/continuity", "continuity.db") + " (existing)\n",
 		"No initialization files were created.\n",
 		"Run `llewm doctor` to verify project health.\n",
 	} {
@@ -779,7 +779,7 @@ func TestReminderHookClientContracts(t *testing.T) {
 func TestHookSurfacesOneConfiguredCheckpointReminder(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
-	configPath := filepath.Join(root, ".continuity", "config.toml")
+	configPath := filepath.Join(root, ".llewm/continuity", "config.toml")
 	if err := os.WriteFile(configPath, []byte("[checkpoint_reminder]\nremind_after_events = 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -815,7 +815,7 @@ func TestSessionStartRoadmapScanIsOptInAndFailureIsolated(t *testing.T) {
 		t.Fatalf("session start lacks narrative coverage: %s", out)
 	}
 
-	configPath := filepath.Join(root, ".continuity", "config.toml")
+	configPath := filepath.Join(root, ".llewm/continuity", "config.toml")
 	if err := os.WriteFile(configPath, []byte("[roadmap_scan]\non_session_start = true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1112,7 +1112,7 @@ func TestHookRejectsInvalidInput(t *testing.T) {
 			t.Fatalf("accepted invalid input of length %d", len(input))
 		}
 	}
-	if _, err := os.Stat(".continuity"); !os.IsNotExist(err) {
+	if _, err := os.Stat(".llewm/continuity"); !os.IsNotExist(err) {
 		t.Fatalf("invalid input created state: %v", err)
 	}
 }
@@ -1124,7 +1124,7 @@ func TestHookRefusesPendingMigrationWithoutWriting(t *testing.T) {
 	}
 	root := testProject(t)
 	runCLI(t, "", "init")
-	databasePath := filepath.Join(root, ".continuity", "continuity.db")
+	databasePath := filepath.Join(root, ".llewm/continuity", "continuity.db")
 	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(databasePath)+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
@@ -1186,7 +1186,7 @@ func TestDatabaseBackupUsesGeneratedOrExplicitDestination(t *testing.T) {
 	if err := json.Unmarshal([]byte(runCLI(t, "", "database", "backup")), &generated); err != nil {
 		t.Fatal(err)
 	}
-	if generated.BackupIntegrity != "ok" || generated.BackupMigration != latestSchema || filepath.Dir(generated.BackupPath) != filepath.Join(root, ".continuity", "backups") {
+	if generated.BackupIntegrity != "ok" || generated.BackupMigration != latestSchema || filepath.Dir(generated.BackupPath) != filepath.Join(root, ".llewm/continuity", "backups") {
 		t.Fatalf("generated backup receipt: %#v", generated)
 	}
 	var second database.BackupResult
@@ -1214,7 +1214,7 @@ func TestDatabaseBackupPruneIsDryRun(t *testing.T) {
 	if err := json.Unmarshal([]byte(runCLI(t, "", "database", "backup")), &backup); err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(root, ".continuity", "config.toml")
+	configPath := filepath.Join(root, ".llewm/continuity", "config.toml")
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1270,10 +1270,10 @@ func TestComponentUsesGitRootStateAndGuidance(t *testing.T) {
 	if !strings.Contains(want, "components/continuity/AGENTS.md") || strings.Contains(want, "Component-only rule.") {
 		t.Fatalf("unexpected instruction discovery scope:\n%s", want)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".continuity", "continuity.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".llewm/continuity", "continuity.db")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(nested, ".continuity")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(nested, ".llewm/continuity")); !os.IsNotExist(err) {
 		t.Fatalf("component should not have separate state: %v", err)
 	}
 }

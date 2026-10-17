@@ -114,8 +114,8 @@ func TestStoreInside(t *testing.T) {
 		database, root string
 		want           bool
 	}{
-		{"/work/a/.continuity/continuity.db", "/work/a", true},
-		{"/work/ab/.continuity/continuity.db", "/work/a", false},
+		{"/work/a/.llewm/continuity/continuity.db", "/work/a", true},
+		{"/work/ab/.llewm/continuity/continuity.db", "/work/a", false},
 		{"/home/me/.continuity-home/continuity.db", "/work/a", false},
 	} {
 		if got := StoreInside(test.database, test.root); got != test.want {

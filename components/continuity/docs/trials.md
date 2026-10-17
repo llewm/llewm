@@ -8,7 +8,7 @@ prose, uninstalls shared plugins, or changes client approvals.
 ## Disposable demo
 
 For a first look, create an empty Git repository in a disposable directory. Add
-a Git ignore rule for the project state directory, an `AGENTS.md` describing a small fictional task and a `PLAN.md`, then run:
+a `.gitignore` containing `.llewm/`, an `AGENTS.md` describing a small fictional task and a `PLAN.md`, then run:
 
 ```sh
 llewm trial start --prose PLAN.md
@@ -26,7 +26,7 @@ commands. Only the demo directory and normal local project registry are affected
 
 ## Real-project trial
 
-Before changing client setup, ignore the project state directory in Git and run:
+Before changing client setup, ignore `.llewm/` in Git and run:
 
 ```sh
 llewm trial start --prose docs/PLAN.md,docs/DECISIONS.md --review-after 336h
@@ -97,7 +97,7 @@ Output must be new; previous evidence is never overwritten. The review contains
 original/current redacted prose with hashes, all curated record revisions with
 identity/authority/timestamps, missing references, and an explicit omission list.
 It includes learning accumulated during the trial. It excludes raw events,
-usage, transcripts, credentials, global config bodies and unresolved external
+per-request usage, transcripts, credentials, global config bodies and unresolved external
 source bodies. The SQLite store and backups remain the recovery source for those
 local observations. Historical revisions are evidence, not all current truth.
 
@@ -126,9 +126,14 @@ property the renderer can prove.
 
 ```sh
 llewm trial exit --review docs/handback-review-2 \
-  --handback docs/HANDBACK.md --reviewed \
+  --handback docs/HANDBACK.md --reviewed --writers-stopped \
   --verification 'Fresh CLIENT session with integrations disabled loaded the prose and recovered OBJECTIVE/NEXT/CONSTRAINTS'
 ```
+
+Drain all project CLI, hook, MCP and sync writers before the final snapshot check.
+`--writers-stopped` is an explicit attestation, not process discovery. In-flight
+operations must finish before exit. Already-open compatible idle MCP servers
+refuse later calls; old binaries must be stopped.
 
 The handback must be a separate nonempty prose file outside the generated review.
 Exit verifies review hashes and refuses if baselined prose, curated knowledge,

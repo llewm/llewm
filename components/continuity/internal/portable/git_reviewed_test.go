@@ -89,7 +89,7 @@ func TestGitReviewedRootMustBeRealProjectSubdirectory(t *testing.T) {
 	if err := validateGitReviewedRoot(project, t.TempDir()); err == nil || !strings.Contains(err.Error(), "project subdirectory") {
 		t.Fatalf("outside root accepted: %v", err)
 	}
-	if err := validateGitReviewedRoot(project, filepath.Join(project, ".continuity")); err == nil || !strings.Contains(err.Error(), ".continuity") {
+	if err := validateGitReviewedRoot(project, filepath.Join(project, ".llewm/continuity")); err == nil || !strings.Contains(err.Error(), ".llewm") {
 		t.Fatalf("private store root accepted: %v", err)
 	}
 	real := filepath.Join(project, "real")

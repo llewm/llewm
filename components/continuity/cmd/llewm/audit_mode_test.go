@@ -16,7 +16,7 @@ func TestAuditOnlyHooksAreSilentAndDoNotPersistPayloadsOrContinuityState(t *test
 		t.Run(client, func(t *testing.T) {
 			root := testProject(t)
 			runCLI(t, "", "init")
-			path := filepath.Join(root, ".continuity", "config.toml")
+			path := filepath.Join(root, ".llewm/continuity", "config.toml")
 			data, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)

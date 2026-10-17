@@ -30,6 +30,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/coverage"
 	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/layout"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/mcpserver"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
@@ -1252,6 +1253,9 @@ func initCommand() *cobra.Command {
 			databaseExisted, err := pathExists(cfg.Storage.Database)
 			if err != nil {
 				return fmt.Errorf("inspect database: %w", err)
+			}
+			if err := layout.EnsureManifest(root); err != nil {
+				return err
 			}
 			path, err := config.WriteDefault(root)
 			if err != nil {

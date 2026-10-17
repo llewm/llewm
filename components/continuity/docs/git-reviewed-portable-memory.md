@@ -13,7 +13,7 @@ push, pull, fetch, or any network command. The result reports
 authorized workflow decides whether anything is tracked.
 
 The export root must already exist as a real, non-symlinked project subdirectory.
-It cannot be the project root or live `.git/` or `.continuity/` state. The live
+It cannot be the project root or live `.git/` or `.llewm/continuity/` state. The live
 SQLite database, WAL/SHM files, backups, raw events/sessions, usage samples,
 reference source bodies, roadmap sync-file snapshots, and derived friction
 candidates are not copied into this profile.

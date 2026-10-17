@@ -49,7 +49,7 @@ func TestCompletionOutsideProject(t *testing.T) {
 			}
 		})
 	}
-	for _, path := range []string{state, global, filepath.Join(root, ".continuity")} {
+	for _, path := range []string{state, global, filepath.Join(root, ".llewm/continuity")} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("completion touched %s: %v", path, err)
 		}

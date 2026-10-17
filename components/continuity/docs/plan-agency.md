@@ -17,7 +17,7 @@ Completion may unblock dependencies, but never grants permission to execute them
 
 ## Configure delegation
 
-The engineer's global `config.toml` and the project's `.continuity/config.toml`
+The engineer's global `config.toml` and the project's `.llewm/continuity/config.toml`
 support `[plan_policy]`. Project settings override global defaults; exact roadmap
 node IDs can override the default rule. Configuration is local policy, not a
 portable execution grant. Agents must not change it to grant themselves agency

@@ -65,7 +65,7 @@ func TestLeasesThroughTheCLI(t *testing.T) {
 func TestRequiredLeasesFenceCheckpointsAndPlansThroughTheCLI(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
-	configPath := filepath.Join(root, ".continuity", "config.toml")
+	configPath := filepath.Join(root, ".llewm/continuity", "config.toml")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)

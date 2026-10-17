@@ -113,13 +113,15 @@ llewm --project-root /path/to/project status
 llewm --project-root /path/to/project mcp
 ```
 
-The default state directory is `.continuity` at the detected Git root (the Llewm
-repository root when developing here), not in this component directory. Set `CONTINUITY_HOME` to use a different local state directory.
+The default state directory is `.llewm/continuity` at the detected Git root (the Llewm
+repository root when developing here), not in this component directory. Set `CONTINUITY_HOME` to use a different local component state directory.
+See [layout migration](docs/project-layout.md) for legacy `.continuity` stores and
+[reversible trials](docs/trials.md) before adopting a real project.
 
 Project IDs are opaque and permanent; the root path is only the project's current
 location. A linked Git worktree uses its main checkout's project and store, and a
 submodule uses its superproject's, unless that worktree or submodule has its own
-`.continuity/` directory. When a checkout moves with its store inside it,
+`.llewm/` project directory. When a checkout moves with its store inside it,
 Continuity recognizes the repository and records the relocation. Any other
 ambiguous match is refused until you choose explicitly:
 
@@ -134,7 +136,7 @@ or keep independent projects grouped for routing (`federated`). In the folder
 that holds them, propose and then save a workspace manifest:
 
 ```bash
-llewm workspace init            # print the proposed .continuity/workspace.toml
+llewm workspace init            # print the proposed .llewm/workspace.toml
 llewm workspace init --write    # save it
 llewm init                      # create the workspace store
 ```

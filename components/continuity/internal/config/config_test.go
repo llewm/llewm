@@ -11,11 +11,11 @@ import (
 func TestLoadRebasesAStoreRecordedAtAFormerRoot(t *testing.T) {
 	t.Setenv("CONTINUITY_HOME", "")
 	root := t.TempDir()
-	dir := filepath.Join(root, ".continuity")
+	dir := filepath.Join(root, ".llewm/continuity")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := "[project]\nname = \"a\"\nroot = \"/old/a\"\n\n[storage]\ndatabase = \"/old/a/.continuity/continuity.db\"\n"
+	legacy := "[project]\nname = \"a\"\nroot = \"/old/a\"\n\n[storage]\ndatabase = \"/old/a/.llewm/continuity/continuity.db\"\n"
 	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestLoadRebasesAStoreRecordedAtAFormerRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Storage.Database != filepath.Join(root, ".continuity", "continuity.db") || cfg.Project.Root != root {
+	if cfg.Storage.Database != filepath.Join(root, ".llewm/continuity", "continuity.db") || cfg.Project.Root != root {
 		t.Fatalf("moved config: %#v", cfg)
 	}
 }
@@ -31,7 +31,7 @@ func TestLoadRebasesAStoreRecordedAtAFormerRoot(t *testing.T) {
 func TestLoadKeepsAnAbsoluteStoreOutsideTheFormerRoot(t *testing.T) {
 	t.Setenv("CONTINUITY_HOME", "")
 	root := t.TempDir()
-	dir := filepath.Join(root, ".continuity")
+	dir := filepath.Join(root, ".llewm/continuity")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -60,17 +60,17 @@ func TestWriteDefaultRecordsPathsRelativeToTheCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(content)
-	if strings.Contains(text, root) || !strings.Contains(text, `database = ".continuity/continuity.db"`) || !strings.Contains(text, `dir = ".continuity/backups"`) {
+	if strings.Contains(text, root) || !strings.Contains(text, `database = ".llewm/continuity/continuity.db"`) || !strings.Contains(text, `dir = ".llewm/continuity/backups"`) {
 		t.Fatalf("default config is not relocatable:\n%s", text)
 	}
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Storage.Database != filepath.Join(root, ".continuity", "continuity.db") {
+	if cfg.Storage.Database != filepath.Join(root, ".llewm/continuity", "continuity.db") {
 		t.Fatalf("loaded database = %s", cfg.Storage.Database)
 	}
-	if cfg.Backups.Dir != filepath.Join(root, ".continuity", "backups") {
+	if cfg.Backups.Dir != filepath.Join(root, ".llewm/continuity", "backups") {
 		t.Fatalf("loaded backup dir = %s", cfg.Backups.Dir)
 	}
 	if cfg.Backups.KeepLast != 3 || cfg.Backups.KeepDays != 30 {
@@ -97,11 +97,11 @@ func TestWriteDefaultKeepsContinuityHomeAbsolute(t *testing.T) {
 func TestLoadResolvesConfiguredBackupDirectory(t *testing.T) {
 	t.Setenv("CONTINUITY_HOME", "")
 	root := t.TempDir()
-	dir := filepath.Join(root, ".continuity")
+	dir := filepath.Join(root, ".llewm/continuity")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	content := "[project]\nroot = \"/old/a\"\n\n[storage]\ndatabase = \".continuity/continuity.db\"\n\n[backups]\ndir = \"var/snapshots\"\n"
+	content := "[project]\nroot = \"/old/a\"\n\n[storage]\ndatabase = \".llewm/continuity/continuity.db\"\n\n[backups]\ndir = \"var/snapshots\"\n"
 	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
