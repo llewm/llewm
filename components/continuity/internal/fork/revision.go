@@ -124,6 +124,7 @@ func RevisionForks(ctx context.Context, db queryer, projectID, subject string) (
 	}
 	rows, err := db.QueryContext(ctx, `SELECT record_type,record_id,record_revision,content_sha256,envelope_sha256,is_local,envelope_json,recorded_at FROM fork_heads
         WHERE project_id=? AND (?='' OR (record_type=? AND record_id=? AND record_revision=?))
+		AND NOT EXISTS (SELECT 1 FROM redaction_recoveries r WHERE r.project_id=fork_heads.project_id AND r.record_type=fork_heads.record_type AND r.record_id=fork_heads.record_id AND r.record_revision=fork_heads.record_revision AND r.derived_content_sha256=fork_heads.content_sha256)
         ORDER BY record_type,record_id,record_revision,envelope_sha256`, projectID, subject, recordType, recordID, revision)
 	if err != nil {
 		return nil, err

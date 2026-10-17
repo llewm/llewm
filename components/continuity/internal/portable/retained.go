@@ -39,6 +39,22 @@ func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID str
 			specs[i] = saved
 		}
 	}
+	recovered, err := RecoveredEnvelopes(ctx, source, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for i, spec := range specs {
+		encoded, err := EncodeEnvelope(spec)
+		if err != nil {
+			return nil, err
+		}
+		if original, ok := recovered[encoded.Envelope.EnvelopeSHA256]; ok {
+			specs[i], err = DecodeMemoryEnvelope(original.Bytes)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	return specs, nil
 }
 

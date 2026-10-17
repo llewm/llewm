@@ -112,6 +112,7 @@ preserved. Unknown or invalid records refuse conversion before removal.`,
 	}
 	convert.Flags().StringVar(&convertOutput, "output", "text", "text or json")
 	parent.AddCommand(convert)
+	parent.AddCommand(syncRedactionRecoveryCommand())
 
 	var remote, clone, askpass, sshKey, credentialHelper, lineageID string
 	var plaintextCredentials, tokenStdin bool

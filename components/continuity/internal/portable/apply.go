@@ -175,10 +175,20 @@ func applyOperationalImport(ctx context.Context, db *sql.DB, projectID string, m
 	// not adopt a differing schema-equivalent observation over a local record.
 	for _, encoded := range bundle.Records {
 		if _, appended := appendKeys[recordKey(encoded.Envelope)]; appended {
+			if encoded.Envelope.RecordType == "redaction_recovery" {
+				if err := appendRedactionRecovery(ctx, tx, projectID, encoded); err != nil {
+					return result, err
+				}
+			}
 			if err := retainEnvelope(ctx, tx, projectID, "import", encoded); err != nil {
 				return result, err
 			}
 		}
+	}
+	// Check relationships between all retained proofs inside the transaction.
+	// A malformed chain must never strand the store after a successful import.
+	if _, err := RecoveredEnvelopes(ctx, tx, projectID); err != nil {
+		return result, err
 	}
 	if appliedAt.IsZero() {
 		appliedAt = time.Now().UTC()
@@ -234,6 +244,12 @@ func decodeOperationalBundle(bundle Bundle) (decodedOperationalBundle, error) {
 	}
 	for _, encoded := range bundle.Records {
 		envelope := encoded.Envelope
+		if envelope.RecordType == "redaction_recovery" {
+			if _, err := decodeRedactionRecovery(encoded); err != nil {
+				return decoded, err
+			}
+			continue
+		}
 		if handled, err := decodeLedgerEnvelope(&decoded.ledger, envelope); handled {
 			if err != nil {
 				return decoded, err

@@ -99,6 +99,31 @@ planning compares retained envelopes too. This prevents new transport variants;
 it does not settle historical collisions or revision forks. Keep automatic sync
 paused during recovery, and preserve exact procedure definitions and grants.
 
+Writer API 125 adds migration 077 and proof-carrying `redaction_recovery`
+records for historical checkpoint, narrative, procedure, and track-plan
+re-exports. With automatic sync paused and all writers upgraded, preview each
+pair of tracked envelope hashes:
+
+```sh
+llewm sync repair-redaction --original ORIGINAL_SHA256 --derived DERIVED_SHA256 \
+  --redacted-root /absolute/peer/project --redacted-project-id project-PEER_ID \
+  --creator NAME --reason 'Historical peer re-export'
+```
+
+Review the original and derived envelopes in the JSON result, then repeat the
+same command with `--apply --expect-recovery RECOVERY_ID`. Application appends
+the exact proof locally; ordinary sync transports it. It never edits memory
+files, operational records, procedure revisions, or standing grants. Existing
+operational procedure arguments must still be verified separately before use.
+The proof must reproduce the entire derived envelope using only the declared
+additional root/ID substitutions. Unrelated changes, reverse substitutions,
+ambiguous corrections, and chains refuse. Both original and derived observations
+remain available. Fork projections exclude only the proved derived content;
+exports and fresh imports use the original transport form. Sync imports these
+proofs before interpreting the affected historical identities. Require repeated
+zero-collision/fork/unpushed receipts on every peer and fresh recovery before
+restoring the previous automatic-sync setting.
+
 - Memory commits are automated and self-describing (`continuity: <instance> +N
   records`). They run with repository hooks and signing disabled and a fallback
   committer identity when the user has none. They are exempt from the engineer's

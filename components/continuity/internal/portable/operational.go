@@ -214,6 +214,11 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 	records = append(records, contextSpecs...)
 	records = append(records, branchSpecs...)
 	records = append(records, resolutionSpecs...)
+	recoverySpecs, err := loadRedactionRecoverySpecs(ctx, source, projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	records = append(records, recoverySpecs...)
 	invocationIDs := roadmapInvocations
 	workRows, err := source.QueryContext(ctx, `SELECT payload_json,COALESCE(creator_invocation_id,'') FROM work_narratives WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
@@ -529,7 +534,7 @@ func planValidatedOperationalImport(ctx context.Context, source queryer, project
 	for _, incoming := range bundle.Records {
 		item := ImportPlanItem{RecordType: incoming.Envelope.RecordType, RecordID: incoming.Envelope.RecordID, RecordRevision: incoming.Envelope.RecordRevision, IncomingEnvelopeSHA256: incoming.Envelope.EnvelopeSHA256}
 		switch incoming.Envelope.RecordType {
-		case "procedure", "resource", "resource_note", "pin", "coverage_cell", "lease_stamp", "stale_write_resolution", "usage_session_summary", "checkpoint_context", "checkpoint_branches", "fork_resolution", "revision_fork_resolution", "supersession_fork_resolution", "checkpoint", "checkpoint_action", "checkpoint_action_transition", "roadmap_node", "roadmap_binding", "roadmap_link", "roadmap_review_routine", "roadmap_sync", "roadmap_release", "work_item", "work_item_disposition", "work_item_link", "track_plan", "work_narrative", "work_narrative_supersession", "actor_invocation", "decision", "topic_revision", "topic_alias", "topic_link":
+		case "redaction_recovery", "procedure", "resource", "resource_note", "pin", "coverage_cell", "lease_stamp", "stale_write_resolution", "usage_session_summary", "checkpoint_context", "checkpoint_branches", "fork_resolution", "revision_fork_resolution", "supersession_fork_resolution", "checkpoint", "checkpoint_action", "checkpoint_action_transition", "roadmap_node", "roadmap_binding", "roadmap_link", "roadmap_review_routine", "roadmap_sync", "roadmap_release", "work_item", "work_item_disposition", "work_item_link", "track_plan", "work_narrative", "work_narrative_supersession", "actor_invocation", "decision", "topic_revision", "topic_alias", "topic_link":
 			existing, found := local[recordKey(incoming.Envelope)]
 			item.ExistingEnvelopeSHA256 = existing.Envelope.EnvelopeSHA256
 			if !found {

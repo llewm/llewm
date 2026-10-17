@@ -40,7 +40,8 @@ func SupportedRecordType(recordType string) bool {
 }
 
 var supportedRecordSchemas = map[string]int{
-	"checkpoint": 1, "checkpoint_action": 1, "checkpoint_action_transition": 1,
+	"redaction_recovery": 1,
+	"checkpoint":         1, "checkpoint_action": 1, "checkpoint_action_transition": 1,
 	"roadmap_node": 2, "roadmap_binding": 1, "roadmap_link": 1,
 	"roadmap_review_routine": 1, "roadmap_sync": 1,
 	"roadmap_release": 1,

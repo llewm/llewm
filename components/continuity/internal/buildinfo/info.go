@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	MCPAPIVersion = 124
+	MCPAPIVersion = 125
 	// WriterAPIVersion is the newest MCP API revision that introduced a
 	// write-incompatible semantic change. Ordinary MCP surface changes must not
 	// advance it: doing so would strand checkpoints in already-running clients.
-	WriterAPIVersion = 124
+	WriterAPIVersion = 125
 )
 
 // These values may be set with -ldflags for release builds. Development builds

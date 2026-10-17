@@ -763,16 +763,47 @@ func (s Syncer) importNew(ctx context.Context, repo git, lineageDir, previous st
 	}
 	var specs []portable.EnvelopeSpec
 	var forked [][]fork.ObservedHead
+	// Recoveries carry their own bounded proof and must be applied before
+	// interpreting the historical identities they correct, also on fresh peers.
+	var recoveries []portable.EnvelopeSpec
+	for _, values := range versions {
+		for _, spec := range values {
+			if spec.RecordType == "redaction_recovery" {
+				recoveries = append(recoveries, spec)
+			}
+		}
+	}
+	if len(recoveries) > 0 {
+		plan, receipt, err := portable.ImportMemoryRecords(ctx, s.DB, s.ProjectID, recoveries, s.now())
+		if err != nil {
+			return err
+		}
+		if !plan.ApplyAllowed {
+			return fmt.Errorf("redaction recovery observations collide")
+		}
+		if receipt != nil {
+			result.ImportedRecords += receipt.AppendedRecords
+		}
+	}
+	recovered, err := portable.RecoveredEnvelopes(ctx, s.DB, s.ProjectID)
+	if err != nil {
+		return err
+	}
 	for _, identity := range order {
+		if len(versions[identity]) > 0 && versions[identity][0].RecordType == "redaction_recovery" {
+			continue
+		}
 		if len(stored[identity]) > 1 {
-			heads, err := s.forkHeads(stored[identity])
+			heads, err := s.forkHeads(stored[identity], recovered)
 			if err != nil {
 				return err
 			}
 			if len(heads) == 1 {
-				if len(versions[identity]) > 0 {
-					specs = append(specs, versions[identity][0])
+				spec, err := portable.DecodeMemoryEnvelope(heads[0].Envelope)
+				if err != nil {
+					return err
 				}
+				specs = append(specs, spec)
 				continue
 			}
 			if heads == nil {
@@ -857,7 +888,7 @@ func (s Syncer) importNew(ctx context.Context, repo git, lineageDir, previous st
 
 // forkHeads decodes every version of one identity. It returns nil when the
 // identity is unrevisioned, which makes several versions a collision.
-func (s Syncer) forkHeads(relatives []string) ([]fork.ObservedHead, error) {
+func (s Syncer) forkHeads(relatives []string, recovered map[string]portable.EncodedEnvelope) ([]fork.ObservedHead, error) {
 	var heads []fork.ObservedHead
 	var envelopes [][]byte
 	byContent := map[string]int{}
@@ -870,23 +901,30 @@ func (s Syncer) forkHeads(relatives []string) ([]fork.ObservedHead, error) {
 		if err != nil {
 			return nil, err
 		}
-		if spec.RecordRevision < 1 {
-			return nil, nil
-		}
 		encoded, err := portable.EncodeEnvelope(spec)
 		if err != nil {
 			return nil, err
 		}
+		if original, ok := recovered[encoded.Envelope.EnvelopeSHA256]; ok {
+			encoded = original
+		}
 		head := fork.ObservedHead{RecordType: spec.RecordType, RecordID: spec.RecordID, Revision: spec.RecordRevision, ContentSHA256: encoded.Envelope.ContentSHA256, EnvelopeSHA256: encoded.Envelope.EnvelopeSHA256, Envelope: encoded.Bytes, RecordedAt: spec.RecordedAt}
-		if index, ok := byContent[head.ContentSHA256]; ok {
+		key := head.ContentSHA256
+		if head.Revision == 0 {
+			key = head.EnvelopeSHA256
+		}
+		if index, ok := byContent[key]; ok {
 			if head.RecordedAt.After(heads[index].RecordedAt) || head.RecordedAt.Equal(heads[index].RecordedAt) && head.EnvelopeSHA256 > heads[index].EnvelopeSHA256 {
 				heads[index] = head
 			}
 			continue
 		}
-		byContent[head.ContentSHA256] = len(heads)
+		byContent[key] = len(heads)
 		heads = append(heads, head)
 		envelopes = append(envelopes, encoded.Bytes)
+	}
+	if len(heads) > 1 && heads[0].Revision == 0 {
+		return nil, nil
 	}
 	if fork.EquivalentRoadmapNodeEnvelopes(envelopes) {
 		return heads[:1], nil
