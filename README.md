@@ -25,6 +25,13 @@ resolve relevant context and traverse exact references as needed. Compact startu
 state and bounded retrieval keep each session's loaded context small while the
 larger project history remains available.
 
+**Keep research useful beyond the session.** Agents can save research findings,
+supporting evidence, and limitations as attributable claim chunks, linked to the
+work they inform. Focused search and bounded expansion retrieve selected findings
+without replaying the research session. Agents supply the summaries and citations;
+automatic web-source capture and structured claim-to-source links remain gaps.
+See [research memory: current support and proposed improvements](components/continuity/docs/research-memory.md).
+
 **Coordinate work across agents.** Explicit task bindings, presence observations,
 overlap visibility, and scoped leases support coordination today. Required lease
 fencing can protect selected record writes; presence alone does not lock files or

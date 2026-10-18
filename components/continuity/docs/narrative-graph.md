@@ -80,6 +80,8 @@ Record a concise work narrative after the project's chosen meaningful boundaries
 including explicit verification and limits. Record ledger decisions only for
 explicit human choices. Checkpoints keep the small resume state and references;
 they do not replace detailed narratives or become research transcripts.
+For external findings, see [research memory](research-memory.md) for the current
+capture convention, source-link limitations and proposed qualification checks.
 
 The [console](console.md) browses work items, topics/history and exact references
 through the same bounded reads. Browsing history does not select a task.
