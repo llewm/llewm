@@ -772,3 +772,34 @@ func TestEverySaveNamesItsTaskAndCurrentTip(t *testing.T) {
 		t.Fatalf("stale continuation was accepted: %v", err)
 	}
 }
+
+func TestRetiredTaskActionsRemainHistoricalWithoutStartupReminders(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	old, err := s.Create(ctx, Checkpoint{ProjectID: "p", TaskID: "old", Task: "Old rollout", NextAction: "Restart"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := s.Create(ctx, Checkpoint{ProjectID: "p", TaskID: "review", Task: "Review rollout", Status: "completed", NextAction: "Complete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cp := range []Checkpoint{old, review} {
+		if _, err := s.TransitionTask(ctx, TaskTransition{ProjectID: "p", Operation: "start", TaskID: cp.TaskID, CheckpointID: cp.ID, RequestKey: "start-" + cp.TaskID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count, err := s.OtherTaskActionCount(ctx, "p", "review"); err != nil || count != 1 {
+		t.Fatalf("before retirement: %d %v", count, err)
+	}
+	if _, err := s.TransitionTask(ctx, TaskTransition{ProjectID: "p", Operation: "supersede", TaskID: "old", TargetTaskID: "review", CheckpointID: old.ID, RequestKey: "retire-old"}); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := s.OtherTaskActionCount(ctx, "p", "review"); err != nil || count != 0 {
+		t.Fatalf("retired action still advertised: %d %v", count, err)
+	}
+	actions, err := s.ListActions(ctx, "p", "old", false)
+	if err != nil || len(actions) != 1 || actions[0].Status != "open" {
+		t.Fatalf("historical action overwritten: %+v %v", actions, err)
+	}
+}

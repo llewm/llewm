@@ -907,7 +907,8 @@ func (s Service) Unresolved(ctx context.Context, projectID, taskID, excludeCheck
 }
 
 // OtherTaskActionCount counts unresolved actions owned by tasks other than
-// taskID ("" is the untasked group).
+// taskID ("" is the untasked group). Retired task lineages are not active
+// reminders; their original action history remains available through ListActions.
 func (s Service) OtherTaskActionCount(ctx context.Context, projectID, taskID string) (int, error) {
 	actions, err := unresolvedActions(ctx, s.DB, projectID, actionScope{All: true})
 	if err != nil {
@@ -916,6 +917,13 @@ func (s Service) OtherTaskActionCount(ctx context.Context, projectID, taskID str
 	count := 0
 	for _, action := range actions {
 		if action.TaskID != strings.TrimSpace(taskID) {
+			closed, err := TaskClosed(ctx, s.DB, projectID, action.TaskID)
+			if err != nil {
+				return 0, err
+			}
+			if closed {
+				continue
+			}
 			count++
 		}
 	}

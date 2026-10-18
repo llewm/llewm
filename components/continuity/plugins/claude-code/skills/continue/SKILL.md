@@ -51,6 +51,28 @@ the worktree and its local branch only when the task is integrated, the worktree
 is clean, the branch has no unique commits, and no live writer uses it. Otherwise
 report exactly why it remains. Never leave a completed worktree in `/tmp`.
 
+If the packet reports deferred checkpoint detail, retrieve that exact checkpoint
+with `continuity_checkpoint_get` before acting. If bootstrap itself exceeds its
+budget, use the exact checkpoint export or `continuity_brief task:ID`; do not
+increase the budget or discard guidance merely to recover task state.
+
+Treat a restart-only handoff as verification work to finish now. Read the actual
+connected `continuity_info`, recover the exact saved checkpoint, and check each
+remaining acceptance condition. A newer installed commit may satisfy an older
+rollout only after verifying ancestry and relevant behavior; version numbers alone
+are insufficient. When those checks pass, reconcile the selected task's actions,
+update any bound qualification plan, and save/read back a completed checkpoint in
+this turn. Do not end with another restart reminder after the restart is verified.
+If evidence from a later task resolves a remaining check, cite it rather than
+repeating installation. Leave unobserved clients/platforms explicit. Do not infer
+completion merely from SessionStart or `restart_required=false`.
+
+When the user requests reconciliation of several old tasks, inspect their exact
+tips and later evidence. Keep this review under its own task ID; use explicit task
+lifecycle supersession for retired handoffs, preserving history and pointing to
+the review. Never silently complete another active writer's task. Keep substantive
+unfinished scope open even if its installation is finished.
+
 If no checkpoint exists, ask which work to resume. If the task is completed with
 nothing left to do, report that. For blocked or paused work, establish whether the
 recorded obstacle still applies before proceeding.

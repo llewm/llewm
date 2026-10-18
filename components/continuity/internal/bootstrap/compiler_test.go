@@ -44,7 +44,7 @@ func TestBuildIncludesLatestCheckpoint(t *testing.T) {
 			t.Fatalf("bootstrap missing %q:\n%s", want, got)
 		}
 	}
-	for _, budget := range []int{1, 600, 2000, 10_000, 0} {
+	for _, budget := range []int{1, 600, 3000, 10_000, 0} {
 		packet, err := (Compiler{Checkpoints: checkpoints, MaxBytes: budget}).Build(context.Background(), "p", root, "test")
 		if budget == 1 || budget == 600 {
 			if err == nil {
@@ -484,5 +484,94 @@ func TestFitTrimsCoordinationNoticesBeforeFailing(t *testing.T) {
 	}
 	if packet.OverlapNotice != "" || packet.ChangeNotice != "Since this task's last checkpoint, 9 commit(s) by others changed files it touched. Review the log since that checkpoint before continuing." {
 		t.Fatalf("notices not compacted: overlap=%q change=%q", packet.OverlapNotice, packet.ChangeNotice)
+	}
+}
+
+func TestSavedCheckpointSurvivesGuidanceGrowth(t *testing.T) {
+	ctx := context.Background()
+	root, global := t.TempDir(), t.TempDir()
+	db, err := database.Initialize(ctx, filepath.Join(root, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO projects(id, root, name, created_at) VALUES ('p', ?, 'test', '2026-01-01T00:00:00Z')`, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(global, "AGENTS.md"), []byte("# Global\nKeep attribution."), 0600); err != nil {
+		t.Fatal(err)
+	}
+	guidance := filepath.Join(root, "AGENTS.md")
+	if err := os.WriteFile(guidance, []byte("# Rules\nPreserve data."), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := checkpoint.Service{DB: db}
+	saved, err := service.Create(ctx, checkpoint.Checkpoint{ProjectID: "p", TaskID: "restart", Task: "Verify restart", Summary: "Implementation installed", NextAction: "Verify runtime and checkpoint, then complete", Completed: []string{strings.Repeat("completed evidence ", 200)}, Verified: []string{"Earlier tests passed"}, Attempts: []checkpoint.Attempt{{Description: "Old client", Outcome: "Restart required"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler := Compiler{Checkpoints: service, GlobalRoot: global, MaxBytes: 20000}
+	full, err := compiler.Build(ctx, "p", root, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.MarshalIndent(full, "", "  ")
+	compiler.MaxBytes = max(len(body)+1, len(Markdown(full))) + 100
+	if err := os.WriteFile(guidance, []byte("# Rules\nPreserve data.\n"+strings.Repeat("Additional instruction. ", 40)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	compact, err := compiler.Build(ctx, "p", root, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = json.MarshalIndent(compact, "", "  ")
+	if len(body)+1 > compiler.MaxBytes || len(Markdown(compact)) > compiler.MaxBytes {
+		t.Fatal("recovery exceeded budget")
+	}
+	if !compact.Truncated || len(compact.CheckpointDetailsOmitted) != 1 || compact.CheckpointDetailsOmitted[0] != "completed" {
+		t.Fatalf("missing omission receipt: %+v", compact.CheckpointDetailsOmitted)
+	}
+	if compact.Checkpoint.ID != saved.ID || compact.Checkpoint.NextAction != saved.NextAction || len(compact.Checkpoint.Attempts) != 1 || len(compact.Global) != 1 || len(compact.Rules) != 1 {
+		t.Fatal("recovery lost required context")
+	}
+	if !strings.Contains(Markdown(compact), "llewm checkpoint show "+saved.ID) {
+		t.Fatal("missing exact retrieval")
+	}
+	original, err := service.LatestSelected(ctx, "p", checkpoint.Selection{CheckpointID: saved.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(original.Completed) != 1 || len(full.Checkpoint.Completed) != 1 {
+		t.Fatal("read modified saved or caller-held checkpoint")
+	}
+	candidate := *original
+	candidate.ID = ""
+	candidate.TaskID = "new-task"
+	candidate.PredecessorCheckpointID = ""
+	readiness, err := compiler.Preflight(ctx, "p", root, "test", candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readiness.Ready {
+		t.Fatal("optional read recovery weakened full save validation")
+	}
+}
+
+func TestBudgetRecoveryPreservesAttemptsAndActions(t *testing.T) {
+	cp := checkpoint.Checkpoint{ID: "exact-id", TaskID: "work", Task: "Task", Status: "in_progress", Summary: "Summary", NextAction: "Next", Completed: []string{strings.Repeat("detail", 500)}, Changes: []string{strings.Repeat("file", 500)}, Verified: []string{strings.Repeat("verified", 500)}, EvidenceRefs: []string{strings.Repeat("ref", 2000)}, Attempts: []checkpoint.Attempt{{Description: "Failed approach", Outcome: "Do not repeat"}}}
+	packet := Packet{Project: "test", Checkpoint: &cp, Global: []instructions.Section{{Content: "Global rule"}}, Rules: []instructions.Section{{Content: "Project override"}}, UnresolvedActions: []checkpoint.Action{{ID: "action", TaskID: "work", Description: "Must still verify", Status: "open"}}}
+	got, err := (Compiler{MaxBytes: 3000}).fit(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.CheckpointDetailsOmitted) != 4 || len(got.Checkpoint.Attempts) != 1 || len(got.UnresolvedActions) != 1 || len(got.Global) != 1 || len(got.Rules) != 1 {
+		t.Fatalf("lost protected context: %+v", got)
+	}
+	if len(cp.Completed) != 1 || len(cp.Verified) != 1 {
+		t.Fatal("mutated input")
+	}
+	packet.Checkpoint = &checkpoint.Checkpoint{ID: "large-kernel", Task: strings.Repeat("required", 1000), NextAction: "Next"}
+	if _, err := (Compiler{MaxBytes: 3000}).fit(packet); err == nil || !strings.Contains(err.Error(), "JSON bytes") || !strings.Contains(err.Error(), "continuity_checkpoint_get") {
+		t.Fatalf("missing actionable protected-kernel error: %v", err)
 	}
 }

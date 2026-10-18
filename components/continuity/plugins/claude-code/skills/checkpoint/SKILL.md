@@ -79,6 +79,15 @@ roadmap node, confirm with the `track` skill that its track plan is persisted,
 reviewed, and current, and report any `track_plan` findings from
 `llewm work check`.
 
+For a restart handoff, keep the remaining acceptance checks concrete: expected
+commit (or verified descendant), runtime/installed identity, exact checkpoint
+recovery, and the client actually requiring restart. Put completed implementation
+and prior installation evidence in structured fields. The next action must end
+with reconciling actions, updating any bound qualification plan and saving a
+completed checkpoint once the checks pass. Do not copy a stale restart condition
+into a new handoff after it has been verified. Keep unrelated deferred work in its
+own existing work item rather than treating it as a new rollout blocker.
+
 Before ending a slice that normally includes installation, account for the
 installation explicitly: installed and verified, awaiting a named client restart,
 or blocked by a specific prerequisite. Check grant coverage and current procedure

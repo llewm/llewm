@@ -69,8 +69,11 @@ type Packet struct {
 	Briefs []string `json:"briefs,omitempty"`
 	// Choice says which rule chose the task and names other active tasks
 	// (machine-observed at bootstrap time).
-	Choice    *Choice `json:"choice,omitempty"`
-	Truncated bool    `json:"truncated"`
+	Choice *Choice `json:"choice,omitempty"`
+	// Detail fields may be deferred to exact checkpoint retrieval when later
+	// guidance growth makes a previously valid checkpoint too large to deliver.
+	CheckpointDetailsOmitted []string `json:"checkpoint_details_omitted,omitempty"`
+	Truncated                bool     `json:"truncated"`
 }
 
 type RecoveryFallback struct {
@@ -487,10 +490,33 @@ func (c Compiler) fit(packet Packet) (Packet, error) {
 			packet.Truncated = true
 			continue
 		}
+		if packet.Checkpoint != nil {
+			// Copy before trimming: rendering must never alter the saved handoff
+			// or a packet another caller still holds. Keep the task kernel,
+			// failed attempts and unresolved actions intact.
+			cp := *packet.Checkpoint
+			omitted := ""
+			switch {
+			case len(cp.Completed) > 0:
+				cp.Completed, omitted = nil, "completed"
+			case len(cp.Changes) > 0:
+				cp.Changes, omitted = nil, "changes"
+			case len(cp.Verified) > 0:
+				cp.Verified, omitted = nil, "verified"
+			case len(cp.EvidenceRefs) > 0:
+				cp.EvidenceRefs, omitted = nil, "evidence_refs"
+			}
+			if omitted != "" {
+				packet.Checkpoint = &cp
+				packet.CheckpointDetailsOmitted = append(packet.CheckpointDetailsOmitted, omitted)
+				packet.Truncated = true
+				continue
+			}
+		}
 		if len(packet.Global) > 0 {
 			// Dropping project sections could erase a project-specific override
 			// and inadvertently change the meaning of retained global defaults.
-			return Packet{}, fmt.Errorf("combined global guidance, project instructions and checkpoint exceed %d-byte budget; shorten sources or increase bootstrap.max_bytes", c.MaxBytes)
+			return Packet{}, fmt.Errorf("bootstrap requires %d JSON bytes and %d Markdown bytes after optional detail removal (budget %d); guidance, task kernel, attempts and unresolved actions are retained; retrieve the checkpoint with continuity_checkpoint_get or llewm checkpoint show, then shorten the relevant sources", len(body)+1, len(Markdown(packet)), c.MaxBytes)
 		}
 		if len(packet.Rules) == 0 {
 			return Packet{}, fmt.Errorf("bootstrap global guidance, checkpoint and metadata exceed %d-byte budget; shorten global sources or checkpoint, or increase bootstrap.max_bytes", c.MaxBytes)
@@ -588,6 +614,9 @@ func Markdown(packet Packet) string {
 			fmt.Fprintf(&out, "- Task ID: %s\n", packet.Checkpoint.TaskID)
 		}
 		fmt.Fprintf(&out, "- Status: %s\n- Summary: %s\n- Next action: %s\n\n", packet.Checkpoint.Status, packet.Checkpoint.Summary, packet.Checkpoint.NextAction)
+		if len(packet.CheckpointDetailsOmitted) > 0 {
+			fmt.Fprintf(&out, "**Checkpoint detail deferred by size budget:** %s. Before acting, retrieve checkpoint `%s` with continuity_checkpoint_get or `llewm checkpoint show %s`. Saved history is unchanged.\n\n", strings.Join(packet.CheckpointDetailsOmitted, ", "), packet.Checkpoint.ID, packet.Checkpoint.ID)
+		}
 		if len(packet.Briefs) > 0 {
 			out.WriteString("**Named slices (plan records):**\n")
 			for _, line := range packet.Briefs {
@@ -689,7 +718,7 @@ func Markdown(packet Packet) string {
 		}
 	}
 	if packet.Truncated {
-		out.WriteString("_Additional instructions are available on demand._\n")
+		out.WriteString("_Additional context is available on demand._\n")
 	}
 	return out.String()
 }

@@ -170,6 +170,26 @@ this validation for the exact payload it receives, so direct callers cannot bypa
 the startup budget or rely on a preflight performed for different content.
 Readiness describes the current snapshot: later changes to guidance, notices,
 other tasks, or the reading session's selection can change the packet size.
+On read, if those changes exceed the budget, the compiler first drops advisory
+expansions, then defers whole completed/changes/verified/evidence-reference fields
+in that order. `checkpoint_details_omitted` and a Markdown notice name the deferred
+fields and exact checkpoint retrieval. The saved checkpoint is unchanged. Task
+identity, status, summary, next action, prior attempts and unresolved actions stay
+in the packet; global/project guidance retains its existing protection. If this
+minimum still cannot fit, the error reports both serialized sizes and directs the
+caller to exact checkpoint retrieval. New saves still require the complete
+prospective packet to fit; this recovery path does not weaken write validation.
+
+Restart checks remain attributable task acceptance checks. SessionStart does not
+prove completion. The built-in `resume-completion` rule and matching continue,
+checkpoint and update skills require the resumed agent to verify actual runtime
+and checkpoint recovery, reconcile satisfied actions and qualification plans, and
+save completion in the same turn. Later rollout evidence may satisfy earlier
+checks after ancestry and behavior review. Explicit user-requested cross-task
+cleanup uses a separate review task and lifecycle supersession, preserving old
+handoffs rather than writing another agent's checkpoint. Substantive deferred
+platform/client work remains open.
+
 
 `attempts` is an array of objects with `description`, `outcome`, and optional
 `reason`. `evidence_refs` is a list of source references such as recorded event IDs,
@@ -196,6 +216,11 @@ a next action was created, the lease stamp when present, and unnarrated commits.
 Both routes accept a request key for idempotent checkpoint retries. Explicit task
 lifecycle operations are exposed as `checkpoint task-transition`; the deterministic
 report is `checkpoint task-lineage`.
+Startup counts omit actions from explicitly retired task lineages; exact task/all-action
+reads retain their unchanged historical state. Supersession is not fabricated
+action completion. Lifecycle records currently remain device-local and are not
+transported by curated memory sync.
+
 Both routes enforce persistence bounds, completed-task reconciliation, and the
 compiled bootstrap budget on every save; preflight remains useful for section-level
 diagnostics before retrying an oversized candidate.

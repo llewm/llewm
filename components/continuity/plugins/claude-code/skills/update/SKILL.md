@@ -59,3 +59,10 @@ pending. Refresh the attributed current-host installation resource with exact
 source/release identity, retained backup/migration receipts and remaining limits;
 remove scratch artifacts. Do not repeat completed naming/layout/format migrations.
 History sync remains separately scoped to its approved destination/profile.
+
+After a restart has been observed, finish the saved qualification in the same
+turn: verify runtime identity and exact checkpoint recovery, reconcile the
+selected task's pending actions and bound plan, then save/read back completion.
+Do not reinstall to satisfy a stale version-specific reminder; first check whether
+a verified descendant and later rollout evidence satisfy it. A restart event
+alone never proves client activation or semantic completion.

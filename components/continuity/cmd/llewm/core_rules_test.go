@@ -71,7 +71,7 @@ func TestCheckoutLifecycleReachesNewAndResumedTasksWithoutProjectEdits(t *testin
 		}
 		for _, args := range [][]string{{"bootstrap"}, {"hook", "codex", "SessionStart"}, {"hook", "claude-code", "SessionStart"}} {
 			payload := `{"session_id":"` + phase + "-" + args[0] + "-" + args[len(args)-1] + `"}`
-			if got := runCLI(t, payload, args...); !strings.Contains(got, "- checkout-lifecycle:") {
+			if got := runCLI(t, payload, args...); !strings.Contains(got, "- checkout-lifecycle:") || !strings.Contains(got, "- resume-completion:") {
 				t.Fatalf("%s %v: missing checkout rule: %s", phase, args, got)
 			}
 		}
