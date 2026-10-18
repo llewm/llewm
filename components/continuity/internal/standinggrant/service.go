@@ -32,7 +32,7 @@ const (
 	// TriggerAfterSliceCommit is the only trigger so far: after a commit that
 	// completes a slice and passes its checks.
 	TriggerAfterSliceCommit = "after_slice_commit"
-	Disclaimer              = "A standing grant is a person's permission recorded on this machine; Continuity executes nothing. Run only the covered procedure revisions, only on the trigger, and stop if the grant is not active. An active grant does not guarantee harness permission; a harness denial does not revoke the grant."
+	Disclaimer              = "An active standing grant records explicit user authorization for recurring actions within its covered revisions, bound parameters and conditions. Do not ask again when the action, target, data scope and trigger match. Continuity executes nothing. An inactive grant authorizes no execution; no grant overrides a runtime denial or guarantees harness acceptance."
 )
 
 // Grant states.
@@ -430,7 +430,7 @@ func Notice(ctx context.Context, db *sql.DB, projectID string, now time.Time) (s
 				}
 				entry += " (covers " + strings.Join(names, ", ") + ")"
 			}
-			active = append(active, entry+", by "+grant.Creator)
+			active = append(active, entry+", by "+grant.Creator+" [grant "+grant.ID+"]")
 		case Void:
 			void++
 		}
@@ -441,7 +441,7 @@ func Notice(ctx context.Context, db *sql.DB, projectID string, now time.Time) (s
 	}
 	parts := []string{}
 	if len(active) > 0 {
-		parts = append(parts, strings.Join(active, "; ")+". Run these without asking when the trigger occurs. First read standing-grant show GRANT_ID --commands and preserve bound parameters and steps. Include grant ID, procedure revision, trigger, exact target and effect in any escalation. Harness permission is separate: record a denial without invalidating the grant; never route around it.")
+		parts = append(parts, strings.Join(active, "; ")+". Active grants record explicit user authorization for recurring actions. Do not ask again when action, target, data scope and trigger match. First read llewm standing-grant show GRANT_ID --commands; preserve covered revisions, bound parameters and conditions. Cite grant ID, user attribution, trigger evidence, exact target, data scope/destination and effect in any escalation. Missing scope is not authorization. Grants do not override runtime denials: record the stated reason, continue unaffected work and never route around a refusal.")
 	}
 	if void > 0 {
 		parts = append(parts, fmt.Sprintf("%d void because a covered procedure changed. Proactively report any affected planned work; inspect llewm standing-grant list --all and the current procedures, prepare exact repairs for review, then request renewal only if no active grant covers that work. Continue unaffected work; never silently skip an expected installation or renew a grant yourself.", void))

@@ -73,7 +73,7 @@ func writeGrant(out io.Writer, grant standinggrant.Grant) {
 	if grant.VoidReason != "" {
 		fmt.Fprintf(out, " (%s)", grant.VoidReason)
 	}
-	fmt.Fprintf(out, "\nExpiry: %s\nCreator: %s (%s)\n", grantWhen(grant.ExpiresAt), grant.Creator, grant.Authority)
+	fmt.Fprintf(out, "\nExpiry: %s\nCreator: %s (%s)\nRecorded at: %s\n", grantWhen(grant.ExpiresAt), grant.Creator, grant.Authority, grant.RecordedAt.UTC().Format(time.RFC3339))
 	if grant.Reason != "" {
 		fmt.Fprintf(out, "Reason: %s\n", grant.Reason)
 	}
@@ -125,7 +125,7 @@ func standingGrantCommand() *cobra.Command {
 		Short: "Let agents run a procedure on a trigger without asking, until you revoke it",
 		Long: "A standing grant is your permission, recorded on this machine, for agents to run a procedure revision when a trigger occurs (after_slice_commit: after a commit that completes a slice with passing checks). It covers the procedure and every procedure its steps name as procedure:ID, at their current revisions; a new revision of any of them voids it. Only a person at a terminal can create one. Continuity executes nothing; the session bootstrap lists active grants.\n\n" +
 			"Agents must verify the accepted revision with `llewm procedure show PROCEDURE` before recommending a grant. They can inspect creation flags without invoking the denied create command by running `continuity help standing-grant create`.\n\n" +
-			"Before execution, read `llewm standing-grant show GRANT_ID --commands` and preserve bound parameters and individual steps. In an escalation, cite the active grant ID, covered procedure revision, satisfied trigger, exact target, payload identity and intended effect. Harness permission is separate from the grant: a denial does not revoke it. Record the denial in a work narrative, do not route around it, and request only the specific confirmation required by the harness. See docs/resources-and-runbooks.md#harness-denials.",
+			"Before execution, read `llewm standing-grant show GRANT_ID --commands` and preserve bound parameters and individual steps. An active grant records explicit user authorization for recurring actions; do not ask again when action, target, data scope and trigger match. In an escalation, cite the active grant ID, user attribution, covered procedure revision, satisfied trigger, exact target, data scope and destination, payload identity and intended effect. Missing scope is not authorization; a bound host alone does not authorize private-data transfer. Harness permission is separate from the grant: a denial does not revoke it. Record the denial in a work narrative, do not route around it, and request only the specific confirmation required by the harness. See docs/resources-and-runbooks.md#harness-denials.",
 	}
 	var output, trigger, expires, creator, reason string
 	var params []string
@@ -283,6 +283,18 @@ func standingGrantCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), preview.Disclaimer)
 					for _, procedure := range preview.Procedures {
 						fmt.Fprintf(cmd.OutOrStdout(), "\nprocedure:%s@%d (working directory: %s)\n", procedure.ID, procedure.Revision, procedure.WorkingDirectory)
+						if len(procedure.ParameterValues) > 0 {
+							fmt.Fprintln(cmd.OutOrStdout(), "Effective parameters (defaults, then grant overrides):")
+							for _, name := range sortedKeys(procedure.ParameterValues) {
+								fmt.Fprintf(cmd.OutOrStdout(), "- %s=%s\n", name, procedure.ParameterValues[name])
+							}
+						}
+						for _, effect := range procedure.DeclaredEffects {
+							fmt.Fprintf(cmd.OutOrStdout(), "Declared effect: %s\n", effect)
+						}
+						for _, validation := range procedure.Validations {
+							fmt.Fprintf(cmd.OutOrStdout(), "Condition: %s\n", validation)
+						}
 						for _, step := range procedure.Steps {
 							fmt.Fprintf(cmd.OutOrStdout(), "%s [%s]: %s\n", step.ID, step.State, step.Description)
 							if len(step.Missing) > 0 {

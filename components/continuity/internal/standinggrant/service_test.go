@@ -69,6 +69,9 @@ func TestCreateCoversNamedProceduresAndVoidsOnRevision(t *testing.T) {
 	if err != nil || !strings.Contains(notice, "procedure:both@1 after slice commit (covers local@1, remote@1), by engineer") {
 		t.Fatalf("notice %q %v", notice, err)
 	}
+	if !strings.Contains(notice, "[grant "+grant.ID+"]") || !strings.Contains(notice, "Do not ask again when action, target, data scope and trigger match") || !strings.Contains(notice, "Missing scope is not authorization") {
+		t.Fatalf("recurring authorization evidence missing: %s", notice)
+	}
 	if got, err := service.ForProcedure(ctx, projectID, "remote"); err != nil || len(got) != 1 {
 		t.Fatalf("for procedure: %+v %v", got, err)
 	}

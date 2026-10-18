@@ -18,10 +18,13 @@ type GrantPreview struct {
 }
 
 type ProcedurePreview struct {
-	ID               string        `json:"id"`
-	Revision         int           `json:"revision"`
-	WorkingDirectory string        `json:"working_directory"`
-	Steps            []StepPreview `json:"steps"`
+	ID               string            `json:"id"`
+	Revision         int               `json:"revision"`
+	WorkingDirectory string            `json:"working_directory"`
+	Steps            []StepPreview     `json:"steps"`
+	DeclaredEffects  []string          `json:"declared_effects"`
+	Validations      []string          `json:"validations"`
+	ParameterValues  map[string]string `json:"parameter_values"`
 }
 
 type StepPreview struct {
@@ -55,7 +58,7 @@ func Preview(ctx context.Context, db *sql.DB, projectID, id string, rules []stri
 	if err != nil {
 		return GrantPreview{}, err
 	}
-	result := GrantPreview{Grant: grant, Procedures: []ProcedurePreview{}, Disclaimer: "Read-only command preview; nothing was executed or checked. Procedures are grouped, not flattened into an execution schedule. Follow step conditions and project-relative working directories. Preserve bound paths and each argv exactly. Rule checks cover only the supplied files, not effective runtime authorization. Inactive grants emit no commands."}
+	result := GrantPreview{Grant: grant, Procedures: []ProcedurePreview{}, Disclaimer: "Read-only authorization evidence and command preview; nothing was executed or checked. Grant attribution, state, expiry and covered revisions come from the recorded user grant. Declared effects and validations come from those exact procedure revisions; parameter values apply defaults then grant overrides. A parameter value alone does not authorize a data transfer. Missing data scope or destination remains unknown; do not infer broader consent. An active matching grant needs no repeat user confirmation, but cannot override a runtime denial. Procedures are grouped, not flattened into an execution schedule. Follow step conditions and project-relative working directories. Preserve bound paths and each argv exactly. Rule checks cover only the supplied files, not effective runtime authorization. Inactive grants emit no commands."}
 	store := procedures.Service{DB: db}
 	for _, covered := range grant.Covers {
 		procedure, err := store.Get(ctx, projectID, covered.ProcedureID, covered.Revision)
@@ -67,6 +70,9 @@ func Preview(ctx context.Context, db *sql.DB, projectID, id string, rules []stri
 		}
 		p := ProcedurePreview{ID: procedure.ID, Revision: procedure.Revision, WorkingDirectory: procedure.WorkingDirectory, Steps: []StepPreview{}}
 		values := parameterValues(*procedure, grant)
+		p.DeclaredEffects = procedure.DeclaredEffects
+		p.Validations = procedure.Validations
+		p.ParameterValues = values
 		for _, step := range procedure.Steps {
 			s := StepPreview{ID: step.ID, Description: step.Description, State: "description_only"}
 			if len(step.ArgvTemplate) > 0 {

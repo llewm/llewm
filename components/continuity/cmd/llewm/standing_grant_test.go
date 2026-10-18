@@ -42,6 +42,8 @@ func TestGrantCommandPreviewPreservesBindingsAndNeverEmitsPartialCommands(t *tes
 		{"name": "to", "description": "new schema"},
 	}
 	procedure["working_directory"] = "components/continuity"
+	procedure["declared_effects"] = []string{"Send reviewed private Continuity records to test-host; no source files"}
+	procedure["validations"] = []string{"Confirm the configured memory repository and approved destination before sync"}
 	recordProcedureFile(t, procedure)
 	previous := interactiveInput
 	interactiveInput = func(*cobra.Command) bool { return true }
@@ -66,6 +68,14 @@ func TestGrantCommandPreviewPreservesBindingsAndNeverEmitsPartialCommands(t *tes
 	if p.WorkingDirectory != "components/continuity" || len(p.Steps) != 4 {
 		t.Fatalf("preview: %+v", p)
 	}
+	if !reflect.DeepEqual(p.DeclaredEffects, []string{"Send reviewed private Continuity records to test-host; no source files"}) ||
+		!reflect.DeepEqual(p.Validations, []string{"Confirm the configured memory repository and approved destination before sync"}) ||
+		!reflect.DeepEqual(p.ParameterValues, map[string]string{"bin": bound, "host": "test-host"}) {
+		t.Fatalf("authorization scope/defaults/overrides lost: %+v", p)
+	}
+	if preview.Grant.ID != id || preview.Grant.RecordedAt.IsZero() || preview.Grant.Authority != "user_reported" {
+		t.Fatalf("grant attribution lost: %+v", preview.Grant)
+	}
 	copy := p.Steps[0]
 	if !reflect.DeepEqual(copy.Argv, []string{"scp", bound, "test-host:binary"}) || copy.State != "bound" {
 		t.Fatalf("bindings changed: %+v", copy)
@@ -85,7 +95,7 @@ func TestGrantCommandPreviewPreservesBindingsAndNeverEmitsPartialCommands(t *tes
 		t.Fatalf("preview executed command: %v", err)
 	}
 	text := runCLI(t, "", "standing-grant", "show", id, "--commands", "--codex-rules", "/rules")
-	if !strings.Contains(text, "Only when migration is pending") || !strings.Contains(text, "Rule check (not run):") {
+	if !strings.Contains(text, "Only when migration is pending") || !strings.Contains(text, "Rule check (not run):") || !strings.Contains(text, "Recorded at:") || !strings.Contains(text, "Declared effect: Send reviewed private Continuity records to test-host; no source files") || !strings.Contains(text, "Condition: Confirm the configured memory repository") || !strings.Contains(text, "- host=test-host") {
 		t.Fatal(text)
 	}
 	runCLI(t, "", "standing-grant", "revoke", id)
@@ -147,7 +157,7 @@ func TestStandingGrantsThroughTheCLI(t *testing.T) {
 	}
 	runCLI(t, "", "checkpoint", "create", "--task", "Build", "--task-id", "build", "--next", "Continue")
 	hook := runCLI(t, `{"session_id":"s","hook_event_name":"SessionStart","source":"startup"}`, "hook", "claude-code")
-	if !strings.Contains(hook, "**Standing grants (user-granted):** procedure:both-install@1 after slice commit until ") || !strings.Contains(hook, "(covers local-install@1), by engineer. Run these without asking") {
+	if !strings.Contains(hook, "**Standing grants (user-granted):** procedure:both-install@1 after slice commit until ") || !strings.Contains(hook, "(covers local-install@1), by engineer [grant "+id+"]") || !strings.Contains(hook, "explicit user authorization for recurring actions") || !strings.Contains(hook, "data scope/destination") || !strings.Contains(hook, "do not override runtime denials") {
 		t.Fatalf("bootstrap without a grant notice:\n%s", hook)
 	}
 

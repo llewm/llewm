@@ -57,7 +57,10 @@ scope, rather than a field that would force a new revision of the target.
 ### Standing grants
 
 A standing grant is a person's permission for agents to run a runbook when a
-trigger occurs, without asking each time. The only trigger so far is
+trigger occurs, without asking each time. Active grants record explicit recurring
+user authorization. Agents should proceed without repeat confirmation when the
+action, target, data scope, trigger and all conditions match. Missing scope is not
+permission to expand the operation. The only trigger so far is
 `after_slice_commit`: after a commit that completes a slice with passing checks.
 A grant names a procedure revision and covers it plus every procedure its steps
 name as `procedure:ID`, each at the revision current when the grant was made. A
@@ -71,7 +74,7 @@ PROCEDURE[@REVISION]` refuses input that is not a terminal and asks for `yes`
 after showing what the grant covers and the declared effects. `revoke`, `list`
 (`--all` includes expired, revoked, and void grants), and `show` need no
 terminal; they are CLI only (MCP API 98 removed the read tool). The session
-bootstrap has a "Standing grants (user-granted)" line listing active grants and
+bootstrap has a "Standing grants (user-granted)" line listing active grant IDs and
 counting void ones, and a slice brief notes the grants that cover its procedures.
 `llewm client permissions` turns active grants into client permission rules
 (see [client permissions](installation.md#client-permissions)). These rules do
@@ -114,8 +117,12 @@ llewm standing-grant show GRANT_ID --commands --codex-rules /absolute/path/to/ll
 ```
 
 The preview loads the covered revisions, applies their parameter defaults and
-then the grant's overrides, and preserves each command's argv. It shows each
-procedure's project-relative working directory and ordered step descriptions,
+then the grant's overrides, and preserves each command's argv. Text and JSON retain
+the grant ID, creator, recorded time, authority, current state, expiry and exact
+covered revisions. Each procedure group also exposes its declared effects,
+validation conditions and effective parameter values. These are existing records,
+not a new authorization token or independent proof of runtime permission. It
+shows each procedure's project-relative working directory and ordered step descriptions,
 including conditions and references to other procedures. The groups are an
 inventory, not a flattened execution schedule. Follow the parent procedure's
 ordering and conditions; do not run every group in sequence. Missing parameters
@@ -127,6 +134,17 @@ read-only checks against the supplied files. JSON exposes both `argv` and
 `codex_check_argv`; text provides shell-quoted equivalents. Preserve bound output
 paths and separate SSH arguments instead of combining or rewriting steps. A
 matching rule is evidence about those files, not effective runtime authorization.
+
+For operations that transfer private data, reviewed declared effects must identify
+what data may leave, its source, destination and recipient or service, and the
+purpose of the transfer. Bound parameters should pin the applicable host,
+repository or path. A grant to copy an executable does not by itself authorize
+syncing private records to that host. Do not infer data categories from a command
+name or treat a host parameter as blanket transfer permission. If the scope is
+missing, prepare the exact clarification for review. A procedure revision voids
+its grants even when it only makes scope clearer; never silently revise live
+procedures or renew a grant. Preserve separately recorded explicit user approval
+with its exact decision reference and scope; it does not rewrite the grant.
 
 #### Harness denials
 
@@ -145,12 +163,19 @@ does not guarantee runtime acceptance.
 When a harness requires escalation, put the relevant evidence directly in its
 request rather than assuming the reviewer can recover it from earlier tools:
 
-> Active user grant GRANT_ID covers procedure:NAME@REVISION on TRIGGER, now
-> satisfied by COMMIT/RESULT. This step uses the bound parameters and targets
-> HOST/PATH. Payload: COMMIT/HASH (when relevant). Effect: SPECIFIC CHANGE.
+> Explicit recurring user authorization: active grant GRANT_ID, created by
+> USER at RECORDED_TIME (recorded authority: AUTHORITY), covers
+> procedure:NAME@REVISION on TRIGGER, now satisfied by COMMIT/RESULT.
+> This step matches the covered effects, conditions and bound parameters.
+> Target: HOST/PATH. Data scope: CATEGORIES/SOURCE; destination/recipient:
+> SERVICE/HOST/REPOSITORY. Payload identity: COMMIT/HASH when applicable.
+> Effect: SPECIFIC CHANGE. Additional scoped user approval: DECISION_REF,
+> when applicable. The grant does not override runtime policy.
 
 Replace those placeholders with verified, redacted facts. This is evidence of
-user intent, not a claim that the grant overrides the sandbox. Missing facts
+user intent, not a claim that the grant overrides the sandbox. Use only the
+data-scope lines relevant to the operation; never include private record contents or credentials as evidence. Do not ask for confirmation again
+merely because authorization is recurring. Missing facts
 remain unknown; do not invent a harness version, authority or approval result.
 
 If the reviewer refuses, stop that invocation and report “user grant active;
@@ -161,6 +186,13 @@ rules; if it requires fresh user confirmation, ask only for the exact refused
 operation and explain that the harness requires it. Do not ask the person to
 recreate an otherwise valid grant. A refusal that permits further read-only
 evidence gathering is not an automatic requirement to ask again.
+
+Provider recognition of these records is not established by clearer wording.
+Use the denial receipts below to compare repeated prompts and observed approvals
+for the same scope and known client/reviewer versions. Do not claim a causal
+reduction or provider integration from one successful invocation. Reliable
+recognition requires a provider-supported way to validate scope, expiry and
+revocation; this change adds no such integration.
 
 Preserve a small **harness-denial receipt** as claims in the existing work
 narrative ledger; this is a documentation convention, not a new schema, command,
