@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/llewm/llewm/components/continuity/internal/adoption"
 	"github.com/llewm/llewm/components/continuity/internal/config"
+	"github.com/llewm/llewm/components/continuity/internal/gitprotection"
 	"strings"
 	"time"
 
@@ -68,16 +69,17 @@ type Runtime struct {
 }
 
 type Report struct {
-	ProjectState          adoption.Status `json:"project_state"`
-	SchemaVersion         int             `json:"schema_version"`
-	Stage                 string          `json:"stage"`
-	Source                Source          `json:"source"`
-	Installed             Installed       `json:"installed"`
-	Database              Database        `json:"database"`
-	Runtime               Runtime         `json:"runtime"`
-	Probes                []Verification  `json:"probes"`
-	UnmetGates            []string        `json:"unmet_gates"`
-	RecommendedNextAction string          `json:"recommended_next_action"`
+	GitProtection         gitprotection.Report `json:"git_protection"`
+	ProjectState          adoption.Status      `json:"project_state"`
+	SchemaVersion         int                  `json:"schema_version"`
+	Stage                 string               `json:"stage"`
+	Source                Source               `json:"source"`
+	Installed             Installed            `json:"installed"`
+	Database              Database             `json:"database"`
+	Runtime               Runtime              `json:"runtime"`
+	Probes                []Verification       `json:"probes"`
+	UnmetGates            []string             `json:"unmet_gates"`
+	RecommendedNextAction string               `json:"recommended_next_action"`
 	// Warnings are advisory observations that are not gates, such as a
 	// client missing the permission rules Continuity needs.
 	Warnings   []string `json:"warnings"`
@@ -199,6 +201,8 @@ func (s Service) Report(ctx context.Context, input Input) (Report, error) {
 	for _, probe := range input.Probes {
 		result.Probes = append(result.Probes, s.probe(ctx, probe))
 	}
+	result.GitProtection = gitprotection.Inspect(ctx, s.Root)
+	result.Warnings = append(result.Warnings, result.GitProtection.Warnings()...)
 	derive(&result)
 	if s.ClientWarnings != nil {
 		result.Warnings = append(result.Warnings, s.ClientWarnings()...)

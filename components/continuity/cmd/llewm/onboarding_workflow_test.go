@@ -235,3 +235,51 @@ func TestProseSnapshotRefusesUnsafeAndOversizedSources(t *testing.T) {
 		}
 	}
 }
+
+func TestGitProtectionInitDoctorAndTrial(t *testing.T) {
+	root := testProject(t)
+	if err := os.WriteFile(".gitignore", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	requireCLIError(t, "Git state protection required", "trial", "start", "--prose", "AGENTS.md")
+	if _, err := os.Stat(config.StateDir(root)); !os.IsNotExist(err) {
+		t.Fatal("unprotected trial created state")
+	}
+	command := newRootCommand("llewm")
+	var out, warnings bytes.Buffer
+	command.SetOut(&out)
+	command.SetErr(&warnings)
+	command.SetArgs([]string{"init"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(warnings.String(), "ignore the whole .llewm/") {
+		t.Fatalf("init missed warning: %s", warnings.String())
+	}
+	if out := runCLI(t, "", "doctor"); !strings.Contains(out, "ignore the whole .llewm/") {
+		t.Fatal(out)
+	}
+	var report struct {
+		Protection struct {
+			Ignored bool `json:"ignored"`
+			Tracked int  `json:"tracked_files"`
+		} `json:"git_protection"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(runCLI(t, "", "doctor", "--output", "json")), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Protection.Ignored || len(report.Warnings) == 0 {
+		t.Fatalf("missing JSON warning: %+v", report)
+	}
+	if err := os.WriteFile(".gitignore", []byte("/.llewm/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(runCLI(t, "", "doctor", "--output", "json")), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.Protection.Ignored || report.Protection.Tracked != 0 {
+		t.Fatalf("protected state: %+v", report)
+	}
+	runCLI(t, "", "trial", "start", "--prose", "AGENTS.md")
+}

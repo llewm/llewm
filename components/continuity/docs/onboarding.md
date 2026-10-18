@@ -39,6 +39,12 @@ canonical repository above, build from components/continuity/, and obtain the
 required Go version from that revision's go.mod; use https://go.dev/doc/install
 if Go is missing. Keep the Llewm source checkout separate from the target project.
 
+Before creating project state, follow the guide's Git exclusion prerequisite.
+Verify that the whole .llewm/ directory is ignored and has no tracked files.
+Default to /.llewm/ in the root .gitignore; use the local Git exclude file for
+personal-only setup. Preserve existing rules, show the change, and do not
+automatically untrack or delete existing state.
+
 Follow only the guide's chosen path. For usage auditing, install the executable
 and collect a baseline without the full plugin, MCP, skills, or an adoption
 checkpoint. For both trial and adoption, import selected project prose into
@@ -80,8 +86,9 @@ See [leaving Llewm](installation.md#remove-or-disable-an-installation).
 1. Install only the executable using the OS-specific [installation instructions](installation.md).
    A source build needs Git and the Go version declared in `go.mod`; an audit
    baseline does not require the client plugin or MCP server.
-2. From the target Git root, run `llewm init`, then `llewm mode audit-only`.
-   Preserve existing state and ignore `.llewm/` in Git. This mode does not create
+2. First complete the [Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git).
+   From the target Git root, run `llewm init`, then `llewm mode audit-only`.
+   Preserve existing state. This mode does not create
    a trial receipt or record adoption.
 3. For the cleanest baseline, leave all Llewm client integrations disabled and
    run ordinary work in a fresh session. Afterwards, run `llewm usage ingest`
@@ -120,7 +127,13 @@ explicit choice. Neither path requires maintaining duplicate operational plans.
    builds, persistent PATH, update and removal. [Preview bundles](preview-distribution.md)
    include a matching plugin package. Public remote installation is available
    only after the reviewed source revision is published.
-3. **Initialize local state.** From the project run `llewm init`, `llewm doctor`,
+3. **Protect and initialize local state.** Before creating state, complete the
+   [Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git):
+   ensure the entire `.llewm/` directory is ignored and no state is tracked.
+   Default to `/.llewm/` in the root `.gitignore`; use Git's local exclude file
+   for personal-only adoption. Preserve existing rules and show the diff.
+   Review already-tracked state separately; never automatically untrack or delete it.
+   From the project run `llewm init`, `llewm doctor`,
    `llewm database status`, and `llewm version --output json`. Init preserves an
    existing store. Pending migrations need the separate backup-gated workflow.
    `doctor` expects root `AGENTS.md`; root `CLAUDE.md` is optional and its absence

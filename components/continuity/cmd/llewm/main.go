@@ -30,6 +30,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/coverage"
 	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/gitprotection"
 	"github.com/llewm/llewm/components/continuity/internal/layout"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/mcpserver"
@@ -1238,6 +1239,9 @@ func initCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			for _, warning := range gitprotection.Inspect(cmd.Context(), root).Warnings() {
+				fmt.Fprintln(cmd.ErrOrStderr(), "Warning:", warning)
+			}
 			if err := adoption.CheckActive(config.StateDir(root)); err != nil {
 				return err
 			}
@@ -1339,6 +1343,11 @@ observations. Nothing is changed either way.`,
 			if !jsonReport {
 				fmt.Fprintf(cmd.OutOrStdout(), "Hook mode: %s\nAdoption state: %s\nEffective hooks: %s\nSession recovery: %s\nLive client: %s\n", state.HookMode, state.AdoptionState, state.EffectiveHooks, state.SessionRecovery, state.LiveClient)
 			}
+			if !jsonReport {
+				for _, warning := range gitprotection.Inspect(cmd.Context(), root).Warnings() {
+					fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-8s %s\n", "Git state", "warning", warning)
+				}
+			}
 			opened := false
 			err = withReadOnlyApp(cmd, func(application *app.App) error {
 				opened = true
@@ -1409,7 +1418,7 @@ observations. Nothing is changed either way.`,
 				return nil
 			})
 			if err != nil && !opened && jsonReport {
-				_ = writeJSON(cmd.OutOrStdout(), map[string]any{"project_state": state, "health_error": err.Error()})
+				_ = writeJSON(cmd.OutOrStdout(), map[string]any{"project_state": state, "health_error": err.Error(), "git_protection": gitprotection.Inspect(cmd.Context(), root)})
 			}
 			return err
 		},

@@ -18,6 +18,10 @@ To switch an existing installation to audit-only or return to full operation,
 use the [mode-switch checklist](usage.md#switch-an-existing-setup-to-audit-only).
 Changing mode alone does not unload the plugin or an already-running MCP server.
 
+Before initializing any target project, complete the
+[Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git).
+Keep the entire `.llewm/` directory out of source control on every platform.
+
 ## Install the executable
 
 For preview archives and matching client packages, see

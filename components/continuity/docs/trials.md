@@ -27,7 +27,8 @@ approvals.
 ## Disposable demo
 
 For a first look, create an empty Git repository in a disposable directory. Add
-a `.gitignore` containing `.llewm/`, an `AGENTS.md` describing a small fictional task and a `PLAN.md`, then run:
+a `.gitignore` containing `/.llewm/` (see the
+[Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git)), an `AGENTS.md` describing a small fictional task and a `PLAN.md`, then run:
 
 ```sh
 llewm trial start --prose PLAN.md
@@ -44,7 +45,8 @@ commands. Only the demo directory and normal local project registry are affected
 
 ## Real-project trial
 
-Before changing client setup, ignore `.llewm/` in Git and run:
+Before creating trial state or changing client setup, complete the
+[Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git), then run:
 
 ```sh
 llewm trial start --prose docs/PLAN.md,docs/DECISIONS.md --review-after 336h

@@ -50,7 +50,7 @@ func testProject(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".llewm/continuity/\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("/.llewm/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "AGENTS.md", "CLAUDE.md", ".gitignore"}, {"-c", "user.name=Continuity Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "Initialize test project"}} {

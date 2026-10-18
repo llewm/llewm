@@ -13,10 +13,59 @@ The default project footprint is:
     backups/
 ```
 
-Ignore the whole `.llewm/` directory in Git. Project IDs, lineage and observations
-remain in the existing Continuity database; the root manifest describes layout,
-not a second identity authority. Future components can use sibling directories
-when implemented. No speculative shared database/library is introduced.
+Project IDs, lineage and observations remain in the existing Continuity database;
+the root manifest describes layout, not a second identity authority. Future
+components can use sibling directories when implemented.
+
+## Keep local state out of Git
+
+Exclude the whole project-root `.llewm/` directory **before** `llewm init`, a
+usage baseline, or a trial. It contains machine-local configuration, identities,
+observations, import bundles, receipts and backups. Ignoring only `*.db` or
+`.llewm/continuity/` leaves other local state exposed. Portable knowledge sharing
+uses the supported export or History-sync workflow.
+
+For a project adopting Llewm, add this line to the root `.gitignore` and commit
+that change with the project's normal workflow:
+
+```gitignore
+/.llewm/
+```
+
+This shares protection with other checkouts, including Windows, macOS and Linux.
+For personal use in a shared repository where a tracked ignore change is
+unwanted, add the same line to the repository's local exclude file instead.
+Locate it with `git rev-parse --git-path info/exclude`; do not assume `.git` is a
+directory, especially in linked worktrees. Local exclusions do not travel to
+other clones, so each installation must verify them. Existing effective global
+exclusions are also accepted; no duplicate rule is needed.
+
+From the target Git root, verify both exclusion and tracked state:
+
+```sh
+git check-ignore --no-index -q -- .llewm/
+git ls-files -- .llewm
+```
+
+The first command must exit successfully; the second must print no paths. These
+commands work in PowerShell as well as POSIX shells. A successful ignore check
+alone does not mean files are untracked. Preserve unrelated rules and existing
+line endings when editing an ignore file; inspect the resulting diff.
+
+If state is already tracked, keep the local data and review the affected paths
+with the engineer before changing the index. An ignore rule does not remove
+tracked files or copies in prior commits. Removing paths from the index and
+handling any published sensitive data are separate reviewed actions; onboarding
+must not delete state, untrack it automatically, or rewrite Git history.
+
+`llewm init` warns about missing exclusions, tracked state or an unavailable Git
+check without editing ignore files. `llewm doctor` reports the same warnings;
+its JSON report includes `git_protection.ignored`, `tracked_files` and any check
+error. These findings are advisory for existing installations. `trial start`
+requires a successful whole-directory exclusion check and no tracked state
+before creating trial files. Agent onboarding must establish and verify this
+protection before creating state for **all three starting paths**, including
+usage auditing, and report unresolved tracked-state findings separately.
 
 `CONTINUITY_HOME` continues to name the component state directory itself, not
 its `.llewm` parent. Global guidance, registry paths and managed memory clones

@@ -14,7 +14,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/adoption"
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/config"
-	"github.com/llewm/llewm/components/continuity/internal/gitenv"
+	"github.com/llewm/llewm/components/continuity/internal/gitprotection"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 	"github.com/spf13/cobra"
@@ -43,10 +43,8 @@ func trialCommand() *cobra.Command {
 		if cfg.Sync.Remote != "" {
 			return errors.New("trial requires History sync to be unconfigured; preserve existing settings and use a disposable demo instead")
 		}
-		if rel, e := filepath.Rel(root, config.StateDir(root)); e == nil && filepath.IsLocal(rel) {
-			if e := gitenv.Command(cmd.Context(), "-C", root, "check-ignore", "-q", "--", filepath.Join(rel, "adoption.json")).Run(); e != nil {
-				return fmt.Errorf("ignore %s in Git before starting a trial; no files changed", rel)
-			}
+		if protection := gitprotection.Inspect(cmd.Context(), root); len(protection.Warnings()) > 0 {
+			return fmt.Errorf("Git state protection required before starting a trial; no files changed: %s", strings.Join(protection.Warnings(), "; "))
 		}
 		if period <= 0 {
 			return errors.New("review-after must be positive; it is a reminder, never automatic adoption or deletion")

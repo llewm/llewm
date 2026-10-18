@@ -9,6 +9,20 @@ Establish the starting path: usage-audit baseline, full local trial, or ongoing
 adoption. Infer it from the user's request; ask once if it is missing. Do not
 turn audit-only setup into a trial/adoption or full plugin installation.
 
+Before creating project state for ANY starting path, follow the canonical Git
+exclusion policy in `docs/project-layout.md#keep-local-state-out-of-git`. From
+the confirmed Git root, check `git check-ignore --no-index -q -- .llewm/` and
+`git ls-files -- .llewm`. Require successful whole-directory exclusion and no
+tracked state. If protection is missing, default to adding `/.llewm/` to the root
+`.gitignore` under the user's onboarding authorization; use the Git local exclude
+file for personal-only use in a shared repository. Resolve that file with
+`git rev-parse --git-path info/exclude`, including in worktrees. Preserve existing
+rules and line endings, show the resulting diff or local change, and verify again.
+Reuse effective existing exclusions. Explain already-tracked state and obtain a
+separate reviewed resolution before proceeding; never automatically untrack,
+delete state, or rewrite history. `init` and `doctor` warnings do not replace this
+onboarding prerequisite.
+
 For a usage baseline, follow `docs/usage.md` and the audit-first section of
 `docs/onboarding.md`: install only the executable, initialize the chosen project,
 select `llewm mode audit-only`, leave full plugin/MCP/skills disabled, and collect

@@ -1,5 +1,8 @@
 # Usage and cost
 
+Before creating local state for a usage baseline, complete the
+[Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git).
+
 Status: 8a-8c of `continuity-auditing`, with the usage-accuracy rebuild in
 migration 069 (MCP API 105; decision `usage-tracking-design`).
 
