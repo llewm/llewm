@@ -1,5 +1,10 @@
 # Client integrations
 
+These instructions install the full client integration. For an audit-first
+baseline, use [audit-first onboarding](onboarding.md#start-with-usage-auditing)
+instead; offline collection needs no plugin, MCP server or skills. Existing users
+can follow the [audit-only switching checklist](usage.md#switch-an-existing-setup-to-audit-only).
+
 Install the [Llewm executable](installation.md) on PATH, then run these commands
 from the Git project you want to adopt. `init` initializes project state;
 `install` installs the bundled matching plugin at **user scope** for one client.

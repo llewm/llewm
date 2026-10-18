@@ -12,6 +12,9 @@ plugin, or Go installation is assumed:
 ```text
 Set up Llewm Continuity for the Git project open in this workspace and the
 coding-agent client running this session.
+My starting path is: [usage-audit baseline / reversible trial / full adoption].
+If I have not chosen one, explain these three choices briefly and ask before
+configuring the client. Do not treat usage auditing as permission for adoption.
 
 Canonical source: https://github.com/llewm/llewm
 Start with this onboarding guide:
@@ -36,13 +39,15 @@ canonical repository above, build from components/continuity/, and obtain the
 required Go version from that revision's go.mod; use https://go.dev/doc/install
 if Go is missing. Keep the Llewm source checkout separate from the target project.
 
-Follow the guide through installation, project initialization, client setup,
-and a first checkpoint that a fresh session can recover. Preserve existing
+Follow only the guide's chosen path. For usage auditing, install the executable
+and collect a baseline without the full plugin, MCP, skills, or an adoption
+checkpoint. For a trial, preserve prose authority and deferred adoption. For full
+adoption, verify a first checkpoint that a fresh session can recover. Preserve existing
 configuration and history. Show me the exact permission changes and the commands
 the guide requires me to run myself. Keep optional reporting and History sync
 disabled. Distinguish prepared changes, successful shell checks, and behavior
 actually observed in the running client; leave fresh-session recovery pending
-until it is observed.
+until it is observed when that check belongs to the chosen path.
 ```
 
 The URL identifies the product and bounds the reading; local prerequisite and
@@ -54,14 +59,49 @@ Once installed, the plugin's `onboard` skill supports the same process. In Codex
 invoke `$onboard`; in Claude Code, invoke `/llewm:onboard`, or ask to onboard this
 project in ordinary language. Fresh-client skill routing still needs qualification.
 
-## Choose a trial before adoption
+## Choose a starting path
+
+- **Usage-audit baseline:** measure ordinary agent usage before introducing
+  Continuity instructions or tools. Follow [audit-first setup](#start-with-usage-auditing).
+- **Reversible trial:** evaluate explicit knowledge recording with existing prose
+  in control. Follow [trials](trials.md) before changing client setup.
+- **Full adoption:** enable task continuity and qualify checkpoint recovery with
+  the [setup steps below](#setup-and-verification).
+
+### Start with usage auditing
+
+1. Install only the executable using the OS-specific [installation instructions](installation.md).
+   A source build needs Git and the Go version declared in `go.mod`; an audit
+   baseline does not require the client plugin or MCP server.
+2. From the target Git root, run `llewm init`, then `llewm mode audit-only`.
+   Preserve existing state and ignore `.llewm/` in Git. This mode does not create
+   a trial receipt or record adoption.
+3. For the cleanest baseline, leave all Llewm client integrations disabled and
+   run ordinary work in a fresh session. Afterwards, run `llewm usage ingest`
+   at a terminal and inspect `llewm usage report`. Optional hook-only collection
+   and comparison commands are in [usage baselines](usage.md#audit-only-baselines-and-comparisons).
+4. Record the session IDs, task, starting revision, client/model/settings,
+   coverage warnings and correctness checks for later comparison. A Continuity
+   checkpoint or MCP recovery check is not required for this path.
+
+To proceed later, retain the store and usage observations. Start a trial using
+the instructions below, or deliberately choose full adoption. When enabling the
+full client, remove any manually registered audit-only hooks, run `llewm mode full`,
+then follow client setup and restart verification. A trial still suppresses task
+bootstrap until reviewed adoption, even with mode `full`.
+
+Already onboarded another way? Follow [switching an existing setup to audit-only](usage.md#switch-an-existing-setup-to-audit-only).
+This also covers returning to full operation; changing mode preserves history
+and does not change trial/adoption state.
+
+### Choose a trial before adoption
 
 Start with a [disposable demo or reversible project trial](trials.md). For a real
 trial run `llewm trial start --prose PATHS` before changing client setup. Existing
 prose remains in control, task bootstrap is suppressed and History sync is disabled.
 At the review point, choose `trial adopt --reviewed` or the reviewed prose-handback
 workflow. A review reminder never automatically adopts or deletes anything.
-The steps below describe full adoption; do not silently perform that cutover for
+The setup steps below describe full adoption; do not silently perform that cutover for
 someone who only asked to try the product.
 
 ## Setup and verification

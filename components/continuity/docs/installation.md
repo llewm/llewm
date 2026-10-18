@@ -3,6 +3,23 @@
 For an agent-guided setup and first-session verification, start with
 [guided onboarding](onboarding.md).
 
+## Choose the installation scope
+
+For a **usage-audit baseline**, install only the executable and its prerequisites
+using the OS-specific instructions below, then follow
+[audit-first onboarding](onboarding.md#start-with-usage-auditing). Skip full plugin
+installation, MCP registration, checkpoint recovery and the full-client permission
+setup. Offline `usage ingest` needs no Llewm integration in the running client;
+optional passive hooks require their own reviewed client registration.
+
+For a **reversible trial**, follow [trials](trials.md) before configuring the
+client. For **full adoption**, follow the complete [onboarding checklist](onboarding.md#setup-and-verification).
+To switch an existing installation to audit-only or return to full operation,
+use the [mode-switch checklist](usage.md#switch-an-existing-setup-to-audit-only).
+Changing mode alone does not unload the plugin or an already-running MCP server.
+
+## Install the executable
+
 For preview archives and matching client packages, see
 [preview distribution](preview-distribution.md). These source-build instructions
 remain useful for development and unqualified platforms.

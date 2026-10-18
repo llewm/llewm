@@ -102,6 +102,9 @@ request and token totals.
 
 ## Audit-only baselines and comparisons
 
+For a new machine, start with [audit-first onboarding](onboarding.md#start-with-usage-auditing)
+to install only the executable and initialize the target project.
+
 Audit-only observation is optional and needs no model. The cleanest baseline uses
 **offline collection**: disable the Llewm plugin, MCP server and skills in the
 client, start a fresh session, complete the task, then run these commands yourself
@@ -173,6 +176,43 @@ Existing tool/family reports measure retrieval transport volume without saving
 tool bodies. They do not yet identify repeated reads of unchanged references or
 prove that a retrieved result helped the task. Those require further attributed
 instrumentation; this mode does not invent that evidence.
+
+### Switch an existing setup to audit-only
+
+This works after ordinary onboarding, during an active trial, or after adoption.
+It preserves saved knowledge and usage; it does not adopt, exit, reset or delete
+the project's trial receipt. An exited trial refuses writable opens: audit mode
+is not a reactivation path. Use the [reviewed recovery guidance](trials.md#disconnect-and-retain-recovery)
+for that case.
+
+1. Finish the current work and preserve enough ordinary project prose to work
+   without querying Continuity. Review root instructions and global/client
+   guidance for requirements to call Llewm; record their presence in the
+   comparison and explicitly review changes needed for a prose-only baseline.
+2. Stop the project's active MCP process and hooks, then run
+   `llewm mode audit-only` from the target Git root at a terminal. Read back with
+   `llewm mode`. This changes project hook behavior, not client configuration.
+3. Disable the full Llewm plugin, its MCP registration, skills and full hooks in
+   the client. Preserve unrelated settings and keep a record of what changed.
+   Shared user-scope integrations may serve other projects; use a separate
+   client profile/configuration when necessary.
+4. Choose offline ingestion, or review and merge
+   `llewm client audit-hooks --client codex` (or `claude-code`) into hook settings.
+   This command only prints JSON. Do not keep duplicate full-plugin hooks.
+5. Restart the client and parent IDE as needed and start a fresh session. Confirm
+   no Llewm bootstrap, MCP tools or plugin/skill instructions are loaded. Then
+   collect usage as described above. Existing session context cannot be undone
+   by changing the mode.
+
+To return, remove the manually registered `--audit-only` hooks (their flag would
+remain passive even in full mode), run `llewm mode full`, restore the reviewed
+full client integration, and restart into a fresh session. Follow
+[client verification](client-integrations.md#verify-the-fresh-client) for adopted
+projects. During an active trial, explicit CLI/MCP evaluation is available but
+automatic task bootstrap remains suppressed until `trial adopt --reviewed`;
+changing mode does not perform that adoption. Keep optional History sync and
+reporting as separate choices; audit mode does not erase their configuration
+or stop independently launched processes.
 
 ## Code statistics
 
