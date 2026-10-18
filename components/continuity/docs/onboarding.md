@@ -5,13 +5,50 @@ or ask your coding agent to guide them. The agent checks prerequisites, prepares
 specific changes, and verifies results. Llewm remains a local Go executable with
 no required model or installation service.
 
-Before the plugin is installed, give your agent this request with the matching
-source checkout or documentation available:
+Before the plugin is installed, paste this request into your coding agent while
+working in the Git project you want to adopt. No Llewm checkout, executable,
+plugin, or Go installation is assumed:
 
-> Set up Llewm Continuity for this Git project and my coding-agent client. Follow
-> the installation and client-integration guides. Preserve existing configuration
-> and history, show me the permission changes, and verify a first checkpoint that
-> a fresh session can recover. Keep optional reporting and history sync disabled.
+```text
+Set up Llewm Continuity for the Git project open in this workspace and the
+coding-agent client running this session.
+
+Canonical source: https://github.com/llewm/llewm
+Start with this onboarding guide:
+https://github.com/llewm/llewm/blob/main/components/continuity/docs/onboarding.md
+Plain-text copy if needed:
+https://raw.githubusercontent.com/llewm/llewm/main/components/continuity/docs/onboarding.md
+
+Read that guide's setup steps, not the rest of the repository. Follow its
+installation.md and client-integrations.md links only for the chosen OS,
+installation method, and client; read other linked sections only when a step
+requires them. Resolve relative links within components/continuity/docs/ at the
+same source revision. Do not search for the product, scan unrelated projects,
+read all documentation, or reconstruct this project's history. If these URLs
+are inaccessible, report the exact failure and ask for the guide or a source
+checkout instead of guessing what Llewm is.
+
+Confirm the target Git root, client, OS/architecture, and whether the client runs
+natively, in WSL, in a container, or on a remote host. Inspect only the relevant
+existing configuration and prerequisites. Ask only for facts you cannot observe.
+Assume Llewm, its plugin, and Go may all be absent. For a source build, use the
+canonical repository above, build from components/continuity/, and obtain the
+required Go version from that revision's go.mod; use https://go.dev/doc/install
+if Go is missing. Keep the Llewm source checkout separate from the target project.
+
+Follow the guide through installation, project initialization, client setup,
+and a first checkpoint that a fresh session can recover. Preserve existing
+configuration and history. Show me the exact permission changes and the commands
+the guide requires me to run myself. Keep optional reporting and History sync
+disabled. Distinguish prepared changes, successful shell checks, and behavior
+actually observed in the running client; leave fresh-session recovery pending
+until it is observed.
+```
+
+The URL identifies the product and bounds the reading; local prerequisite and
+configuration checks are still necessary. A full documentation or source audit
+is not part of onboarding. For a pinned build, replace `main` in both guide URLs
+with its commit or tag and use that same revision for the source and linked docs.
 
 Once installed, the plugin's `onboard` skill supports the same process. In Codex,
 invoke `$onboard`; in Claude Code, invoke `/llewm:onboard`, or ask to onboard this
