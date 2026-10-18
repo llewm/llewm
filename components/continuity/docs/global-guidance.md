@@ -136,6 +136,12 @@ rules (built in)":
 - `task-identity`: checkpoint under your own `task_id` from its current tip;
   review or repair another agent's task under a new task with `reviews_task_id`.
 - `own-commits`: narrate only commits your session or task made.
+- `checkout-lifecycle`: new and resumed tasks default to the current checkout
+  and branch for sequential single-session work. Require confirmed concurrency,
+  explicit isolation, or a project workflow before creating a task branch/worktree.
+  Unfinished task and expiring presence records alone do not establish another
+  writer. Clean up both the integrated task worktree and its local branch only
+  after checking cleanliness, unique commits, and live writers.
 - `memory-repository` (only when `[sync]` names a memory repository): never edit,
   commit to, rebase, reset, or force-push the memory clone, which the rule names
   by path; its automatic commits need no Git note or work narrative.
@@ -143,6 +149,13 @@ rules (built in)":
 Do not copy these rules into `AGENTS.md`: the bootstrap already carries them, so
 copies cost bootstrap budget twice and drift from the behavior they describe.
 The text is versioned with the binary that serves the tools it names.
+
+The checkout rule reaches end users through an executable update, then a fresh
+SessionStart hook or restarted MCP server. It appears even before a project's
+first checkpoint and when task selection is ambiguous; no `continue` skill or
+edit to the user's `AGENTS.md` is required. Both client hooks, CLI bootstrap, and
+MCP use the same core rules. This change requires no schema migration or plugin
+refresh by itself; it is guidance, not automatic Git cleanup or enforcement.
 
 Configuration can turn a rule off or reword it, engineer-wide in
 `config.toml` in the global guidance directory and per project in

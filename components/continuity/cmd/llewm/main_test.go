@@ -1374,6 +1374,8 @@ func TestMCPStdio(t *testing.T) {
 		{"continuity_bootstrap", map[string]any{"task_id": "mcp-smoke"}, "event-reference"},
 		{"continuity_bootstrap", map[string]any{"task_id": "mcp-smoke"}, "MCP smoke task"},
 		{"continuity_bootstrap", map[string]any{"task_id": "missing-task"}, "Factual recovery fallback"},
+		{"continuity_bootstrap", map[string]any{"task_id": "missing-task"}, "- checkout-lifecycle:"},
+		{"continuity_bootstrap", map[string]any{"task_id": "mcp-smoke"}, "- checkout-lifecycle:"},
 		{"continuity_bootstrap", map[string]any{"task_id": "missing-task"}, "project activity cannot establish task intent or completion"},
 		{"continuity_work", map[string]any{"view": "freshness", "task_id": "missing-task", "limit": 1}, `"events_observed":5`},
 		{"continuity_work", map[string]any{"session_id": "mcp-session"}, `"recommendation_source":"explicit_checkpoint.next_action"`},

@@ -14,7 +14,7 @@ func TestResolveCoreRulesAppliesLayersAndRejectsUnknownIDs(t *testing.T) {
 		CoreRuleLayer{Name: "global config", Config: CoreRuleConfig{Override: map[string]string{"discovery": "Global wording."}}},
 		CoreRuleLayer{Name: "project config", Config: CoreRuleConfig{Disable: []string{"own-commits"}, Override: map[string]string{"discovery": "Project wording."}}},
 	)
-	if err != nil || len(rules) != 2 || rules[0].Text != "Project wording." || rules[0].Source != "overridden by project config" || len(disabled) != 1 || disabled[0] != "own-commits" {
+	if err != nil || len(rules) != len(DefaultCoreRules)-2 || rules[0].Text != "Project wording." || rules[0].Source != "overridden by project config" || len(disabled) != 1 || disabled[0] != "own-commits" {
 		t.Fatalf("layers: %#v %v %v", rules, disabled, err)
 	}
 	got := coreRulesMarkdown(rules, disabled, "")
