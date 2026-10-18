@@ -23,7 +23,7 @@ func TestPluginExecutableWiring(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			var manifest struct{ Name string }
+			var manifest struct{ Name, Version string }
 			read(client.manifest, &manifest)
 			if manifest.Name != "llewm" {
 				t.Fatalf("plugin name: %q", manifest.Name)
@@ -32,10 +32,14 @@ func TestPluginExecutableWiring(t *testing.T) {
 				Servers map[string]struct {
 					Command string
 					Args    []string
+					Env     map[string]string
 				} `json:"mcpServers"`
 			}
 			read(".mcp.json", &config)
 			server := config.Servers["continuity"]
+			if server.Env["LLEWM_PLUGIN_VERSION"] != manifest.Version || server.Env["LLEWM_PLUGIN_CLIENT"] == "" {
+				t.Fatalf("plugin launch identity: %+v", server)
+			}
 			if len(config.Servers) != 1 || server.Command != "llewm" || len(server.Args) != 1 || server.Args[0] != "mcp" {
 				t.Fatalf("MCP launch wiring: %+v", config)
 			}

@@ -44,6 +44,10 @@ The first vocabulary is intentionally explicit:
 - `identity_current`: installed artifact, database schema, and fresh runtime identity
   match, but attributable source verification or feature-surface qualification was
   not supplied;
+- `plugin_verification_pending`: the executable is current but MCP startup plugin
+  files or launch identity remain unverified. Refresh through the existing owner,
+  restart and inspect `continuity_info.runtime.plugin`; disk verification does not
+  prove loaded skills or hook trust.
 - `operationally_verified`: identity is current and the named required surface probes
   passed with attributable evidence;
 - `unknown`: one or more required observations are unavailable; and

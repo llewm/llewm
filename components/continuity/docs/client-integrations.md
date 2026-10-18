@@ -54,9 +54,34 @@ The installer refuses a shadowed executable. See [PATH setup](installation.md).
 After installing a new executable, stop client hooks and long-running MCP
 processes, then rerun `llewm install --client CLIENT`. Run `--permissions` again
 when the permission interface changes. Bundled content determines the installed
-plugin version, so changed skills/hooks get a new client cache identity. Identical
+plugin version, including skills, hooks, launch configuration and generated
+marketplace catalogs. Every changed input gets a new cache identity. Identical
 repeat runs avoid plugin-manager writes. Installer-owned prior packages are
 retained as backups; project stores and private memory are outside the package.
+
+The installer uses Claude's `plugin update --scope user` for an existing stale
+plugin and `plugin enable` only when disabled. Codex refreshes through `plugin add`.
+Before reporting installation success, it compares cached files with the bundled
+payload; Claude's direct-load folder is checked too. A matching registered version
+alone is insufficient. A cache that remains stale after the native update produces
+a partial receipt with its exact path; review that plugin through its owner rather
+than deleting a client's entire cache.
+
+`continuity_info.runtime.plugin` retains the plugin file observation from MCP
+startup: client, version, root, root basis and content digest. The top-level
+`plugin_status` compares that snapshot with the bundled payload and current disk
+files. `current` verifies these files, not that the model has reloaded skills or
+that hooks are trusted. A fresh session and exact checkpoint recovery remain
+required. Changed files or a stale launch version require plugin refresh/restart;
+missing launch metadata reports `unknown`, never a successful plugin check.
+
+Claude supplies its expanded plugin root in the launch environment. Codex's legacy
+MCP format does not interpolate a plugin-root variable, so Llewm inspects the
+native `CODEX_HOME/plugins/cache/llewm/llewm/VERSION` path (default `~/.codex`) and
+labels the basis `codex_version_cache_layout`. This is an inferred cache location,
+not a client attestation. Custom layouts that cannot be observed remain unknown.
+Source-owned plugins still require a manifest version bump when packaged files
+change; the installer digest applies to installer-owned packages only.
 
 Database migrations remain explicit and [backup-gated](installation.md#migration-bearing-updates).
 The installer never migrates a database or configures history sync/reporting.

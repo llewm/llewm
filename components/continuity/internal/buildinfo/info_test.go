@@ -1,6 +1,7 @@
 package buildinfo
 
 import (
+	"github.com/llewm/llewm/components/continuity/internal/pluginidentity"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,5 +31,29 @@ func TestRuntimeHealthReportsUnreadableInstallUnknown(t *testing.T) {
 	health := runtimeState.CheckInstalled()
 	if health.Status != "unknown" || health.RestartRequired || health.Installed.Error == "" {
 		t.Fatalf("unreadable install was not reported unknown: %#v", health)
+	}
+}
+
+func TestRuntimeRetainsStartupPluginObservation(t *testing.T) {
+	expected, err := pluginidentity.Expected("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for name, body := range expected {
+		path := filepath.Join(root, name)
+		os.MkdirAll(filepath.Dir(path), 0o700)
+		os.WriteFile(path, body, 0o600)
+	}
+	state := CaptureRuntime()
+	state.Plugin = pluginidentity.Inspect("codex", root, expected)
+	before := state.CheckInstalled()
+	if before.PluginStatus != "current" {
+		t.Fatal(before)
+	}
+	os.WriteFile(filepath.Join(root, "skills/update/SKILL.md"), []byte("changed after start"), 0o600)
+	after := state.CheckInstalled()
+	if after.PluginStatus != "stale" || !after.RestartRequired || after.Runtime.Plugin.SHA256 != before.Runtime.Plugin.SHA256 {
+		t.Fatal(after)
 	}
 }

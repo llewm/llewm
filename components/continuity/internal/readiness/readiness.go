@@ -254,6 +254,7 @@ func derive(result *Report) {
 	integrityFailed := result.Database.IntegrityAuthority == "machine_observed" && result.Database.Integrity != "ok"
 	runtimeKnown := result.Runtime.Observed && result.Runtime.State != nil && result.Runtime.Health != nil
 	runtimeCurrent := runtimeKnown && result.Runtime.Health.Status == "current" && result.Runtime.State.Build.GitCommit == result.Source.GitCommit && result.Runtime.State.Build.MCPAPIVersion == result.Source.ExpectedMCPAPI
+	pluginCurrent := runtimeKnown && result.Runtime.Health.PluginStatus == "current"
 	sourceVerified := len(result.Source.Verification) > 0
 	for _, verification := range result.Source.Verification {
 		sourceVerified = sourceVerified && (verification.Status == "passed" || verification.Status == "reported_pass")
@@ -299,6 +300,9 @@ func derive(result *Report) {
 	if runtimeKnown && !runtimeCurrent {
 		result.UnmetGates = append(result.UnmetGates, "running MCP identity is stale or does not match repository HEAD")
 	}
+	if runtimeKnown && !pluginCurrent {
+		result.UnmetGates = append(result.UnmetGates, "plugin files at MCP startup are stale or unverified")
+	}
 	if len(result.Probes) == 0 {
 		result.UnmetGates = append(result.UnmetGates, "no required live surface probes were supplied")
 	}
@@ -322,6 +326,9 @@ func derive(result *Report) {
 	case !runtimeCurrent:
 		result.Stage = "migrated_restart_pending"
 		result.RecommendedNextAction = "restart the client so it launches the installed executable, then rerun readiness"
+	case !pluginCurrent:
+		result.Stage = "plugin_verification_pending"
+		result.RecommendedNextAction = "verify the matching plugin files and launch identity in a fresh client"
 	case !sourceVerified:
 		result.Stage = "identity_current"
 		result.RecommendedNextAction = "supply attributable source-verification references for the intended commit"

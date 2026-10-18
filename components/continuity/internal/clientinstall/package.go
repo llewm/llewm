@@ -23,12 +23,17 @@ type Package struct {
 // Bundled assembles an inert, content-addressed package, not an executable
 // recipe. The cache version changes whenever a bundled skill or hook changes.
 func Bundled() (Package, error) {
+	return bundled(plugins.Assets, nil)
+}
+
+// transform is applied to all source inputs before hashing, including catalogs.
+func bundled(assets fs.FS, transform func(map[string][]byte)) (Package, error) {
 	p := Package{Files: map[string][]byte{}}
-	err := fs.WalkDir(plugins.Assets, ".", func(path string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(assets, ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
-		data, err := plugins.Assets.ReadFile(path)
+		data, err := fs.ReadFile(assets, path)
 		if err != nil {
 			return err
 		}
@@ -46,6 +51,11 @@ func Bundled() (Package, error) {
 	})
 	if err != nil {
 		return p, err
+	}
+	p.Files[".agents/plugins/marketplace.json"] = []byte(`{"name":"llewm","plugins":[{"name":"llewm","source":{"source":"local","path":"./plugins/codex"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Productivity"}]}`)
+	p.Files[".claude-plugin/marketplace.json"] = []byte(`{"name":"llewm","owner":{"name":"Llewm contributors"},"plugins":[{"name":"llewm","source":"./plugins/claude-code"}]}`)
+	if transform != nil {
+		transform(p.Files)
 	}
 	keys := make([]string, 0, len(p.Files))
 	for key := range p.Files {
@@ -78,8 +88,24 @@ func Bundled() (Package, error) {
 			return p, err
 		}
 	}
-	p.Files[".agents/plugins/marketplace.json"] = []byte(`{"name":"llewm","plugins":[{"name":"llewm","source":{"source":"local","path":"./plugins/codex"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Productivity"}]}`)
-	p.Files[".claude-plugin/marketplace.json"] = []byte(`{"name":"llewm","owner":{"name":"Llewm contributors"},"plugins":[{"name":"llewm","source":"./plugins/claude-code"}]}`)
+	for _, client := range []string{"codex", "claude-code"} {
+		name := "plugins/" + client + "/.mcp.json"
+		var launch struct {
+			Servers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(p.Files[name], &launch); err != nil {
+			return p, err
+		}
+		env, ok := launch.Servers["continuity"]["env"].(map[string]any)
+		if !ok {
+			return p, fmt.Errorf("plugin launch identity missing")
+		}
+		env["LLEWM_PLUGIN_VERSION"] = p.Version
+		p.Files[name], err = json.MarshalIndent(launch, "", "  ")
+		if err != nil {
+			return p, err
+		}
+	}
 	p.Files[".llewm-installer.json"], err = json.Marshal(struct {
 		Digest  string `json:"digest"`
 		Version string `json:"version"`

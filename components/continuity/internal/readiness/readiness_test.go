@@ -11,7 +11,7 @@ func boolPointer(value bool) *bool { return &value }
 func baseReport() Report {
 	api := 28
 	state := &buildinfo.RuntimeState{Build: buildinfo.Info{GitCommit: "source", MCPAPIVersion: api}, ExecutableSHA256: "hash"}
-	health := &buildinfo.Health{Status: "current", Runtime: *state, Installed: buildinfo.ExecutableInfo{GitCommit: "source", SHA256: "hash"}}
+	health := &buildinfo.Health{Status: "current", PluginStatus: "current", Runtime: *state, Installed: buildinfo.ExecutableInfo{GitCommit: "source", SHA256: "hash"}}
 	return Report{
 		Source:     Source{GitCommit: "source", Dirty: boolPointer(false), ExpectedMCPAPI: api, ExpectedMigration: "019.sql", Verification: []Verification{{Name: "go test ./...", Status: "reported_pass", Authority: "caller_reported"}}},
 		Installed:  Installed{Executable: buildinfo.ExecutableInfo{GitCommit: "source", SHA256: "hash"}, MCPAPI: &api},
@@ -42,6 +42,7 @@ func TestDeriveReadinessStages(t *testing.T) {
 			r.Runtime.Health.Status = "stale"
 			r.Runtime.Health.RestartRequired = true
 		}, stage: "migrated_restart_pending", action: "restart the client so it launches the installed executable, then rerun readiness"},
+		{name: "unknown plugin", edit: func(r *Report) { r.Runtime.Health.PluginStatus = "unknown" }, stage: "plugin_verification_pending", action: "verify the matching plugin files and launch identity in a fresh client"},
 		{name: "identity current without probes", edit: func(r *Report) { r.Probes = []Verification{} }, stage: "identity_current", action: "run the named required live surface probes"},
 		{name: "dirty source", edit: func(r *Report) { r.Source.Dirty = boolPointer(true) }, stage: "source_only", action: "build and install an artifact from the clean repository HEAD"},
 		{name: "database ahead", edit: func(r *Report) { r.Database.AppliedMigration = "020.sql"; r.Database.State = "ahead" }, stage: "inconsistent", action: "diagnose the conflicting database or executable identities before making changes"},

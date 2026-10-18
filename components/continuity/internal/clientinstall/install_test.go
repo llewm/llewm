@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/llewm/llewm/components/continuity/plugins"
 )
 
 type fakeClient struct {
+	skipCache                   bool
 	client, root, version, fail string
+	cacheRoot                   string
 	registered, enabled         bool
 	writes                      [][]string
 }
@@ -38,7 +43,7 @@ func (f *fakeClient) run(_ context.Context, args ...string) ([]byte, error) {
 	if key == "plugin list --json" {
 		items := []installedPlugin{}
 		if f.version != "" {
-			items = append(items, installedPlugin{ID: Selector, PluginID: Selector, Scope: "user", Version: f.version, Enabled: f.enabled, Installed: true})
+			items = append(items, installedPlugin{InstallPath: f.cacheRoot, ID: Selector, PluginID: Selector, Scope: "user", Version: f.version, Enabled: f.enabled, Installed: true})
 		}
 		if f.client == "codex" {
 			return json.Marshal(map[string]any{"installed": items})
@@ -53,18 +58,53 @@ func (f *fakeClient) run(_ context.Context, args ...string) ([]byte, error) {
 		f.registered = true
 		f.root = args[3]
 	}
-	if strings.HasPrefix(key, "plugin add ") || strings.HasPrefix(key, "plugin install ") {
+	if strings.HasPrefix(key, "plugin install ") && f.version != "" {
+		return []byte(`{"outcome":"ok","message":"already installed"}`), nil
+	}
+	if strings.HasPrefix(key, "plugin add ") || strings.HasPrefix(key, "plugin install ") || strings.HasPrefix(key, "plugin update ") {
 		p, err := Bundled()
 		if err != nil {
 			return nil, err
 		}
+		if err := f.materialize(p); err != nil {
+			return nil, err
+		}
 		f.version = p.Version
-		f.enabled = true
+		if !strings.HasPrefix(key, "plugin update ") {
+			f.enabled = true
+		}
 	}
 	if strings.HasPrefix(key, "plugin enable ") {
+		if f.enabled {
+			return nil, errors.New("already enabled")
+		}
 		f.enabled = true
 	}
 	return []byte(`{}`), nil
+}
+
+func (f *fakeClient) materialize(p Package) error {
+	if f.skipCache {
+		return nil
+	}
+	f.cacheRoot = filepath.Join(filepath.Dir(f.root), "client-cache")
+	if err := os.RemoveAll(f.cacheRoot); err != nil {
+		return err
+	}
+	prefix := "plugins/" + f.client + "/"
+	for name, body := range p.Files {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		path := filepath.Join(f.cacheRoot, strings.TrimPrefix(name, prefix))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TestClientInstallPreviewApplyAndRepeat(t *testing.T) {
@@ -93,9 +133,6 @@ func TestClientInstallPreviewApplyAndRepeat(t *testing.T) {
 			}
 			if !r.PluginInstalled || r.LiveVerified || r.Permissions != "needs_review" || r.HookTrust != "needs_client_review" {
 				t.Fatalf("misleading receipt: %#v", r)
-			}
-			if client == "claude-code" && !reflect.DeepEqual(f.writes[2], []string{"plugin", "enable", Selector, "--scope", "user", "--json"}) {
-				t.Fatalf("wrong enable ordering: %#v", f.writes)
 			}
 			writes := len(f.writes)
 			r, err = s.Apply(context.Background())
@@ -212,5 +249,90 @@ func TestPackageRejectsSymlinkAndUnmanagedDirectory(t *testing.T) {
 	}
 	if _, err := p.Stage(root); err == nil {
 		t.Fatal("followed symlink")
+	}
+}
+
+func TestUpgradeAndEnableTransitions(t *testing.T) {
+	for _, client := range []string{"codex", "claude-code"} {
+		for _, stale := range []bool{false, true} {
+			for _, enabled := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/stale=%t/enabled=%t", client, stale, enabled), func(t *testing.T) {
+					p, _ := Bundled()
+					root := filepath.Join(t.TempDir(), "marketplace")
+					version := p.Version
+					if stale {
+						version = "0.1.0+installer.old"
+					}
+					f := &fakeClient{client: client, root: root, version: version, registered: true, enabled: enabled}
+					if err := f.materialize(p); err != nil {
+						t.Fatal(err)
+					}
+					r, err := (Service{Client: client, Root: root, Package: p, Run: f.run}).Apply(context.Background())
+					if err != nil || !r.PluginInstalled {
+						t.Fatalf("%#v %v", r, err)
+					}
+					if client == "claude-code" && stale && f.writes[0][1] != "update" {
+						t.Fatal(f.writes)
+					}
+					for _, write := range f.writes {
+						if client == "claude-code" && write[1] == "install" {
+							t.Fatal("reinstalled existing plugin", write)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestEveryPackageInputChangesCacheIdentity(t *testing.T) {
+	original, err := Bundled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"plugins/codex/skills/update/SKILL.md", "plugins/claude-code/hooks/hooks.json", ".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"} {
+		t.Run(name, func(t *testing.T) {
+			changed, err := bundled(plugins.Assets, func(files map[string][]byte) { files[name] = append(append([]byte{}, files[name]...), '\n') })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed.Digest == original.Digest || changed.Version == original.Version {
+				t.Fatal("input omitted from cache identity")
+			}
+			root := filepath.Join(t.TempDir(), "marketplace")
+			if _, err := original.Stage(root); err != nil {
+				t.Fatal(err)
+			}
+			backup, err := changed.Stage(root)
+			if err != nil || backup == "" {
+				t.Fatal("changed package skipped", err)
+			}
+			got, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+			if !reflect.DeepEqual(got, changed.Files[name]) {
+				t.Fatal("new input not staged")
+			}
+		})
+	}
+}
+
+func TestCorrectVersionWithStaleCacheDoesNotPass(t *testing.T) {
+	p, _ := Bundled()
+	root := filepath.Join(t.TempDir(), "marketplace")
+	f := &fakeClient{client: "claude-code"}
+	s := Service{Client: f.client, Root: root, Package: p, Run: f.run}
+	if _, err := s.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.cacheRoot, "skills/update/SKILL.md"), []byte("stale bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.skipCache = true
+	receipt, err := s.Apply(context.Background())
+	if err == nil || receipt.State != "partial" || receipt.PluginCache.Status != "stale" || receipt.LiveVerified {
+		t.Fatal(receipt, err)
+	}
+	f.skipCache = false
+	if receipt, err := s.Apply(context.Background()); err != nil || receipt.PluginCache.Status != "current" {
+		t.Fatal(receipt, err)
 	}
 }

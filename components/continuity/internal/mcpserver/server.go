@@ -776,7 +776,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			health := runtimeState.CheckInstalled()
 			warning := ""
 			if health.RestartRequired {
-				warning = "Continuity MCP is stale; restart the client so it launches the installed executable."
+				warning = "Continuity MCP or its plugin is stale; inspect continuity_info, refresh the matching plugin if needed, and restart the parent client."
 			}
 			markdown := bootstrap.Markdown(packet)
 			if !input.Full && selection == (checkpoint.Selection{}) {

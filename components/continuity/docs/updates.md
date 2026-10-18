@@ -82,9 +82,18 @@ comparison also works with locally generated preview bundles today.
    where required. Never turn an update into `init` on replacement storage.
 5. Refresh matching plugins through their existing owner/marketplace. Preserve
    permissions and trust; prepare a separate review if either needs expansion.
-   Regenerate saved completions when the command surface changes.
+   For installer-owned packages, rerun `llewm install --client CLIENT` and require
+   `plugin_cache.status=current`. Existing Claude installations use native update,
+   not a repeat install. For source-owned plugins, bump matching manifest versions
+   when packaged files change and refresh through the existing registration.
+   Compare actual cached skills/hooks/configuration; a version string alone does
+   not establish freshness. Regenerate saved completions when the command surface changes.
 6. Restart clients/parent IDE as needed; compare actual MCP `continuity_info`
    with installed CLI identity and verify checkpoint recovery in a fresh session.
+   Require `restart_required=false` and `plugin_status=current`; inspect the
+   startup plugin root/basis/digest separately from executable identity. Unknown
+   plugin identity requires investigation, not a completion claim. Disk identity
+   does not prove session skill activation; verify fresh bootstrap and recovery.
    Report installed, migrated, plugin-refreshed and live-verified separately.
 7. Retain verified backups and receipts; remove scratch artifacts. After new
    writes or sync, restoring an old database is a separate reconciliation decision,

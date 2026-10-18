@@ -52,9 +52,18 @@ scope. Use existing explicit grants where applicable; do not create or renew one
 yourself. Honor terminal-only steps without simulating confirmation. A routine
 authorized update needs no repeated approval for already-covered steps.
 
+For installer-owned packages, require the receipt's `plugin_cache.status=current`.
+A stale Claude installation needs native `plugin update` at its existing scope;
+repeating install can be a no-op. Source-owned plugins need matching manifest
+version bumps when packaged files change. Verify cached bytes, not only versions.
+
 Report installed, migrated, plugin-refreshed and live-verified separately. Restart
 the parent IDE/client as needed, compare actual MCP identity and verify exact
-checkpoint recovery in a fresh session. Leave unobserved native-client checks
+checkpoint recovery in a fresh session. Require `restart_required=false` and
+`plugin_status=current`; inspect `runtime.plugin` root, basis and digest. A Codex
+cache-layout inference is not a client attestation, and disk verification does not
+prove loaded skills or hook trust. Unknown plugin identity is a pending check.
+Leave unobserved native-client checks
 pending. Refresh the attributed current-host installation resource with exact
 source/release identity, retained backup/migration receipts and remaining limits;
 remove scratch artifacts. Do not repeat completed naming/layout/format migrations.

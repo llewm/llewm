@@ -10,10 +10,12 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
+
+	"github.com/llewm/llewm/components/continuity/internal/pluginidentity"
 )
 
 const (
-	MCPAPIVersion = 129
+	MCPAPIVersion = 130
 	// WriterAPIVersion is the newest MCP API revision that introduced a
 	// write-incompatible semantic change. Ordinary MCP surface changes must not
 	// advance it: doing so would strand checkpoints in already-running clients.
@@ -50,8 +52,9 @@ type ExecutableInfo struct {
 }
 
 type RuntimeState struct {
-	Build            Info   `json:"build"`
-	ExecutableSHA256 string `json:"executable_sha256,omitempty"`
+	Plugin           pluginidentity.Snapshot `json:"plugin"`
+	Build            Info                    `json:"build"`
+	ExecutableSHA256 string                  `json:"executable_sha256,omitempty"`
 }
 
 type Health struct {
@@ -95,7 +98,7 @@ func Current() Info {
 }
 
 func CaptureRuntime() RuntimeState {
-	result := RuntimeState{Build: Current()}
+	result := RuntimeState{Build: Current(), Plugin: pluginidentity.Capture()}
 	installed := InspectExecutable(result.Build.Executable)
 	if installed.Error == "" {
 		result.ExecutableSHA256 = installed.SHA256
@@ -110,6 +113,23 @@ func (runtimeState RuntimeState) CheckInstalled() Health {
 		Installed:    InspectExecutable(runtimeState.Build.Executable),
 		PluginStatus: "unknown",
 		PluginReason: "the MCP server is not given client plugin package identity",
+	}
+	if runtimeState.Plugin.Status != "" {
+		health.PluginStatus, health.PluginReason = runtimeState.Plugin.Status, runtimeState.Plugin.Reason
+		if runtimeState.Plugin.Status == "current" {
+			expected, err := pluginidentity.Expected(runtimeState.Plugin.Client)
+			if err == nil {
+				observed := pluginidentity.Inspect(runtimeState.Plugin.Client, runtimeState.Plugin.Root, expected)
+				if observed.Status != "current" || observed.SHA256 != runtimeState.Plugin.SHA256 || observed.Version != runtimeState.Plugin.Version {
+					health.PluginStatus, health.PluginReason = "stale", "plugin files changed or became unavailable since MCP startup"
+				}
+			}
+		}
+		if health.PluginStatus == "stale" {
+			health.Status = "stale"
+			health.RestartRequired = true
+			health.Reasons = append(health.Reasons, "refresh the matching plugin and restart the parent client")
+		}
 	}
 	if health.Installed.Error != "" || runtimeState.ExecutableSHA256 == "" {
 		health.Status = "unknown"
