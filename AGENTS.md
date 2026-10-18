@@ -51,4 +51,19 @@ a plan item with `llewm brief LABEL`, install steps from the pinned procedures,
 and hosts from resources. Use `docs/vision.md` and `docs/architecture.md` for
 project-wide scope decisions. Continuity-specific product
 context is in `components/continuity/docs/product-context.md`.
-With other agents active, use your own worktree and stage explicit paths.
+
+## Branch and worktree lifecycle
+
+For sequential single-session work, including new tasks, use the current checkout
+and branch. Create a task branch/worktree only for confirmed concurrent writers,
+an explicit isolation request, or an established project workflow requiring it.
+Open tasks, checkpoints, leases, existing branches/worktrees, and expiring presence
+records alone do not establish another active writer. If concurrency is uncertain,
+inspect `llewm presence --live` and Git state; respect the user's report that this
+is the only session. With concurrent writers, use your own worktree and stage
+explicit paths.
+
+After integrating work, remove its dedicated worktree and local branch once the
+worktree is clean, the branch has no unique commits, and no live writer uses it.
+Removing a worktree alone is incomplete cleanup. Report a concrete reason for any
+retained task branch/worktree; do not remove unmerged or dirty work.
