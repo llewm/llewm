@@ -71,6 +71,55 @@ func TestSourceCheckPreservesDirtyWorkAndClassifiesAncestry(t *testing.T) {
 	}
 }
 
+func TestSourceCheckModuleLineEndings(t *testing.T) {
+	const module = "module github.com/llewm/llewm/components/continuity"
+	for _, tc := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "LF", body: module + "\n\ngo 1.25.0\n"},
+		{name: "CRLF", body: module + "\r\n\r\ngo 1.25.0\r\n"},
+		{name: "wrong module LF", body: module + "-other\n", wantErr: true},
+		{name: "wrong module CRLF", body: module + "-other\r\n", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			ctx := context.Background()
+			git := func(args ...string) string {
+				t.Helper()
+				out, err := gitenv.Command(ctx, append([]string{"-C", root}, args...)...).CombinedOutput()
+				if err != nil {
+					t.Fatalf("git: %v %s", err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			git("init", "-q")
+			git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture")
+			head := git("rev-parse", "HEAD")
+			if err := os.MkdirAll(filepath.Join(root, "components/continuity"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			mod := filepath.Join(root, "components/continuity/go.mod")
+			if err := os.WriteFile(mod, []byte(tc.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			r, err := Source(ctx, buildinfo.Info{GitCommit: head}, root, "", "", false)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "unexpected module identity") {
+					t.Fatalf("expected module identity error, got %v", err)
+				}
+			} else if err != nil || r.State != "current" || r.TargetCommit != head {
+				t.Fatalf("source check: %+v, %v", r, err)
+			}
+			body, err := os.ReadFile(mod)
+			if err != nil || string(body) != tc.body {
+				t.Fatalf("source check changed go.mod: %q, %v", body, err)
+			}
+		})
+	}
+}
+
 func TestBinaryManifestSelectsPlatformAndVerifiesArtifact(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte("fixture bundle")

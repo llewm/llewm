@@ -81,7 +81,8 @@ func Source(ctx context.Context, installed buildinfo.Info, root, remote, branch 
 	if err != nil {
 		return r, fmt.Errorf("source root must be a Llewm checkout: %w", err)
 	}
-	if !strings.HasPrefix(string(mod), "module github.com/llewm/llewm/components/continuity\n") {
+	// Git checkouts on Windows may use CRLF line endings.
+	if !strings.HasPrefix(strings.ReplaceAll(string(mod), "\r\n", "\n"), "module github.com/llewm/llewm/components/continuity\n") {
 		return r, fmt.Errorf("source checkout has an unexpected module identity")
 	}
 	status, err := run("status", "--porcelain")
