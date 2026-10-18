@@ -3,6 +3,12 @@
 Continuity is the first component and entire current MVP of [Llewm](../../README.md).
 It is a local-first continuity and activity controller for coding agents. It keeps cloud sessions disposable while preserving project rules, task state, failed attempts, environment discoveries, verification results, and cost attribution.
 
+A major goal is to reduce repeated prose discovery in fresh sessions and the
+accumulation of duplicate plans, handoff files, and stale agent notes in the
+repository. Structured state and bounded retrieval support that direction today;
+populating it from existing docs and reducing redundant prose still require
+deliberate review during onboarding and ongoing work.
+
 The MVP deliberately avoids general-purpose AI memory and autonomous execution. It focuses on:
 
 - compact session bootstraps;

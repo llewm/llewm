@@ -8,6 +8,13 @@ Llewm originally explored a broad local context-control plane with persistent ev
 
 ## MVP thesis
 
+Reducing repeated prose discovery, project-doc clutter, and documentation rot is
+a major product goal. Fresh sessions should recover the current task and relevant
+plans without repeatedly hunting through prose. Maintaining operational state in
+Continuity should reduce duplicate handoffs and plan copies while keeping useful
+project docs. Evaluate this through measured discovery and maintenance costs and
+successful continuation, rather than treating record capture as the outcome.
+
 Treat cloud sessions as disposable reasoning processes. Durable project continuity belongs in a local, structured controller.
 
 The controller should make re-sessioning nearly frictionless while keeping startup context small. It should capture enough activity to expose repeated work and estimate the cost of using premium models for deterministic procedures.

@@ -1,5 +1,13 @@
 # Llewm vision
 
+Reducing repeated prose discovery and project-document clutter and rot is a
+major product goal. A fresh agent should recover the relevant current work
+without rereading a growing collection of handoffs, duplicate plans, and stale
+notes. Operational state should be maintained as attributable structured
+knowledge, so ordinary project docs can stay focused and useful. Progress should
+be measured through discovery cost, continuation quality, and documentation
+maintenance effort; storing more records alone does not establish success.
+
 Llewm aims to make agent-assisted work durable across sessions, clients, and models.
 Continuity is the first deliverable and the complete MVP: preserve attributable
 context, report the saved project pulse and recurring routines, expose activity and

@@ -5,6 +5,18 @@
 Llewm is a local-first project for agent continuity, activity auditing, and future
 automation, orchestration, and local LLM interoperability.
 
+**Less repeated discovery. Less project-doc clutter and rot.** A major goal is
+to reduce the time and tokens fresh agent sessions spend hunting through prose
+to reconstruct current work. Llewm should also reduce the growing piles of
+handoff files, duplicate plans, and stale agent notes that make repositories
+harder to navigate and maintain.
+
+Continuity already stores attributable task state, plans, decisions, and history
+and retrieves bounded context for the next action. The direction is to maintain
+operational project knowledge there, keeping ordinary docs focused on useful
+guidance and explanations. Onboarding and doc cleanup still require explicit
+review; Llewm does not automatically import or reconcile existing prose today.
+
 **Continuity is the entire current MVP, not the full scope of Llewm.** It preserves
 attributable project rules, task state, attempts, and verification across coding-agent
 sessions. It builds as the `llewm` executable.
