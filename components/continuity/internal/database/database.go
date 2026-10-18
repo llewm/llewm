@@ -325,7 +325,11 @@ func openReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 func openReadWrite(ctx context.Context, path string) (*sql.DB, error) {
-	return open(ctx, "file:"+filepath.ToSlash(path)+"?mode=rwc&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", 4)
+	// Reserve the writer before taking a snapshot. Deferred read-then-write
+	// transactions can fail immediately with SQLITE_BUSY_SNAPSHOT if a hook or
+	// another process commits between the read and write; busy_timeout cannot
+	// repair that stale snapshot. The driver keeps ReadOnly transactions deferred.
+	return open(ctx, "file:"+filepath.ToSlash(path)+"?mode=rwc&_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", 4)
 }
 
 func open(ctx context.Context, dsn string, maxConnections int) (*sql.DB, error) {

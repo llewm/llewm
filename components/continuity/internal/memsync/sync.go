@@ -399,7 +399,7 @@ func (s Syncer) cycle(ctx context.Context, p plan) (Result, error) {
 
 	export, err := portable.EncodeMemoryExport(local, s.DB, s.ProjectID)
 	if err != nil {
-		return result, err
+		return result, fmt.Errorf("export memory records: %w", err)
 	}
 	lineageDir := portable.MemoryLineageDir(export.Identity.LineageID)
 	written, err := writeNew(s.Clone, export.Envelopes)
@@ -461,7 +461,7 @@ func (s Syncer) cycle(ctx context.Context, p plan) (Result, error) {
 			}
 		}
 		if err := s.importNew(local, repo, lineageDir, previous, written, &result); err != nil {
-			return result, err
+			return result, fmt.Errorf("import memory records: %w", err)
 		}
 		imported = true
 		exportedBeforeConversion := result.ExportedRecords
@@ -472,7 +472,7 @@ func (s Syncer) cycle(ctx context.Context, p plan) (Result, error) {
 			// Conversion includes remote-only and rejected observations, so import
 			// every new-format path after the conversion commit, not just exports.
 			if err := s.importNew(local, repo, lineageDir, "", written, &result); err != nil {
-				return result, err
+				return result, fmt.Errorf("import converted memory records: %w", err)
 			}
 		}
 		if upToDate(local, repo, branch) {
@@ -508,7 +508,7 @@ func (s Syncer) cycle(ctx context.Context, p plan) (Result, error) {
 		// Records already on this machine's clone still reach the project.
 		if !imported {
 			if err := s.importNew(local, repo, lineageDir, previous, written, &result); err != nil {
-				return result, err
+				return result, fmt.Errorf("import local memory records: %w", err)
 			}
 		}
 		result.Outcome = OutcomeOffline
