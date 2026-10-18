@@ -13,6 +13,7 @@ jobs:
           - components/continuity
           - components/action-control
           - components/reporting
+          - components/orchestration
     defaults:
       run:
         working-directory: ${{ matrix.component }}

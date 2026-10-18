@@ -11,6 +11,11 @@ to a private Forgejo tracker. It consumes Continuity's v1 JSON report through
 files, never its internal packages or SQLite tables. It owns credentials,
 explicit project opt-in, local outbox and delivery receipts; project memsync
 continues to transport curated history separately.
+The independent `github.com/llewm/llewm/components/orchestration` module implements
+the manual shared-work milestone: a separately started authenticated coordinator,
+reviewed plan snapshots, claims, reassignment and stale-result reconciliation.
+It consumes public Continuity plan JSON and owns its own SQLite store; provider
+accounts and manually launched execution stay on each engineer's machines.
 GitHub supplies the canonical public module paths; Forgejo remains the source
 authority. Component version tags include their repository subdirectory, such as
 `components/continuity/v0.1.0-preview.1`. See [source publication](source-publication.md).
@@ -27,9 +32,9 @@ work items, narratives, decisions, bounded history reads and portable memory.
 Procedures, resources, pins and standing grants preserve reviewed operational
 context without executing it.
 Its [architecture](../components/continuity/docs/architecture.md) describes the current
-implementation. Automation, orchestration, and local LLM interoperability will
-become sibling components when implemented. No shared runtime or library has been
-created speculatively.
+implementation. [Orchestration](../components/orchestration/README.md) is now a sibling
+component for manual coordination. Automated execution and local LLM interoperability
+remain future capabilities. No shared runtime or library has been created speculatively.
 
 Continuity is a curated state and retrieval layer, not a transcript-replay or model
 state restoration layer. Persistent records keep provenance and stable references;
@@ -85,6 +90,22 @@ and releases. Consider separate repositories only when ownership, permissions, o
 release independence warrants the coordination cost.
 
 ## Agent host and execution-control boundary
+
+The manual orchestration coordinator authenticates engineers and serializes
+assignment epochs, accepted plan revisions and attempt claims. A reassigned or
+expired attempt cannot resume with publication authority. Its late contribution
+is retained for explicit adoption or rejection, with original attribution; it
+never overwrites accepted results. Plan transfers preserve completed nodes and
+explicitly assigned children. This authority applies to the coordinator's records,
+not to an offline agent process or a source repository. The versioned HTTP/CLI
+interface performs no generic execution or automatic merge.
+
+The first milestone supports one authoritative coordinator per team project,
+manual claims and source-plan imports. An import is a proposed execution snapshot
+that needs coordinator review; collaborative revisions and source-plan changes
+require explicit reconciliation. Continuity writeback, automatic runners, provider
+budget enforcement and team deployment are not implemented. The coordinator is
+optional for Continuity users and must not share its database through memory sync.
 
 [Agent Host Protocol interoperability](agent-host-security.md) is a proposed host
 integration. Qualify its exact version behind an adapter; protocol state must not

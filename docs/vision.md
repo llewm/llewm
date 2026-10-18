@@ -27,11 +27,13 @@ Graph techniques over typed relationships should make context resolution and
 traversal efficient: keep a small session kernel and expand exact linked tasks,
 plans, decisions and evidence only when needed. Persistent state should survive
 agent replacement without requiring the entire history in the model context.
-Task bindings, presence and optional scoped lease fencing support coordination;
-broader orchestration remains an explicitly scoped future capability.
+Task bindings, presence and optional scoped lease fencing support coordination.
+The separate [manual orchestration milestone](../components/orchestration/README.md)
+adds shared reviewed plans, engineer work pools, and context-preserving reassignment.
+Automatic scheduling and agent execution remain explicitly scoped future capabilities.
 
-The larger project will extend into human-reviewed automation, agent/task
-orchestration, and local LLM interoperability. Storage, model routing, execution,
+The larger project will extend this manual coordination into human-reviewed
+automation, automatic agent/task orchestration, and local LLM interoperability. Storage, model routing, execution,
 and shared infrastructure may evolve as those capabilities become concrete.
 These are future directions, not implemented features or commitments to specific backends.
 

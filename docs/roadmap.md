@@ -26,6 +26,11 @@ See [source publication](source-publication.md) and the
 - **Action Control:** a standalone versioned Git commit-message validator.
   Hook installation and action execution are outside its implemented slice.
   See [Action Control](../components/action-control/README.md).
+- **Orchestration:** a manual coordination pilot with authenticated work claims,
+  collaborative plan revisions, context-preserving reassignment and explicit
+  stale-result review. Local fixtures qualify its CLI/API; team deployment and
+  automatic execution remain separate work. See
+  [Orchestration](../components/orchestration/README.md).
 
 ## Qualification and distribution
 
@@ -41,7 +46,7 @@ Neither signed installers nor an editor extension are currently offered.
 
 ## Future project capabilities
 
-Human-reviewed automation, orchestration, agent-host interoperability, provider
+Human-reviewed automation, automatic agent orchestration, agent-host interoperability, provider
 adapters, and optional local-model integration remain future directions. Their
 execution and approval boundaries must be designed explicitly; Continuity itself
 does not expose general command execution or require a model.
