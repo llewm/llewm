@@ -12,7 +12,7 @@ plugin, or Go installation is assumed:
 ```text
 Set up Llewm Continuity for the Git project open in this workspace and the
 coding-agent client running this session.
-My starting path is: [usage-audit baseline / prose-first trial / full adoption].
+My starting path is: [usage-audit baseline / full local trial / full adoption].
 If I have not chosen one, explain these three choices briefly and ask before
 configuring the client. Do not treat usage auditing as permission for adoption.
 
@@ -41,9 +41,11 @@ if Go is missing. Keep the Llewm source checkout separate from the target projec
 
 Follow only the guide's chosen path. For usage auditing, install the executable
 and collect a baseline without the full plugin, MCP, skills, or an adoption
-checkpoint. For a trial, preserve prose authority and deferred adoption. For full
-adoption, verify a first checkpoint that a fresh session can recover. Preserve existing
-configuration and history. Show me the exact permission changes and the commands
+checkpoint. For both trial and adoption, import selected project prose into
+source-linked tracks/plans, review the interpretation, show the populated TUI,
+and verify a first checkpoint that a fresh session can recover. Preserve
+original trial docs and defer ongoing adoption. Preserve existing configuration
+and history. Show me the exact permission changes and the commands
 the guide requires me to run myself. Keep optional reporting and History sync
 disabled. Distinguish prepared changes, successful shell checks, and behavior
 actually observed in the running client; leave fresh-session recovery pending
@@ -63,9 +65,9 @@ project in ordinary language. Fresh-client skill routing still needs qualificati
 
 - **Usage-audit baseline:** measure ordinary agent usage before introducing
   Continuity instructions or tools. Follow [audit-first setup](#start-with-usage-auditing).
-- **Prose-first trial:** evaluate explicit knowledge recording with existing prose
-  in control. Follow [trials](trials.md) before changing client setup.
-- **Full adoption:** enable task continuity and qualify checkpoint recovery with
+- **Full local trial:** evaluate populated tracks/plans, normal observation and fresh-session
+  recovery while retaining original docs for review and handback. Follow [trials](trials.md) before changing client setup.
+- **Full adoption:** choose ongoing use of the same local workflow with
   the [setup steps below](#setup-and-verification).
 
 You can stop using Llewm after either trial or adoption. Adoption does not
@@ -92,8 +94,8 @@ See [leaving Llewm](installation.md#remove-or-disable-an-installation).
 To proceed later, retain the store and usage observations. Start a trial using
 the instructions below, or deliberately choose full adoption. When enabling the
 full client, remove any manually registered audit-only hooks, run `llewm mode full`,
-then follow client setup and restart verification. A trial still suppresses task
-bootstrap until reviewed adoption, even with mode `full`.
+then follow client setup and restart verification. A trial supports the same local task
+recovery with mode `full`; optional History sync remains disabled during trial.
 
 Already onboarded another way? Follow [switching an existing setup to audit-only](usage.md#switch-an-existing-setup-to-audit-only).
 This also covers returning to full operation; changing mode preserves history
@@ -101,13 +103,13 @@ and does not change trial/adoption state.
 
 ### Choose a trial before adoption
 
-Start with a [disposable demo or prose-first project trial](trials.md). For a real
-trial run `llewm trial start --prose PATHS` before changing client setup. Existing
-prose remains in control, task bootstrap is suppressed and History sync is disabled.
+Start with a [disposable demo or full local project trial](trials.md). For a real
+trial run `llewm trial start --prose PATHS` before changing client setup. Original
+prose is retained, full local task recovery is available, and History sync is disabled.
 At the review point, choose `trial adopt --reviewed` or the reviewed prose-handback
 workflow. A review reminder never automatically adopts or deletes anything.
-The setup steps below describe full adoption; do not silently perform that cutover for
-someone who only asked to try the product.
+The setup steps below also verify a trial; ongoing adoption still requires an
+explicit choice. Neither path requires maintaining duplicate operational plans.
 
 ## Setup and verification
 
@@ -134,11 +136,17 @@ someone who only asked to try the product.
 5. **Verify the running client.** Restart the parent IDE and client when required.
    Compare MCP `continuity_info` with the installed version. A successful shell
    invocation or doctor check does not prove that hooks ran in the client.
-6. **Save an adoption checkpoint.** Name the current objective, authoritative
+6. **Populate and review the project model.** Follow [prose import](prose-import.md)
+   for trial and adoption: the onboarding agent reads a bounded set of current
+   authoritative docs once, imports source-linked tracks and plans, and shows
+   them in `llewm tui`. Interpretations stay proposed unless review/delegation
+   permits otherwise. Review uncertainties and the intended current work once;
+   do not manufacture approvals or reconstruct all historical commits.
+7. **Save a first checkpoint.** Name the current objective, authoritative
    project instructions, observed checks, and remaining limits. Use the checkpoint
    skill's dry-run/save/readback flow. Adopt existing history progressively; do
    not manufacture knowledge from every old commit. Retain an existing lineage.
-7. **Recover in a fresh session.** Ask to continue. Confirm the exact checkpoint,
+8. **Recover in a fresh session.** Ask to continue. Confirm the exact checkpoint,
    objective and next action, plus the observed SessionStart event. Record the
    client/plugin versions and OS/architecture that passed.
 
@@ -146,6 +154,19 @@ The result should distinguish what was prepared, installed, and observed in a
 live client. If the agent cannot observe a fresh session, that final check remains
 pending. Expiring presence from a previous session is advisory, not proof of a
 second writer.
+
+## See the current operating state
+
+Run `llewm doctor` for hook mode, recorded trial/adoption state, effective hooks
+and session-recovery behavior, alongside normal health checks. Use
+`llewm doctor --output json` for project state and readiness as JSON.
+`not_recorded` means no trial/adoption receipt; it does not prove reviewed adoption.
+A disposable demo has the same state as any other trial. Audit mode and adoption
+state are independent: an adopted project may temporarily collect only usage.
+Live client activation is reported as `not_verified`; verify the actual client
+separately. Doctor reads without registering a project or opening a writable
+store and can report state after exit or before initialization (missing health
+prerequisites still produce a diagnostic error).
 
 ## Optional capabilities
 

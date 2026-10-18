@@ -76,7 +76,7 @@ func newRootCommand(name string) *cobra.Command {
 	root.PersistentFlags().String("project-root", "", "explicit Git project root or path within it")
 	root.AddCommand(pmCommand())
 	root.AddCommand(versionCommand(), initCommand(), databaseCommand(), projectCommand(), workspaceCommand(), syncCommand(), globalCommand(), doctorCommand(), clientCommand(), briefCommand(), workCommand(), presenceCommand(), tuiCommand(), consoleCommand(), hookCommand(), coverageCommand(), usageCommand(), statsCommand(), checkpointCommand(), procedureCommand(), resourceCommand(), pinCommand(), leaseCommand(), standingGrantCommand(), forkCommand(), contractCommand(), bootstrapCommand(), activityCommand(), roadmapCommand(), releaseCommand(), trackPlanCommand(), decisionCommand(), historyCommand(), topicCommand(), narrativeCommand(), itemCommand(), memoryCommand(), mcpCommand())
-	root.AddCommand(modeCommand(), trialCommand())
+	root.AddCommand(modeCommand(), trialCommand(), proseImportCommand())
 	root.AddCommand(installCommand())
 	return root
 }
@@ -1307,6 +1307,7 @@ func creationStatus(existed bool) string {
 
 func doctorCommand() *cobra.Command {
 	var readinessReport, checkIntegrity bool
+	var output string
 	var probes, sourceVerifications []string
 	command := &cobra.Command{
 		Use:   "doctor",
@@ -1318,8 +1319,30 @@ separate source, installed artifact, database, runtime, and named probe
 observations. Nothing is changed either way.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withApp(cmd, func(application *app.App) error {
-				if readinessReport || checkIntegrity || len(probes) > 0 || len(sourceVerifications) > 0 {
+			format, err := outputFormat(output)
+			if err != nil {
+				return err
+			}
+			root, err := projectRoot(cmd)
+			if err != nil {
+				return err
+			}
+			cfg, err := config.Load(root)
+			if err != nil {
+				return err
+			}
+			state, err := adoption.Inspect(config.StateDir(root), cfg.Mode)
+			if err != nil {
+				return err
+			}
+			jsonReport := format == "json" || readinessReport || checkIntegrity || len(probes) > 0 || len(sourceVerifications) > 0
+			if !jsonReport {
+				fmt.Fprintf(cmd.OutOrStdout(), "Hook mode: %s\nAdoption state: %s\nEffective hooks: %s\nSession recovery: %s\nLive client: %s\n", state.HookMode, state.AdoptionState, state.EffectiveHooks, state.SessionRecovery, state.LiveClient)
+			}
+			opened := false
+			err = withReadOnlyApp(cmd, func(application *app.App) error {
+				opened = true
+				if jsonReport {
 					report, err := application.Readiness.Report(cmd.Context(), readiness.Input{Probes: probes, SourceVerifications: sourceVerifications, CheckIntegrity: checkIntegrity})
 					if err != nil {
 						return err
@@ -1385,8 +1408,13 @@ observations. Nothing is changed either way.`,
 				}
 				return nil
 			})
+			if err != nil && !opened && jsonReport {
+				_ = writeJSON(cmd.OutOrStdout(), map[string]any{"project_state": state, "health_error": err.Error()})
+			}
+			return err
 		},
 	}
+	command.Flags().StringVar(&output, "output", "text", "text or json; JSON includes readiness and project state")
 	command.Flags().BoolVar(&readinessReport, "readiness", false, "print the operational-readiness report as JSON")
 	command.Flags().StringSliceVar(&probes, "probe", nil, "readiness: named live probe; supported form is narrative:<id>")
 	command.Flags().StringSliceVar(&sourceVerifications, "source-verification", nil, "readiness: caller-reported source verification reference")
@@ -1427,7 +1455,7 @@ func hookCommand() *cobra.Command {
 				return nil
 			}
 			return withApp(cmd, func(application *app.App) error {
-				if phase.Phase() == "trial" || auditOnly || application.Config.Mode == "audit-only" {
+				if auditOnly || application.Config.Mode == "audit-only" {
 					return auditHook(cmd, application, args[0], body)
 				}
 				var codexEnvelope clients.HookEnvelope

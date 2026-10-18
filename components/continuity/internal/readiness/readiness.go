@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/llewm/llewm/components/continuity/internal/adoption"
+	"github.com/llewm/llewm/components/continuity/internal/config"
 	"strings"
 	"time"
 
@@ -66,15 +68,16 @@ type Runtime struct {
 }
 
 type Report struct {
-	SchemaVersion         int            `json:"schema_version"`
-	Stage                 string         `json:"stage"`
-	Source                Source         `json:"source"`
-	Installed             Installed      `json:"installed"`
-	Database              Database       `json:"database"`
-	Runtime               Runtime        `json:"runtime"`
-	Probes                []Verification `json:"probes"`
-	UnmetGates            []string       `json:"unmet_gates"`
-	RecommendedNextAction string         `json:"recommended_next_action"`
+	ProjectState          adoption.Status `json:"project_state"`
+	SchemaVersion         int             `json:"schema_version"`
+	Stage                 string          `json:"stage"`
+	Source                Source          `json:"source"`
+	Installed             Installed       `json:"installed"`
+	Database              Database        `json:"database"`
+	Runtime               Runtime         `json:"runtime"`
+	Probes                []Verification  `json:"probes"`
+	UnmetGates            []string        `json:"unmet_gates"`
+	RecommendedNextAction string          `json:"recommended_next_action"`
 	// Warnings are advisory observations that are not gates, such as a
 	// client missing the permission rules Continuity needs.
 	Warnings   []string `json:"warnings"`
@@ -124,7 +127,16 @@ func (s Service) Report(ctx context.Context, input Input) (Report, error) {
 		}
 		input.SourceVerifications[index] = value
 	}
+	cfg, err := config.Load(s.Root)
+	if err != nil {
+		return Report{}, err
+	}
+	state, err := adoption.Inspect(config.StateDir(s.Root), cfg.Mode)
+	if err != nil {
+		return Report{}, err
+	}
 	result := Report{
+		ProjectState:  state,
 		SchemaVersion: SchemaVersion,
 		Source:        Source{Root: s.Root, ExpectedMCPAPI: s.ExpectedMCPAPI, ExpectedMigration: s.ExpectedMigration, Verification: []Verification{}, Authority: "machine_observed"},
 		Installed:     Installed{Authority: "machine_observed"},

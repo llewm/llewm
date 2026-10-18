@@ -32,12 +32,14 @@ func TestTrialHandbackPreservesLearningAndConcurrentProse(t *testing.T) {
 		t.Fatalf("trial MCP unavailable: %v %+v", err, beforeCall)
 	}
 
-	// Startup must not direct work from stored task state, even after checkpointing.
+	// Trials must exercise real task recovery, not just passive usage collection.
 	runCLI(t, "", "checkpoint", "create", "--task-id", "learned", "--task", "Trial learning", "--summary", "Keep the newly discovered recovery requirement", "--next", "Review new recovery knowledge")
-	if out := runCLI(t, `{"session_id":"trial-session","hook_event_name":"SessionStart"}`, "hook", "codex"); out != "" {
-		t.Fatalf("trial startup directed work: %s", out)
+	if out := runCLI(t, `{"session_id":"trial-session","hook_event_name":"SessionStart"}`, "hook", "codex"); !strings.Contains(out, "Trial learning") || !strings.Contains(out, "additionalContext") {
+		t.Fatalf("trial startup did not recover work: %s", out)
 	}
-	requireCLIError(t, "trial", "bootstrap")
+	if out := runCLI(t, "", "bootstrap"); !strings.Contains(out, "Trial learning") {
+		t.Fatalf("trial bootstrap missing saved task: %s", out)
+	}
 	a, err := app.Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)

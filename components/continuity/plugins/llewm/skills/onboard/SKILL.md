@@ -5,16 +5,57 @@ description: Set up or verify Llewm Continuity for a chosen Git project and codi
 
 # Guide Continuity onboarding
 
-For a request to try the product, use the matching `docs/trials.md` workflow.
-Prefer a disposable Git demo with no plugin setup for a first look. For a real
-project, run `llewm trial start --prose PATHS` before client setup and list the
-project prose that must survive. Keep prose in control; do not delete instructions
-or replace them with Continuity queries. Trial hooks are silent and automatic
-task bootstrap is refused. Save client setup receipts separately because shared
-configuration is not owned by the trial. The review point requires explicit
-`trial adopt --reviewed` or a reviewed handback and fresh prose-only verification.
-Do not treat trial expiry as consent or skip the handback review. Full adoption
-steps below apply only when adoption is requested.
+Establish the starting path: usage-audit baseline, full local trial, or ongoing
+adoption. Infer it from the user's request; ask once if it is missing. Do not
+turn audit-only setup into a trial/adoption or full plugin installation.
+
+For a usage baseline, follow `docs/usage.md` and the audit-first section of
+`docs/onboarding.md`: install only the executable, initialize the chosen project,
+select `llewm mode audit-only`, leave full plugin/MCP/skills disabled, and collect
+usage offline in fresh sessions. Passive hook registration is optional and
+separate. No semantic prose import or checkpoint recovery is required.
+
+For a request to try the product, use `docs/trials.md`. A disposable Git demo is
+one option; a real-project trial runs `llewm trial start --prose PATHS` before
+client setup and includes every source doc that must survive. Trials support the
+full local workflow, including normal hooks and checkpoint recovery. Preserve
+original docs as the baseline; do not require duplicate maintenance of every
+operational plan or delete useful project guidance. History sync remains disabled.
+Save shared client setup receipts separately. Review expiry never adopts or exits.
+Both trial and adoption can be left through a knowledge-preserving prose handback.
+
+During trial AND adoption onboarding, populate a useful project model by default:
+
+1. Identify authoritative instructions, roadmap/plan and current-work docs from
+   root guidance and explicit references. Select a bounded set; do not scan the
+   whole repository or reconstruct history from every commit.
+2. Follow `docs/prose-import.md`. Run `llewm import-prose --sources PATHS` to
+   obtain redacted text and source hashes. Interpret these documents once using
+   this session's model; the executable calls no model. Read current DB tracks
+   and plans first on an existing installation and reuse their stable IDs.
+3. Prepare a version-1 bundle in ignored project state, preserving source path,
+   heading/excerpt, source hash and exact expected node/plan revisions. Map
+   explicit item statuses; mark unknown status pending and put uncertainty or
+   conflicts in the plan summary. Never invent active work, dependencies or
+   historical user approvals. Preview `llewm import-prose --file BUNDLE`, then
+   apply the valid batch with `--apply` under the user's onboarding instruction.
+   Applying imports records interpretations; it does not grant work execution.
+4. Show tracks/plans in `llewm tui`; proposals are visible before review. Present
+   one concise review of imported intent, uncertainties and missing sources.
+   Activate plans only with explicit review or existing delegated policy; never
+   change policy or name the user as a model-authored record's creator.
+   Use the existing roadmap review interface for inferred node status. Explain
+   retained source docs and which operational state will be maintained in the DB.
+5. Preserve relevant source-backed facts with ordinary narrative/resource tools;
+   record decisions as user decisions only when explicitly reviewed. Save the
+   current objective and next action in a checkpoint once grounded. If there are
+   several plausible current tasks, ask for selection instead of inventing one.
+   Bind the chosen task to its track with `llewm roadmap link --kind task --node
+   NODE --task TASK --reason REASON --request-key KEY` after checkpoint creation
+   so joined views and TUI selection identify the same current work.
+   Remove scratch source/bundle JSON after successful receipt/readback. On rerun,
+   re-read changed sources and current record revisions; reconcile conflicts.
+
 
 Help the user reach a verified first checkpoint and fresh-session recovery. This
 skill guides project adoption and live verification; the scoped installer registers
@@ -36,7 +77,8 @@ from the process that launches the client, not only an interactive shell.
 
 From the chosen project, or with `llewm --project-root PATH` before each command:
 
-- Run `llewm init` for initial adoption, then `llewm doctor` and
+- Run `llewm init` for initial setup, then `llewm doctor` (or
+  `llewm doctor --output json`) and
   `llewm database status`. Init is idempotent; existing state is retained.
 - If migrations are pending, follow the documented backup/verify/migrate flow.
   Do not let a build, hook, or MCP startup substitute for migration verification.
@@ -58,9 +100,10 @@ from all commits. Reuse an existing Continuity lineage when appropriate; do not
 configure history sync, usage ingestion, reporting, or personal global guidance
 unless requested. Reporting is a separate explicit opt-in, never a setup default.
 
-Read the checkpoint skill to save a concise first adoption checkpoint with the
+Read the checkpoint skill to save a concise first trial/adoption checkpoint with the
 current task, authoritative sources, checks and unresolved setup limits. State
-that older semantic history was not imported. Do not replace an existing task's
+which current prose sources were imported and that older semantic history was not
+reconstructed. Do not replace an existing task's
 checkpoint with an onboarding report; create a distinct onboarding task when
 needed. Dry-run, save, and read it back through the available supported surface.
 

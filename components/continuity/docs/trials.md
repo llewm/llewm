@@ -1,12 +1,16 @@
 # Try Continuity, adopt it, or return to prose
 
-Try Llewm with your existing docs in control. Adopt for automatic continuity.
+Try the full local Llewm workflow while retaining your original docs.
+Adopt when you choose ongoing use.
 You can leave either path and continue without Llewm.
 
-A trial records a starting snapshot, suppresses automatic task context, and blocks
-History sync while you evaluate explicit knowledge reads and writes. Adoption
-enables normal task continuity; it does not automatically reorganize or replace
-project docs. Keep standalone project instructions useful in both paths.
+A trial records a starting snapshot and enables normal local hooks, knowledge
+recording and fresh-session recovery. Guided onboarding [populates tracks and
+plans from current prose](prose-import.md) so the TUI shows your project immediately.
+The `trial start` command creates the baseline/store; the onboarding agent performs
+the semantic import. History sync stays disabled during trial. Adoption records
+ongoing use; it does not unlock local recovery or automatically replace project
+docs. Keep useful standalone instructions in both paths.
 
 To stop using Llewm, disable its client integrations, stop its processes, remove
 instructions that require Llewm, and start a fresh session. If useful knowledge
@@ -35,8 +39,7 @@ llewm trial prepare --out review
 
 Read `review/review.md`. You can try the CLI without installing any client plugin,
 setting permissions, or connecting a remote. A fresh process can read saved
-records with `checkpoint show` and the history reads; automatic task bootstrap
-is deliberately unavailable before adoption. Use `llewm --help` for exact read
+records with `checkpoint show`, history reads and `bootstrap`. Use `llewm --help` for exact read
 commands. Only the demo directory and normal local project registry are affected.
 
 ## Real-project trial
@@ -65,11 +68,17 @@ Keep original prose in Git. Inspect sensitive content before supplying it.
 
 During a trial:
 
-- Existing prose controls work. Do not delete it or replace it with “ask Llewm.”
-- Full hooks act as silent lifecycle/audit hooks. They do not emit task bootstraps,
-  prompts, tool inputs or raw payloads. No automatic task selection is injected.
-- CLI/MCP reads and explicit record writes let you evaluate saved knowledge.
-  Automatic task bootstrap returns an explanatory refusal until adoption.
+- Original prose remains available for review and handback. Root instructions
+  retain authority. Do not delete useful docs or require duplicate maintenance
+  of every operational plan; review what the DB will maintain.
+- With mode `full`, normal hooks observe activity, deliver the saved task at
+  SessionStart, surface checkpoint reminders and run configured roadmap scans.
+  Checkpoints and explicit CLI/MCP bootstrap recover the same saved state.
+- The onboarding agent imports current tracks/plans with source evidence and
+  existing plan-review policy. Explicit CLI/MCP reads and writes remain available.
+- Mode `audit-only` still selects passive hooks and refuses new MCP startup.
+  Use the separate [baseline path](usage.md#audit-only-baselines-and-comparisons)
+  for a comparison without plugin/skill context.
 - History sync setup and execution are refused. This is independent of plugin,
   reporting or external tool permissions; do not enable optional reporting as
   part of the trial.
@@ -88,8 +97,8 @@ settings in the baseline can be compared, but are never blindly restored.
 llewm trial adopt --reviewed
 ```
 
-Adopt after reviewing how agents will use saved tasks and plans. It enables normal
-task continuity; repository instruction authority remains unchanged. It does not
+Adopt after reviewing the trial and choosing ongoing use. Local hooks and task
+recovery stay enabled; repository instruction authority remains unchanged. It does not
 remove prose, enable sync, enable reporting, or alter approvals. Restart clients
 and qualify exact checkpoint recovery in a fresh session. Keep prose sufficient
 for recovery while deciding what ongoing responsibilities belong in Continuity.

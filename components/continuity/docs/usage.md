@@ -208,9 +208,9 @@ To return, remove the manually registered `--audit-only` hooks (their flag would
 remain passive even in full mode), run `llewm mode full`, restore the reviewed
 full client integration, and restart into a fresh session. Follow
 [client verification](client-integrations.md#verify-the-fresh-client) for adopted
-projects. During an active trial, explicit CLI/MCP evaluation is available but
-automatic task bootstrap remains suppressed until `trial adopt --reviewed`;
-changing mode does not perform that adoption. Keep optional History sync and
+projects. During an active trial, full local hooks and session recovery are available
+again; `trial adopt --reviewed` separately records ongoing use. Changing mode
+does not perform that adoption. Keep optional History sync and
 reporting as separate choices; audit mode does not erase their configuration
 or stop independently launched processes.
 

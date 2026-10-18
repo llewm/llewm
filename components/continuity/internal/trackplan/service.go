@@ -88,6 +88,24 @@ func cleanUnique(values []string, name string) ([]string, error) {
 }
 
 func (service Service) AppendPlan(ctx context.Context, value Plan) (Plan, error) {
+	tx, err := service.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Plan{}, err
+	}
+	defer tx.Rollback()
+	result, err := service.AppendPlanTx(ctx, tx, value)
+	if err != nil {
+		return Plan{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Plan{}, err
+	}
+	return result, nil
+}
+
+// AppendPlanTx applies the same validation, review policy and lease fencing in
+// an enclosing transaction. The caller must commit or roll back the transaction.
+func (service Service) AppendPlanTx(ctx context.Context, tx *sql.Tx, value Plan) (Plan, error) {
 	var err error
 	for name, target := range map[string]*string{"project ID": &value.ProjectID, "plan ID": &value.ID, "roadmap node ID": &value.RoadmapNodeID, "task ID": &value.TaskID, "title": &value.Title, "summary": &value.Summary, "status": &value.Status, "creator": &value.Creator, "model": &value.Model} {
 		required := name == "project ID" || name == "plan ID" || name == "roadmap node ID" || name == "title" || name == "summary" || name == "status" || name == "creator"
@@ -130,11 +148,6 @@ func (service Service) AppendPlan(ctx context.Context, value Plan) (Plan, error)
 	} else if len(encoded) > maxPlanBytes {
 		return Plan{}, fmt.Errorf("plan exceeds 256 KiB limit")
 	}
-	tx, err := service.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return Plan{}, err
-	}
-	defer tx.Rollback()
 	var latest int
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM track_plan_revisions WHERE project_id=? AND id=?`, value.ProjectID, value.ID).Scan(&latest); err != nil {
 		return Plan{}, err
@@ -258,9 +271,6 @@ func (service Service) AppendPlan(ctx context.Context, value Plan) (Plan, error)
 	}
 	stamp, err := value.Fence.Stamp(ctx, tx, value.ProjectID, lease.StampPlan, fmt.Sprintf("%s@%d", value.ID, value.Revision), "track_plan", value.ID, value.RecordedAt)
 	if err != nil {
-		return Plan{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return Plan{}, err
 	}
 	value.Lease = &stamp

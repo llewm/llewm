@@ -28,7 +28,7 @@ type handbackReview struct {
 }
 
 func trialCommand() *cobra.Command {
-	parent := &cobra.Command{Use: "trial", Short: "Try Continuity with prose in control, adopt explicitly, or prepare a reviewed handback"}
+	parent := &cobra.Command{Use: "trial", Short: "Evaluate the full local workflow, adopt explicitly, or prepare a reviewed handback"}
 	var prose []string
 	var period time.Duration
 	start := &cobra.Command{Use: "start", Short: "Capture a redacted prose baseline before client setup; sync must be unconfigured", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -61,7 +61,7 @@ func trialCommand() *cobra.Command {
 		if err = withApp(cmd, func(a *app.App) error { _, err := a.Portable.Initialize(cmd.Context(), a.ProjectID, ""); return err }); err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "Trial started. Existing project prose remains in control; automatic task bootstrap and History sync are disabled for this trial. No project prose or client configuration was changed. Record shared client setup separately. Run trial status to review, trial adopt to adopt, or trial prepare to leave.")
+		fmt.Fprintln(cmd.OutOrStdout(), "Trial started. Full local hooks, knowledge recording and session recovery are available. Original prose is retained for review; History sync remains disabled. No project prose or client configuration was changed. Record shared client setup separately. Run trial status to review, trial adopt to adopt, or trial prepare to leave.")
 		return nil
 	}}
 	start.Flags().StringSliceVar(&prose, "prose", nil, "additional project-relative instruction/plan files to baseline (repeat or comma separate)")
@@ -79,7 +79,7 @@ func trialCommand() *cobra.Command {
 		return writeJSON(cmd.OutOrStdout(), map[string]any{"state": s, "phase": s.Phase(), "current": current, "review_due": time.Now().After(s.ReviewAfter), "shared_client_configuration": "not owned by the project trial; inspect plugin, hook, MCP, permission and global guidance changes separately"})
 	}})
 	var adoptReviewed bool
-	adopt := &cobra.Command{Use: "adopt", Short: "Explicitly let Continuity supply task continuity; preserve prose and data", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	adopt := &cobra.Command{Use: "adopt", Short: "Confirm ongoing use after a full local trial; preserve prose and data", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		root, s, err := trialState(cmd)
 		if err != nil {
 			return err
@@ -94,7 +94,7 @@ func trialCommand() *cobra.Command {
 		if err = adoption.Save(config.StateDir(root), *s); err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "Adopted. Project instruction prose retains its instruction authority. Restart clients; verify exact checkpoint recovery. History sync remains a separate choice. The original prose baseline is retained for handback.")
+		fmt.Fprintln(cmd.OutOrStdout(), "Adopted for ongoing use. The local continuity workflow remains enabled. Project instruction prose retains its instruction authority. History sync remains a separate choice. The original prose baseline is retained for handback.")
 		return nil
 	}}
 	adopt.Flags().BoolVar(&adoptReviewed, "reviewed", false, "confirm explicit adoption after reviewing project control")

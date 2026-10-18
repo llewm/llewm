@@ -236,6 +236,15 @@ func (v *terminalView) load(ctx context.Context) error {
 			if err == nil {
 				v.current, err = v.source.Current(ctx)
 			}
+			if err == nil && v.current == nil && v.filter == "current" && len(v.work.Items) == 0 {
+				all, readErr := v.source.Work(ctx, "all")
+				if readErr != nil {
+					err = readErr
+				} else if len(all.Items) > 0 {
+					v.work, v.filter = all, "all"
+					v.status = "No current task yet; showing recorded tracks, including proposals for review."
+				}
+			}
 			if err == nil {
 				err = v.loadProgress(ctx)
 			}

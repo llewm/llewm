@@ -71,6 +71,20 @@ func relativePath(name, value string) (string, error) {
 }
 
 func (service Service) AppendNode(ctx context.Context, node Node) (Node, error) {
+	return service.appendNode(ctx, service.DB, node)
+}
+
+// AppendNodeTx validates and appends within a caller-owned transaction.
+func (service Service) AppendNodeTx(ctx context.Context, tx *sql.Tx, node Node) (Node, error) {
+	return service.appendNode(ctx, tx, node)
+}
+
+type nodeWriter interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (service Service) appendNode(ctx context.Context, db nodeWriter, node Node) (Node, error) {
 	var err error
 	if node.ProjectID, err = text("project ID", node.ProjectID, true); err != nil {
 		return Node{}, err
@@ -131,7 +145,7 @@ func (service Service) AppendNode(ctx context.Context, node Node) (Node, error) 
 		return Node{}, fmt.Errorf("priority must be between 0 and 100")
 	}
 	if node.Revision == 0 {
-		if err := service.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision), 0) + 1 FROM roadmap_nodes WHERE project_id = ? AND node_id = ?`, node.ProjectID, node.ID).Scan(&node.Revision); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision), 0) + 1 FROM roadmap_nodes WHERE project_id = ? AND node_id = ?`, node.ProjectID, node.ID).Scan(&node.Revision); err != nil {
 			return Node{}, err
 		}
 	}
@@ -139,7 +153,7 @@ func (service Service) AppendNode(ctx context.Context, node Node) (Node, error) 
 		return Node{}, fmt.Errorf("revision must be positive")
 	}
 	node.Authority, node.RecordedAt, node.SchemaVersion = "caller_asserted", service.now(), SchemaVersion
-	_, err = service.DB.ExecContext(ctx, `INSERT INTO roadmap_nodes(project_id, node_id, revision, title, status, priority, kind, target_date, target_release, target_horizon, evidence_refs_json, source_path, source_ref, authority, recorded_at, schema_version) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?)`, node.ProjectID, node.ID, node.Revision, node.Title, node.Status, node.Priority, node.Kind, node.TargetDate, node.TargetRelease, node.TargetHorizon, string(evidenceJSON), node.SourcePath, node.SourceRef, node.Authority, node.RecordedAt.Format(time.RFC3339Nano), node.SchemaVersion)
+	_, err = db.ExecContext(ctx, `INSERT INTO roadmap_nodes(project_id, node_id, revision, title, status, priority, kind, target_date, target_release, target_horizon, evidence_refs_json, source_path, source_ref, authority, recorded_at, schema_version) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?)`, node.ProjectID, node.ID, node.Revision, node.Title, node.Status, node.Priority, node.Kind, node.TargetDate, node.TargetRelease, node.TargetHorizon, string(evidenceJSON), node.SourcePath, node.SourceRef, node.Authority, node.RecordedAt.Format(time.RFC3339Nano), node.SchemaVersion)
 	return node, err
 }
 

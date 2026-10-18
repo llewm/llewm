@@ -14,8 +14,10 @@ harder to navigate and maintain.
 Continuity already stores attributable task state, plans, decisions, and history
 and retrieves bounded context for the next action. The direction is to maintain
 operational project knowledge there, keeping ordinary docs focused on useful
-guidance and explanations. Onboarding and doc cleanup still require explicit
-review; Llewm does not automatically import or reconcile existing prose today.
+guidance and explanations. Guided onboarding imports selected prose into
+source-linked tracks and plans
+using the existing agent, then presents it for review. Doc cleanup and
+reconciliation of conflicting intent remain deliberate choices.
 
 **Continuity is the entire current MVP, not the full scope of Llewm.** It preserves
 attributable project rules, task state, attempts, and verification across coding-agent
@@ -35,7 +37,9 @@ See the
 ## Get started
 
 Start with [guided onboarding](components/continuity/docs/onboarding.md) for an
-agent-assisted setup and verified first checkpoint. Follow [Continuity installation](components/continuity/docs/installation.md) for
+agent-assisted audit baseline, full local trial, or adoption. Trial and adoption
+include [project-prose import](components/continuity/docs/prose-import.md), a populated
+TUI and verified first checkpoint. Follow [Continuity installation](components/continuity/docs/installation.md) for
 Linux, macOS, Windows, and WSL, then [client integrations](components/continuity/docs/client-integrations.md).
 The installed binary bundles its matching plugins: run `llewm init` in the project,
 then `llewm install --client codex --permissions` (or `--client claude-code`).

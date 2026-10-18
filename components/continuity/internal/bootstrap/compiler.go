@@ -16,6 +16,7 @@ import (
 )
 
 type Packet struct {
+	Trial         bool                   `json:"trial,omitempty"`
 	SchemaVersion int                    `json:"schema_version"`
 	Project       string                 `json:"project"`
 	Global        []instructions.Section `json:"global,omitempty"`
@@ -258,7 +259,11 @@ func (c Compiler) PreflightWithReconciliation(ctx context.Context, projectID, ro
 	if err != nil {
 		return Readiness{}, err
 	}
-	packet := Packet{SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, Checkpoint: &prepared, UnresolvedActions: unresolved, Pins: pins, PinsOmitted: omitted}
+	phase, err := adoption.Load(config.StateDir(root))
+	if err != nil {
+		return Readiness{}, err
+	}
+	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, Checkpoint: &prepared, UnresolvedActions: unresolved, Pins: pins, PinsOmitted: omitted}
 	c.addNotices(ctx, projectID, &packet)
 	var automaticChoice *Choice
 	if c.Choose != nil {
@@ -336,7 +341,7 @@ func (c Compiler) BuildForSession(ctx context.Context, projectID, root, name str
 	if err != nil {
 		return Packet{}, err
 	}
-	if phase.Phase() == "trial" || phase.Phase() == "exited" {
+	if phase.Phase() == "exited" {
 		return Packet{}, fmt.Errorf("Continuity %s: existing project prose controls work; automatic task bootstrap is disabled", phase.Phase())
 	}
 
@@ -388,7 +393,7 @@ func (c Compiler) BuildForSession(ctx context.Context, projectID, root, name str
 	if err != nil {
 		return Packet{}, err
 	}
-	packet := Packet{SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, Checkpoint: latest, UnresolvedActions: unresolved, Fallback: fallback, Pins: pins, PinsOmitted: omitted}
+	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, Checkpoint: latest, UnresolvedActions: unresolved, Fallback: fallback, Pins: pins, PinsOmitted: omitted}
 	c.addNotices(ctx, projectID, &packet)
 	if latest != nil || ambiguous {
 		packet.Choice = choice
@@ -536,6 +541,9 @@ func globalOverrides(global, rules []instructions.Section) map[string]instructio
 func Markdown(packet Packet) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Continuity bootstrap\n\nProject: %s\n\n", packet.Project)
+	if packet.Trial {
+		out.WriteString("Trial: full local continuity is enabled. Preserve original project docs for review and handback; History sync remains disabled. Do not maintain duplicate operational plans by default.\n\n")
+	}
 	out.WriteString(coreRulesMarkdown(packet.CoreRules, packet.CoreRulesDisabled, packet.CoreRulesWarning))
 	if packet.Checkpoint != nil {
 		fmt.Fprintf(&out, "Suggested conversation title: %s\n\n", conversationTitle(packet.Project, packet.Checkpoint.Task))

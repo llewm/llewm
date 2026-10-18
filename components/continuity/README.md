@@ -6,8 +6,9 @@ It is a local-first continuity and activity controller for coding agents. It kee
 A major goal is to reduce repeated prose discovery in fresh sessions and the
 accumulation of duplicate plans, handoff files, and stale agent notes in the
 repository. Structured state and bounded retrieval support that direction today;
-populating it from existing docs and reducing redundant prose still require
-deliberate review during onboarding and ongoing work.
+guided onboarding populates it from selected docs through
+[source-linked prose import](docs/prose-import.md). Reducing redundant prose
+and reconciling conflicting intent remain deliberate review choices.
 
 The MVP deliberately avoids general-purpose AI memory and autonomous execution. It focuses on:
 
@@ -122,7 +123,7 @@ llewm --project-root /path/to/project mcp
 The default state directory is `.llewm/continuity` at the detected Git root (the Llewm
 repository root when developing here), not in this component directory. Set `CONTINUITY_HOME` to use a different local component state directory.
 See [layout migration](docs/project-layout.md) for legacy `.continuity` stores and
-[prose-first trials and leaving Llewm](docs/trials.md) before adopting a real project.
+[full local trials and leaving Llewm](docs/trials.md) before adopting a real project.
 
 Project IDs are opaque and permanent; the root path is only the project's current
 location. A linked Git worktree uses its main checkout's project and store, and a

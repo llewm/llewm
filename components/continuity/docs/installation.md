@@ -12,7 +12,7 @@ installation, MCP registration, checkpoint recovery and the full-client permissi
 setup. Offline `usage ingest` needs no Llewm integration in the running client;
 optional passive hooks require their own reviewed client registration.
 
-For a **prose-first trial**, follow [trials](trials.md) before configuring the
+For a **full local trial**, follow [trials](trials.md) before configuring the
 client. For **full adoption**, follow the complete [onboarding checklist](onboarding.md#setup-and-verification).
 To switch an existing installation to audit-only or return to full operation,
 use the [mode-switch checklist](usage.md#switch-an-existing-setup-to-audit-only).
@@ -638,8 +638,8 @@ installers are not yet available.
 
 ## Remove or disable an installation
 
-You can stop using Llewm after either trial or full adoption. Adoption enables
-automatic continuity; it does not automatically restructure project docs or
+You can stop using Llewm after either trial or full adoption. Trial and adoption both support
+the full local continuity workflow; neither automatically restructures project docs or
 make Llewm a permanent requirement.
 
 Preserve any knowledge you still need in ordinary project docs, remove instructions
