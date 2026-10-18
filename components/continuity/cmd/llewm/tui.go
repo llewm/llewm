@@ -99,7 +99,7 @@ var errTerminalQuit = errors.New("quit")
 
 var terminalTopViews = []string{"tracks", "timeline", "decisions", "ideas", "history", "project", "checkpoints", "health", "releases", "delivery"}
 var terminalViewTitles = map[string]string{"tracks": "Tracks", "timeline": "Timeline", "decisions": "Decisions", "ideas": "Work items", "history": "History", "project": "Project", "checkpoints": "Checkpoints", "health": "Health", "releases": "Releases", "delivery": "Delivery"}
-var terminalFilters = []string{"current", "active", "next", "blocked", "stale", "all", "everything"}
+var terminalFilters = []string{"open", "current", "active", "next", "blocked", "stale", "all", "everything"}
 var terminalKinds = []string{"", "checkpoint", "roadmap_revision", "work_item", "task_transition", "activity_event"}
 
 // terminalLevel is one drilled-in screen above a top-level view.
@@ -221,7 +221,7 @@ func tuiCommand() *cobra.Command {
 }
 
 func newTerminalView(source terminalSource) *terminalView {
-	return &terminalView{source: source, view: "tracks", filter: "all", currentTrack: -1, now: time.Now}
+	return &terminalView{source: source, view: "tracks", filter: "open", currentTrack: -1, now: time.Now}
 }
 
 func (v *terminalView) load(ctx context.Context) error {

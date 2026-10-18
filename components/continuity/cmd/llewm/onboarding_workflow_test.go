@@ -176,15 +176,31 @@ func TestProseImportPreviewApplyReplayAndTUI(t *testing.T) {
 	if _, err := a.Checkpoints.Create(ctx, checkpoint.Checkpoint{ProjectID: a.ProjectID, TaskID: "current-work", Task: "Current work", Status: "in_progress", NextAction: "Continue"}); err != nil {
 		t.Fatal(err)
 	}
+	for _, node := range []roadmap.Node{
+		{ID: "finished", Title: "Finished", Status: "completed", Priority: 0},
+		{ID: "deferred", Title: "Deferred", Status: "deferred", Priority: 0},
+	} {
+		node.ProjectID, node.SourcePath = a.ProjectID, "PLAN.md"
+		if _, err := a.Roadmap.AppendNode(ctx, node); err != nil {
+			t.Fatal(err)
+		}
+	}
 	view = newTerminalView(source)
 	if err := view.load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if view.filter != "all" || len(view.work.Items) != 2 || view.currentTrack < 0 || view.workIndex != view.currentTrack {
+	if view.filter != "open" || len(view.work.Items) != 3 || view.currentTrack != 0 || view.workIndex != view.currentTrack {
 		t.Fatalf("current task hides proposal or loses selection: %+v", view)
 	}
 	if view.work.Items[view.currentTrack].Node.ID != "current-work" {
 		t.Fatal("current task was not highlighted")
+	}
+	if view.work.Items[1].Node.ID != "api" || view.work.Items[2].Node.ID != "deferred" {
+		t.Fatalf("open ordering: %+v", view.work.Items)
+	}
+	all, err := source.Work(ctx, "all")
+	if err != nil || len(all.Items) != 4 || all.Items[3].Node.ID != "finished" {
+		t.Fatalf("all history: %+v %v", all, err)
 	}
 	p, err := source.Plan(context.Background(), "api-plan", 1)
 	if err != nil {

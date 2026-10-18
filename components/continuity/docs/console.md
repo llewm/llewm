@@ -41,9 +41,22 @@ PgUp/PgDn scroll the detail pane; `z` or Enter expands it. Escape first collapse
 expanded detail. `r` refreshes saved data while staying in the current view or
 navigation stack. `?` opens scrollable help; `q` or Ctrl-C exits.
 
-Tracks opens with the `all` filter so imported proposals are visible alongside
-current work. The current task's track remains selected and highlighted. Use `f`
-to narrow the view. Proposed, accepted and historical tracks need no task binding;
+Tracks opens with the `open` filter: unfinished tracks, including imported
+proposals and deferred work. Completed, abandoned and superseded work is hidden.
+Use `f` to reach `all` for finished tracks or `everything` to also include finished
+tasks without a roadmap node. The current task's visible track remains selected
+and highlighted.
+
+Tracks are ordered before pagination: current work, other active work, blocked
+work, next/resumable work, pending/proposed work, deferred work, then finished
+history. Within each group, explicit priority comes first, then title
+(case-insensitive), then ID for a stable tie-break. The latest checkpoint only
+promotes current work while it is in progress and its task is not retired;
+completed tracks stay in history even if an old checkpoint disagrees.
+The same ordering applies to `llewm work list --view open` and the other work
+list/inventory views. The CLI's existing `current` default is unchanged.
+
+Proposed, accepted and historical tracks need no task binding;
 only active or blocked nodes flag a missing task binding as an anomaly. Other recorded
 inconsistencies, such as a completed node with unfinished plans, still appear.
 

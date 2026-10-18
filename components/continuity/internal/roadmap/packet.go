@@ -86,10 +86,14 @@ func (service Service) currentNodes(ctx context.Context, projectID string) ([]No
 }
 
 func currentNodesFrom(ctx context.Context, db roadmapQueryer, projectID string) ([]Node, error) {
+	return latestNodesFrom(ctx, db, projectID, false)
+}
+
+func latestNodesFrom(ctx context.Context, db roadmapQueryer, projectID string, includeSuperseded bool) ([]Node, error) {
 	rows, err := db.QueryContext(ctx, `SELECT n.node_id, n.revision, n.title, n.status, n.priority, n.kind, COALESCE(n.target_date,''), COALESCE(n.target_release,''), COALESCE(n.target_horizon,''), n.evidence_refs_json, n.source_path, n.source_ref, n.authority, n.recorded_at, n.schema_version
 		FROM roadmap_nodes n WHERE n.project_id = ?
 		AND n.revision = (SELECT MAX(latest.revision) FROM roadmap_nodes latest WHERE latest.project_id = n.project_id AND latest.node_id = n.node_id)
-		AND n.status != 'superseded' ORDER BY n.priority, n.node_id LIMIT ?`, projectID, maxReviewNodes+1)
+		AND (? OR n.status != 'superseded') ORDER BY n.priority, n.node_id LIMIT ?`, projectID, includeSuperseded, maxReviewNodes+1)
 	if err != nil {
 		return nil, err
 	}

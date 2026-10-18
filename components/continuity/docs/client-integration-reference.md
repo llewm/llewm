@@ -386,9 +386,13 @@ See the [switching summary](roadmap.md#productive-switching) and
 `check`, `list`, `item`, `inventory`, or `freshness`. The CLI equivalents are
 `llewm work`, `work --summary`, `work show`, and the other corresponding subcommands. Use
 `--output json` for machine output; Continuity removed its `--json` aliases in
-6e2. `work list --view` includes `current`, `active`, `next`, `blocked`, `stale`,
+6e2. `work list --view` includes `open`, `current`, `active`, `next`, `blocked`, `stale`,
 `all`, and `everything` (also includes finished tasks without a roadmap node).
 `work show ID` accepts `node:` and `task:` prefixes to resolve ambiguity.
+At MCP API 129, `open` lists unfinished tracks including proposals and deferred
+work. Track lists sort current work, active, blocked, next/resumable, proposed,
+deferred, then finished history, with priority/title/ID ties, before pagination.
+The TUI defaults to `open`; CLI/MCP list defaults remain `current`.
 
 At API 78, `continuity_brief` (CLI `llewm brief [REF]`) returns the brief
 for starting one plan item. REF is a slice label taken from the item title's

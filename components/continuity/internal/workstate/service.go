@@ -138,6 +138,7 @@ func (service Service) List(ctx context.Context, projectID, view string, limit i
 		view = "current"
 	}
 	filters := map[string]string{
+		"open":    "open",
 		"current": "current_focus",
 		"active":  "active",
 		"next":    "resumable",
@@ -149,7 +150,7 @@ func (service Service) List(ctx context.Context, projectID, view string, limit i
 	}
 	filter, ok := filters[view]
 	if !ok {
-		return List{}, fmt.Errorf("work view must be current, active, next, blocked, stale, all, or everything")
+		return List{}, fmt.Errorf("work view must be open, current, active, next, blocked, stale, all, or everything")
 	}
 	limit, err := boundedLimit(limit)
 	if err != nil {

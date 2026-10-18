@@ -386,7 +386,7 @@ func TestTUIDrillsFromTrackIntoPlanAndBack(t *testing.T) {
 	if text := strings.Join(screenText(screen), "\n"); !strings.Contains(text, "  Child B") || !strings.Contains(text, "needs root") || strings.Contains(text, "needs child-a") {
 		t.Fatalf("plan rows missing:\n%s", text)
 	}
-	if err := press(t, view, 'f'); err != nil || view.filter != "all" {
+	if err := press(t, view, 'f'); err != nil || view.filter != "open" {
 		t.Fatalf("filter changed inside plan: %s %v", view.filter, err)
 	}
 	if err := press(t, view, tcell.KeyEscape); err != nil || view.level() != nil || view.workIndex != 0 {
@@ -607,7 +607,7 @@ func TestTUIOpensOnTheTrackBeingWorkedOn(t *testing.T) {
 	if view.workIndex != 2 || view.currentTrack != 2 {
 		t.Fatalf("opened on row %d, current %d", view.workIndex, view.currentTrack)
 	}
-	if context := view.context(); !strings.HasPrefix(context, "◉ Now: node-c · in_progress · checkpoint ") || !strings.Contains(context, "(12m ago) · Tracks · filter all") {
+	if context := view.context(); !strings.HasPrefix(context, "◉ Now: node-c · in_progress · checkpoint ") || !strings.Contains(context, "(12m ago) · Tracks · filter open") {
 		t.Fatalf("context = %q", context)
 	}
 	if row := view.rows(120)[2]; !strings.HasPrefix(row, "◉") || !strings.Contains(row, "working now") {
@@ -681,15 +681,15 @@ func TestTUIFilterBarVisibleAtMinimumSize(t *testing.T) {
 			t.Fatalf("filter bar lacks emphasis: %v", attrs)
 		}
 	}
-	check("FILTER: all  [f: change]")
-	for _, want := range []string{"everything", "current", "active", "next", "blocked", "stale", "all"} {
+	check("FILTER: open  [f: change]")
+	for _, want := range []string{"current", "active", "next", "blocked", "stale", "all", "everything", "open"} {
 		if err := press(t, view, 'f'); err != nil {
 			t.Fatal(err)
 		}
 		check("FILTER: " + want + "  [f: change]")
 	}
 	view.expanded, view.status = true, "A status message replaces the normal hints"
-	check("FILTER: all  [f: change]")
+	check("FILTER: open  [f: change]")
 	view.expanded = false
 	if err := press(t, view, '4'); err != nil {
 		t.Fatal(err)

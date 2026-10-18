@@ -78,7 +78,7 @@ To review or repair another agent's work, use a separate task with
 ## Joined inventory
 
 `llewm work inventory` joins roadmap, task, checkpoint, plan, unresolved-action
-and work-item state without a model. Filters include all, everything, current focus,
+and work-item state without a model. Filters include open, all, everything, current focus,
 active, resumable, blocked, anomalous and stale. Counts, bounds and exact references
 make omissions and ambiguity visible.
 

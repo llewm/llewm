@@ -270,12 +270,12 @@ type WorkInput struct {
 	CheckpointID       string `json:"checkpoint_id,omitempty" jsonschema:"pulse, freshness"`
 	TaskID             string `json:"task_id,omitempty" jsonschema:"pulse, freshness"`
 	SessionID          string `json:"session_id,omitempty" jsonschema:"pulse, freshness"`
-	List               string `json:"list,omitempty" jsonschema:"current (default), active, next, blocked, stale, all, or everything"`
+	List               string `json:"list,omitempty" jsonschema:"current (default), open, active, next, blocked, stale, all, or everything"`
 	Identifier         string `json:"identifier,omitempty" jsonschema:"item: node or task ID"`
 	Scope              string `json:"scope,omitempty" jsonschema:"check: current (default) or all"`
 	RemindAfterSeconds int64  `json:"remind_after_seconds,omitempty" jsonschema:"freshness"`
 	RemindAfterEvents  int    `json:"remind_after_events,omitempty" jsonschema:"freshness"`
-	Filter             string `json:"filter,omitempty" jsonschema:"inventory: all, everything (adds finished unbound tasks), current_focus, active, resumable, blocked, anomalous, or stale"`
+	Filter             string `json:"filter,omitempty" jsonschema:"inventory: open, all, everything (adds finished unbound tasks), current_focus, active, resumable, blocked, anomalous, or stale"`
 	RoadmapNodeID      string `json:"roadmap_node_id,omitempty" jsonschema:"inventory"`
 	Offset             int    `json:"offset,omitempty" jsonschema:"inventory"`
 	RefLimit           int    `json:"ref_limit,omitempty" jsonschema:"inventory"`

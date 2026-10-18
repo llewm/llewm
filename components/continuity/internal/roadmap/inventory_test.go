@@ -1,6 +1,7 @@
 package roadmap
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
@@ -283,5 +284,88 @@ func TestTrackInventorySelectsTheOpenTaskAndHidesFinishedUnboundTasks(t *testing
 	}
 	if bound, err := service.EnsureTaskBinding(ctx, projectID, "node-d", "no-such-task", "plan", "ensure-3"); err != nil || bound {
 		t.Fatalf("ensure binding for an unrecorded task: %v %v", bound, err)
+	}
+}
+
+// Exercise the real join and page boundary: neither a high numeric priority
+// nor a terminal track's stale checkpoint may bury current/open work.
+func TestTrackInventoryOpenOrderingBeforePagination(t *testing.T) {
+	ctx, service, projectID, _, _ := testService(t)
+	for _, node := range []Node{
+		{ID: "finished", Title: "A finished track", Status: "completed", Priority: 0},
+		{ID: "replaced", Title: "A replaced track", Status: "superseded", Priority: 0},
+		{ID: "deferred", Title: "Deferred", Status: "deferred", Priority: 0},
+		{ID: "proposal-z", Title: "alpha", Status: "proposed", Priority: 10},
+		{ID: "proposal-a", Title: "Beta", Status: "proposed", Priority: 10},
+		{ID: "proposal-first", Title: "Zulu", Status: "proposed", Priority: 1},
+		{ID: "proposal-tie", Title: "ALPHA", Status: "proposed", Priority: 10},
+		{ID: "ready", Title: "Next work", Status: "accepted", Priority: 80},
+		{ID: "blocked", Title: "Blocked work", Status: "blocked", Priority: 90},
+		{ID: "active", Title: "Active work", Status: "active", Priority: 100},
+	} {
+		node.ProjectID, node.SourcePath = projectID, "ROADMAP.md"
+		if _, err := service.AppendNode(ctx, node); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkpoints := checkpoint.Service{DB: service.DB}
+	for _, cp := range []checkpoint.Checkpoint{
+		{TaskID: "finished", Task: "Stale unfinished checkpoint", Status: "in_progress"},
+		{TaskID: "replaced", Task: "Superseded track checkpoint", Status: "in_progress"},
+		{TaskID: "ready", Task: "Finished precursor", Status: "completed"},
+		{TaskID: "loose-finished", Task: "Finished task", Status: "completed"},
+		{TaskID: "loose-paused", Task: "Paused task", Status: "paused"},
+		{TaskID: "loose-blocked", Task: "Blocked task", Status: "blocked"},
+		{TaskID: "loose-active", Task: "Other active task", Status: "in_progress"},
+		{TaskID: "current", Task: "Current unbound task", Status: "in_progress"},
+	} {
+		cp.ProjectID, cp.NextAction = projectID, "Continue if open"
+		if _, err := checkpoints.Create(ctx, cp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantOpen := []string{"current", "active", "loose-active", "blocked", "loose-blocked", "ready", "proposal-first", "proposal-tie", "proposal-z", "proposal-a", "deferred", "loose-paused"}
+	ids := func(items []TrackInventoryItem) []string {
+		result := []string{}
+		for _, item := range items {
+			id := item.SelectedTaskID
+			if item.Node != nil {
+				id = item.Node.ID
+			}
+			result = append(result, id)
+		}
+		return result
+	}
+	for _, filter := range []string{"open", "all", "everything"} {
+		want := slices.Clone(wantOpen)
+		if filter != "open" {
+			want = append(want, "finished", "replaced")
+		}
+		if filter == "everything" {
+			want = append(want, "loose-finished")
+		}
+		all, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: filter, Limit: 100})
+		if err != nil || !slices.Equal(ids(all.Items), want) {
+			t.Fatalf("%s: got %v want %v err %v", filter, ids(all.Items), want, err)
+		}
+		var paged []string
+		for offset := 0; offset < len(want); offset += 3 {
+			page, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: filter, Limit: 3, Offset: offset})
+			if err != nil || page.Total != len(want) {
+				t.Fatalf("%s page %d: %+v %v", filter, offset, page, err)
+			}
+			paged = append(paged, ids(page.Items)...)
+		}
+		if !slices.Equal(paged, want) {
+			t.Fatalf("%s paged: %v", filter, paged)
+		}
+	}
+	// A completed latest checkpoint is history, not current work to promote.
+	if _, err := checkpoints.Create(ctx, checkpoint.Checkpoint{ProjectID: projectID, TaskID: "last-finished", Task: "Last finished", Status: "completed", NextAction: "Done"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: "everything", Limit: 1})
+	if err != nil || !slices.Equal(ids(first.Items), []string{"active"}) {
+		t.Fatalf("finished current promoted: %+v %v", first, err)
 	}
 }

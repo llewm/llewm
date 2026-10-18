@@ -116,6 +116,7 @@ func taskBindingHash(value TaskBinding) (string, error) {
 
 type inventoryTaskState struct {
 	ID        string
+	Title     string
 	Managed   bool
 	Lifecycle string
 	Latest    *TrackCheckpoint
@@ -137,8 +138,8 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 	if options.Filter == "" {
 		options.Filter = "all"
 	}
-	if !oneOf(options.Filter, "all", "everything", "current_focus", "active", "resumable", "blocked", "anomalous", "stale") {
-		return TrackInventory{}, fmt.Errorf("track inventory filter must be all, everything, current_focus, active, resumable, blocked, anomalous or stale")
+	if !oneOf(options.Filter, "open", "all", "everything", "current_focus", "active", "resumable", "blocked", "anomalous", "stale") {
+		return TrackInventory{}, fmt.Errorf("track inventory filter must be open, all, everything, current_focus, active, resumable, blocked, anomalous or stale")
 	}
 	if len(options.TaskID) > 200 {
 		return TrackInventory{}, fmt.Errorf("task ID must not exceed 200 bytes")
@@ -159,7 +160,9 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 		return TrackInventory{}, fmt.Errorf("reference limit must be between 1 and %d", MaxTrackInventoryRefLimit)
 	}
 
-	nodes, err := service.currentNodes(ctx, projectID)
+	// Keep terminal nodes in the join so their bound tasks do not reappear as
+	// unbound open work. All/everything can then show the complete track history.
+	nodes, err := latestNodesFrom(ctx, service.DB, projectID, true)
 	if err != nil {
 		return TrackInventory{}, err
 	}
@@ -269,10 +272,29 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 		classifyInventoryItem(&item, "")
 		items = append(items, item)
 	}
+	// Match the console's current checkpoint, without promoting the last
+	// completed or retired task. Order the whole inventory before pagination.
+	current, err := (checkpoint.Service{DB: service.DB}).Latest(ctx, projectID)
+	if err != nil {
+		return TrackInventory{}, err
+	}
+	currentTask := ""
+	if current != nil && current.Status == "in_progress" && taskOpen(tasks[current.TaskID]) {
+		currentTask = current.TaskID
+	}
 	sort.Slice(items, func(i, j int) bool {
-		pi, idi := inventorySortKey(items[i])
-		pj, idj := inventorySortKey(items[j])
-		return pi < pj || pi == pj && idi < idj
+		ri, pi, ti, idi := inventorySortKey(items[i], tasks, currentTask)
+		rj, pj, tj, idj := inventorySortKey(items[j], tasks, currentTask)
+		if ri != rj {
+			return ri < rj
+		}
+		if pi != pj {
+			return pi < pj
+		}
+		if ti != tj {
+			return ti < tj
+		}
+		return idi < idj
 	})
 	filtered := items[:0]
 	for _, item := range items {
@@ -283,6 +305,9 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 			continue
 		}
 		if options.Filter != "everything" && options.TaskID == "" && finishedUnboundTask(item, tasks) {
+			continue
+		}
+		if options.Filter == "open" && inventoryFinished(item, tasks) {
 			continue
 		}
 		if inventoryMatches(item, options.Filter) {
@@ -400,7 +425,7 @@ func (service Service) inventoryTasks(ctx context.Context, projectID string) (ma
 		}
 		state := inventoryTaskState{ID: id, Managed: lineage.State.Managed, Lifecycle: lineage.State.Status}
 		var checkpointID, status, nextAction, created string
-		err = service.DB.QueryRowContext(ctx, `SELECT id,status,next_action,created_at FROM checkpoints WHERE project_id=? AND task_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, projectID, id).Scan(&checkpointID, &status, &nextAction, &created)
+		err = service.DB.QueryRowContext(ctx, `SELECT id,status,next_action,created_at,task_title FROM checkpoints WHERE project_id=? AND task_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, projectID, id).Scan(&checkpointID, &status, &nextAction, &created, &state.Title)
 		if err != nil && err != sql.ErrNoRows {
 			return nil, err
 		}
@@ -611,11 +636,47 @@ func inventoryMatches(item TrackInventoryItem, filter string) bool {
 	}
 }
 
-func inventorySortKey(item TrackInventoryItem) (int, string) {
+func inventoryFinished(item TrackInventoryItem, tasks map[string]inventoryTaskState) bool {
 	if item.Node != nil {
-		return item.Node.Priority, item.Node.ID
+		return oneOf(item.Node.Status, "completed", "abandoned", "superseded")
 	}
-	return 101, item.SelectedTaskID
+	return !taskOpen(tasks[item.SelectedTaskID])
+}
+
+// Lifecycle groups outrank numeric priority. Explicit deferral and terminal
+// node status win over stale checkpoint activity; their inconsistencies remain
+// available in the diagnostic views. CurrentFocus is a broad roadmap filter,
+// not the single task highlighted as current in the console.
+func inventorySortKey(item TrackInventoryItem, tasks map[string]inventoryTaskState, currentTask string) (rank, priority int, title, id string) {
+	state := tasks[item.SelectedTaskID]
+	priority, title, id = 101, state.Title, item.SelectedTaskID
+	status := ""
+	if item.Node != nil {
+		priority, title, id, status = item.Node.Priority, item.Node.Title, item.Node.ID, item.Node.Status
+	}
+	if title == "" {
+		title = id
+	}
+	title = strings.ToLower(title)
+	switch {
+	case inventoryFinished(item, tasks):
+		rank = 6
+	case currentTask != "" && inventoryHasTask(item, currentTask):
+		rank = 0
+	case status == "deferred":
+		rank = 5
+	case item.Blocked || taskOpen(state) && state.Latest.Status == "blocked":
+		rank = 2
+	case status == "active" || taskOpen(state) && state.Latest.Status == "in_progress":
+		rank = 1
+	case taskOpen(state) && state.Latest.Status == "paused":
+		rank = 5
+	case status == "accepted" || item.Resumable:
+		rank = 3
+	default:
+		rank = 4
+	}
+	return
 }
 
 func ptrNodeRef(value NodeRef) *NodeRef { return &value }
