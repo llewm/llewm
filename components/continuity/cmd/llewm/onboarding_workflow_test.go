@@ -12,6 +12,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/adoption"
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/config"
+	"github.com/llewm/llewm/components/continuity/internal/gitenv"
 	"github.com/llewm/llewm/components/continuity/internal/proseimport"
 	"github.com/llewm/llewm/components/continuity/internal/roadmap"
 	"github.com/llewm/llewm/components/continuity/internal/trackplan"
@@ -219,18 +220,105 @@ func TestProseImportRollsBackWholeBatchOnInvalidPlan(t *testing.T) {
 	}
 }
 
+func TestProseImportLargeOriginalThroughPagesAndStdin(t *testing.T) {
+	root := testProject(t)
+	body := "# Roadmap\r\n" + strings.Repeat("Planned work with café and 🙂.\r\n", 10000) + "# Final milestone\r\nBuild the parser.\r\n"
+	if err := os.WriteFile("ROADMAP.md", []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "", "init")
+	status := func() string {
+		t.Helper()
+		out, err := gitenv.Command(context.Background(), "-C", root, "status", "--porcelain", "--untracked-files=all").CombinedOutput()
+		if err != nil {
+			t.Fatalf("git status: %v %s", err, out)
+		}
+		return string(out)
+	}
+	before := status()
+	var cursor, got string
+	var sources []proseimport.Source
+	for {
+		args := []string{"import-prose", "--sources", "ROADMAP.md"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		var page proseimport.SnapshotPage
+		if err := json.Unmarshal([]byte(runCLI(t, "", args...)), &page); err != nil {
+			t.Fatal(err)
+		}
+		sources = page.Sources
+		for _, doc := range page.Documents {
+			got += doc.Text
+		}
+		if page.Complete {
+			break
+		}
+		if page.NextCursor == "" || page.NextCursor == cursor {
+			t.Fatal("missing pagination progress")
+		}
+		cursor = page.NextCursor
+	}
+	if got != body || cursor == "" {
+		t.Fatal("snapshot failed to page through original prose")
+	}
+	bundle := proseimport.Bundle{Version: 1, ID: "large-import", Creator: "test-agent", Model: "test-model", Sources: sources, Tracks: []proseimport.Track{{ID: "parser", PlanID: "parser-plan", Title: "Build parser", Summary: "Implement the final roadmap milestone", SourcePath: "ROADMAP.md", Section: "Final milestone", Items: []trackplan.Item{{ID: "parse", Position: 1, Title: "Build parser", Status: "pending", AcceptanceCriteria: "Parser checks pass"}}}}}
+	b, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, apply := range []bool{false, true, true} {
+		args := []string{"import-prose", "--file", "-"}
+		if apply {
+			args = append(args, "--apply")
+		}
+		var receipt proseimport.Receipt
+		if err := json.Unmarshal([]byte(runCLI(t, string(b), args...)), &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if len(receipt.Sources) != 1 || receipt.Sources[0] != sources[0] || len(receipt.Tracks) != 1 {
+			t.Fatalf("lost source evidence: %+v", receipt)
+		}
+	}
+	a, err := app.Open(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var path, ref string
+	if err := a.DB.QueryRow(`SELECT source_path,source_ref FROM roadmap_nodes WHERE node_id='parser'`).Scan(&path, &ref); err != nil || path != "ROADMAP.md" || !strings.Contains(ref, sources[0].SHA256) {
+		t.Fatalf("lost original path/hash: %s %s %v", path, ref, err)
+	}
+	if after := status(); after != before {
+		t.Fatalf("import changed git status: before %q after %q", before, after)
+	}
+	original, err := os.ReadFile("ROADMAP.md")
+	if err != nil || string(original) != body {
+		t.Fatalf("original document changed: %v", err)
+	}
+	// A fresh bundle referencing the old snapshot must reject changes anywhere
+	// in the original, including beyond the former 64 KiB source cap.
+	bundle.ID = "large-import-changed"
+	bundle.Tracks[0].ExpectedNodeRevision = 1
+	bundle.Tracks[0].ExpectedPlanRevision = 1
+	if err := os.WriteFile("ROADMAP.md", []byte(body+"Changed tail\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	requireCLIError(t, "source \"ROADMAP.md\" changed", "import-prose", "--file", writeJSONFile(t, bundle), "--apply")
+}
+
 func TestProseSnapshotRefusesUnsafeAndOversizedSources(t *testing.T) {
 	root := testProject(t)
 	if err := os.WriteFile("huge.md", []byte(strings.Repeat("x", proseimport.MaxSourceBytes+1)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"../outside.md", ".git/config", ".llewm/secret.md", "huge.md"} {
-		if _, err := proseimport.Snapshot(root, []string{path}, proseimport.MaxTotalBytes); err == nil {
+		if _, err := proseimport.Snapshot(root, []string{path}, proseimport.MaxTotalBytes, ""); err == nil {
 			t.Fatalf("accepted %s", path)
 		}
 	}
 	if err := os.Symlink(filepath.Join(root, "AGENTS.md"), "linked.md"); err == nil {
-		if _, err = proseimport.Snapshot(root, []string{"linked.md"}, 4096); err == nil {
+		if _, err = proseimport.Snapshot(root, []string{"linked.md"}, 4096, ""); err == nil {
 			t.Fatal("accepted symlink")
 		}
 	}

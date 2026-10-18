@@ -11,13 +11,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/llewm/llewm/components/continuity/internal/adoption"
 	"github.com/llewm/llewm/components/continuity/internal/config"
@@ -27,7 +25,10 @@ import (
 )
 
 const MaxBundleBytes = 512 << 10
-const MaxSourceBytes = 64 << 10
+
+// MaxSourceBytes bounds in-memory validation/redaction, not the response size.
+const MaxSourceBytes = 16 << 20
+const MaxChunkBytes = 64 << 10
 const MaxTotalBytes = 256 << 10
 
 type Source struct {
@@ -36,7 +37,9 @@ type Source struct {
 }
 type Document struct {
 	Source
-	Text string `json:"text"`
+	Text   string `json:"text"`
+	Offset int    `json:"offset"`
+	End    int    `json:"end"`
 }
 type Track struct {
 	ID                   string           `json:"id"`
@@ -82,50 +85,6 @@ type Service struct {
 }
 
 func digest(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
-
-// Snapshot reads only explicitly selected prose, bounded before redaction.
-// Source hashes identify exact original bytes; only redacted text is returned.
-func Snapshot(root string, paths []string, budget int) ([]Document, error) {
-	if len(paths) == 0 || len(paths) > 16 || budget < 1 || budget > MaxTotalBytes {
-		return nil, fmt.Errorf("select 1..16 prose files and a byte budget within 1..%d", MaxTotalBytes)
-	}
-	seen := map[string]bool{}
-	var result []Document
-	for _, path := range paths {
-		path = filepath.ToSlash(filepath.Clean(path))
-		if seen[path] {
-			return nil, fmt.Errorf("duplicate source %q", path)
-		}
-		seen[path] = true
-		switch strings.ToLower(filepath.Ext(path)) {
-		case ".md", ".txt", ".rst":
-		default:
-			return nil, fmt.Errorf("source %q must be Markdown, text or reStructuredText", path)
-		}
-		full, err := adoption.SafePath(root, path)
-		if err != nil {
-			return nil, err
-		}
-		f, err := os.Open(full)
-		if err != nil {
-			return nil, err
-		}
-		b, err := io.ReadAll(io.LimitReader(f, MaxSourceBytes+1))
-		f.Close()
-		if err != nil {
-			return nil, err
-		}
-		if len(b) > MaxSourceBytes || len(b) > budget {
-			return nil, fmt.Errorf("source %q exceeds the file or remaining total byte budget; select a narrower set", path)
-		}
-		if !utf8.Valid(b) || bytes.IndexByte(b, 0) >= 0 {
-			return nil, fmt.Errorf("source %q is not UTF-8 prose", path)
-		}
-		budget -= len(b)
-		result = append(result, Document{Source: Source{Path: path, SHA256: digest(b)}, Text: redact.String(string(b))})
-	}
-	return result, nil
-}
 
 // Decode rejects typos and excess data instead of silently discarding fields.
 func Decode(b []byte) (Bundle, error) {
@@ -189,16 +148,12 @@ func normalize(value Bundle) (Bundle, string, error) {
 }
 
 func (s Service) checkSources(sources []Source, tracks []Track) error {
-	paths := make([]string, len(sources))
-	for i, v := range sources {
-		paths[i] = v.Path
-	}
-	docs, err := Snapshot(s.Root, paths, MaxTotalBytes)
-	if err != nil {
-		return err
-	}
-	for i, doc := range docs {
-		if doc.SHA256 != sources[i].SHA256 {
+	for _, source := range sources {
+		doc, err := readDocument(s.Root, source.Path)
+		if err != nil {
+			return err
+		}
+		if doc.SHA256 != source.SHA256 {
 			return fmt.Errorf("source %q changed; read the current prose and rebuild the import", doc.Path)
 		}
 		for _, t := range tracks {

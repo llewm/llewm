@@ -44,15 +44,27 @@ During trial AND adoption onboarding, populate a useful project model by default
    root guidance and explicit references. Select a bounded set; do not scan the
    whole repository or reconstruct history from every commit.
 2. Follow `docs/prose-import.md`. Run `llewm import-prose --sources PATHS` to
-   obtain redacted text and source hashes. Interpret these documents once using
-   this session's model; the executable calls no model. Read current DB tracks
+   obtain redacted text and original source hashes. Follow `next_cursor` with
+   the same ordered `--sources` and `--cursor` until `complete` is true. Large
+   documents are chunked in memory by default: read all chunks, combining split
+   sections, without skipping large files or splitting/restructuring originals.
+   A changed-source cursor requires a fresh snapshot and reconciliation.
+   Interpret these documents once using this session's model; the executable
+   calls no model. Read current DB tracks
    and plans first on an existing installation and reuse their stable IDs.
-3. Prepare a version-1 bundle in ignored project state, preserving source path,
+3. Prepare a version-1 bundle, preserving each original source path once,
    heading/excerpt, source hash and exact expected node/plan revisions. Map
    explicit item statuses; mark unknown status pending and put uncertainty or
    conflicts in the plan summary. Never invent active work, dependencies or
-   historical user approvals. Preview `llewm import-prose --file BUNDLE`, then
-   apply the valid batch with `--apply` under the user's onboarding instruction.
+   historical user approvals. Prefer UTF-8 JSON on stdin with
+   `llewm import-prose --file -` for preview, then pass the same bundle with
+   `--apply` under the user's onboarding instruction. No scratch source files
+   or direct writes to protected `.llewm` state are needed. If a bundle file
+   is more practical, use an already permitted OS temp directory or ignored
+   writable project scratch directory; a unique untracked project directory
+   is acceptable until cleanup. Do not change permissions or Git exclusions
+   just to hide scratch files. See the prose-import guide for shell input,
+   bounded multi-batch imports, and scratch cleanup.
    Applying imports records interpretations; it does not grant work execution.
 4. Show tracks/plans in `llewm tui`; proposals are visible before review. Present
    one concise review of imported intent, uncertainties and missing sources.
@@ -67,8 +79,10 @@ During trial AND adoption onboarding, populate a useful project model by default
    Bind the chosen task to its track with `llewm roadmap link --kind task --node
    NODE --task TASK --reason REASON --request-key KEY` after checkpoint creation
    so joined views and TUI selection identify the same current work.
-   Remove scratch source/bundle JSON after successful receipt/readback. On rerun,
-   re-read changed sources and current record revisions; reconcile conflicts.
+   Read back import receipts and original-file evidence. Remove only scratch
+   files created for this operation on success or failure; preserve originals.
+   On rerun, re-read changed sources and current record revisions; reconcile
+   conflicts.
 
 
 Help the user reach a verified first checkpoint and fresh-session recovery. This

@@ -152,7 +152,9 @@ explicit choice. Neither path requires maintaining duplicate operational plans.
 6. **Populate and review the project model.** Follow [prose import](prose-import.md)
    for trial and adoption: the onboarding agent reads a bounded set of current
    authoritative docs once, imports source-linked tracks and plans, and shows
-   them in `llewm tui`. Interpretations stay proposed unless review/delegation
+   them in `llewm tui`. Follow source continuation pages through large documents;
+   preserve original docs and use stdin for bundles to avoid scratch files.
+   Interpretations stay proposed unless review/delegation
    permits otherwise. Review uncertainties and the intended current work once;
    do not manufacture approvals or reconstruct all historical commits.
 7. **Save a first checkpoint.** Name the current objective, authoritative
