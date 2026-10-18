@@ -15,9 +15,21 @@ Continuity already stores attributable task state, plans, decisions, and history
 and retrieves bounded context for the next action. The direction is to maintain
 operational project knowledge there, keeping ordinary docs focused on useful
 guidance and explanations. Guided onboarding imports selected prose into
-source-linked tracks and plans
-using the existing agent, then presents it for review. Doc cleanup and
-reconciliation of conflicting intent remain deliberate choices.
+source-linked tracks and plans using the existing agent, then presents it for
+review. Doc cleanup and reconciliation of conflicting intent remain deliberate
+choices.
+
+**Persistent agent state, with small working context.** Llewm uses graph
+techniques—typed links between tasks, plans, decisions, evidence, and sources—to
+resolve relevant context and traverse exact references as needed. Compact startup
+state and bounded retrieval keep each session's loaded context small while the
+larger project history remains available.
+
+**Coordinate work across agents.** Explicit task bindings, presence observations,
+overlap visibility, and scoped leases support coordination today. Required lease
+fencing can protect selected record writes; presence alone does not lock files or
+assign work. Broader agent orchestration and approved execution remain future
+directions. See [parallel tracks](docs/parallel-tracks.md).
 
 **Continuity is the entire current MVP, not the full scope of Llewm.** It preserves
 attributable project rules, task state, attempts, and verification across coding-agent
@@ -43,6 +55,11 @@ TUI and verified first checkpoint. Follow [Continuity installation](components/c
 Linux, macOS, Windows, and WSL, then [client integrations](components/continuity/docs/client-integrations.md).
 The installed binary bundles its matching plugins: run `llewm init` in the project,
 then `llewm install --client codex --permissions` (or `--client claude-code`).
+
+[Update checks and agent-led updates](components/continuity/docs/updates.md) cover
+current source builds and future published binary bundles. The `update` skill
+keeps acquisition, verified backups, explicit migrations, matching plugins and
+fresh-client recovery together.
 
 [Preview distribution](components/continuity/docs/preview-distribution.md) builds
 versioned binaries and matching client packages. Automatic private product bug

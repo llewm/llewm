@@ -23,6 +23,13 @@ only the smallest relevant set for the next action. Replaying pre-compaction con
 wholesale would defeat that purpose and can make continuation less accurate by
 crowding current evidence out of the context window.
 
+Graph techniques over typed relationships should make context resolution and
+traversal efficient: keep a small session kernel and expand exact linked tasks,
+plans, decisions and evidence only when needed. Persistent state should survive
+agent replacement without requiring the entire history in the model context.
+Task bindings, presence and optional scoped lease fencing support coordination;
+broader orchestration remains an explicitly scoped future capability.
+
 The larger project will extend into human-reviewed automation, agent/task
 orchestration, and local LLM interoperability. Storage, model routing, execution,
 and shared infrastructure may evolve as those capabilities become concrete.

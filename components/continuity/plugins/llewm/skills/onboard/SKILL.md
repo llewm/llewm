@@ -115,6 +115,14 @@ verification pending rather than claiming success. An unexpired presence record
 from a prior session does not prove another writer; honor the user's report of
 single-session operation and inspect Git state before proposing a worktree.
 
+Record a current-host installation resource with the method (source build,
+binary bundle or package manager), source checkout/remote name/branch or pinned
+revision, installed path, OS/architecture, commit/API/writer identity, affected
+project store and plugin owner/marketplace. Include backup/migration/verification
+receipt references, not credentials or raw configuration. This lets the `update`
+skill reuse the actual installation path later without repeated discovery. Keep
+other hosts' installation resources distinct.
+
 Finish with the installed version, adopted project, client, checks passed, any
 remaining user action, and the checkpoint reference. Keep native platform or
 client qualifications limited to the versions and environments actually observed.

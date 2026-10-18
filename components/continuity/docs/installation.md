@@ -336,6 +336,10 @@ selected project for its lifetime. It does not permit per-call project switching
 run a separately bound process for another project. Omitting the flag preserves
 current-directory Git-root discovery.
 
+For update checks and agent-led source/binary workflows, see [updates](updates.md).
+Invoke the bundled `update` skill to qualify a requested update using the existing
+installation provenance, explicit backups/migrations and fresh-client recovery.
+
 To update, build and verify the candidate at a separate path from the installed
 executable. Stop clients/hooks and long-running MCP processes before replacing
 the identified installed file. Follow the backup-gated workflow below when the
