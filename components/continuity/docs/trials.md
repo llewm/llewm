@@ -1,9 +1,24 @@
 # Try Continuity, adopt it, or return to prose
 
-A trial is a reversible project workflow, not a promise of zero risk. Source and
-client integrations still run with their existing permissions. Keep ordinary Git
-and database backups. Trial/exit never deletes project knowledge, rewrites project
-prose, uninstalls shared plugins, or changes client approvals.
+Try Llewm with your existing docs in control. Adopt for automatic continuity.
+You can leave either path and continue without Llewm.
+
+A trial records a starting snapshot, suppresses automatic task context, and blocks
+History sync while you evaluate explicit knowledge reads and writes. Adoption
+enables normal task continuity; it does not automatically reorganize or replace
+project docs. Keep standalone project instructions useful in both paths.
+
+To stop using Llewm, disable its client integrations, stop its processes, remove
+instructions that require Llewm, and start a fresh session. If useful knowledge
+has accumulated in Llewm, first reconcile it into project docs using the
+[handback workflow below](#prepare-a-handback). The same workflow supports both
+trial and adopted trial projects; existing setups without a trial receipt use a
+manual review. See [removal and retained data](installation.md#remove-or-disable-an-installation).
+
+A trial is not an execution sandbox or an automatic rollback of agent edits.
+Keep ordinary Git and database backups. Trial/exit never deletes project
+knowledge, rewrites project prose, uninstalls shared plugins, or changes client
+approvals.
 
 ## Disposable demo
 

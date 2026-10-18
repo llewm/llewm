@@ -116,7 +116,7 @@ llewm --project-root /path/to/project mcp
 The default state directory is `.llewm/continuity` at the detected Git root (the Llewm
 repository root when developing here), not in this component directory. Set `CONTINUITY_HOME` to use a different local component state directory.
 See [layout migration](docs/project-layout.md) for legacy `.continuity` stores and
-[reversible trials](docs/trials.md) before adopting a real project.
+[prose-first trials and leaving Llewm](docs/trials.md) before adopting a real project.
 
 Project IDs are opaque and permanent; the root path is only the project's current
 location. A linked Git worktree uses its main checkout's project and store, and a

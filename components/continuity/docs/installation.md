@@ -12,7 +12,7 @@ installation, MCP registration, checkpoint recovery and the full-client permissi
 setup. Offline `usage ingest` needs no Llewm integration in the running client;
 optional passive hooks require their own reviewed client registration.
 
-For a **reversible trial**, follow [trials](trials.md) before configuring the
+For a **prose-first trial**, follow [trials](trials.md) before configuring the
 client. For **full adoption**, follow the complete [onboarding checklist](onboarding.md#setup-and-verification).
 To switch an existing installation to audit-only or return to full operation,
 use the [mode-switch checklist](usage.md#switch-an-existing-setup-to-audit-only).
@@ -638,13 +638,23 @@ installers are not yet available.
 
 ## Remove or disable an installation
 
-For a trial or adopted trial project, first use the [reviewed prose handback](trials.md)
-to preserve new knowledge and verify continuation without Continuity. Removing the
-binary or state directory is not a restoration of project prose control.
+You can stop using Llewm after either trial or full adoption. Adoption enables
+automatic continuity; it does not automatically restructure project docs or
+make Llewm a permanent requirement.
 
+Preserve any knowledge you still need in ordinary project docs, remove instructions
+that require Llewm, then disable integrations as described below and verify work
+in a fresh session. For trial and adopted trial projects, the
+[reviewed prose handback](trials.md#prepare-a-handback) helps preserve accumulated
+knowledge and records the disconnection. Without a trial receipt, follow those
+review and fresh-session verification steps manually. Disabling integrations
+does not require deleting state or completing a trial exit command.
 
 Disable or uninstall the Llewm plugin in each client's supported plugin manager,
-then stop its long-running MCP processes and restart the client. Review the
+then stop its long-running MCP processes, hooks and independently launched sync
+processes, and restart the client. Remove any separately registered Llewm hooks,
+MCP servers or skills. Shared user-scope integrations may serve other projects;
+use a separate client profile/configuration when needed. Review the
 permission generator's managed entries and any older hand-added rules; preserve
 unrelated approvals and restrictions. Do not delete an entire client config or
 rules directory.

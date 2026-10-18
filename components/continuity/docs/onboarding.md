@@ -12,7 +12,7 @@ plugin, or Go installation is assumed:
 ```text
 Set up Llewm Continuity for the Git project open in this workspace and the
 coding-agent client running this session.
-My starting path is: [usage-audit baseline / reversible trial / full adoption].
+My starting path is: [usage-audit baseline / prose-first trial / full adoption].
 If I have not chosen one, explain these three choices briefly and ask before
 configuring the client. Do not treat usage auditing as permission for adoption.
 
@@ -63,10 +63,15 @@ project in ordinary language. Fresh-client skill routing still needs qualificati
 
 - **Usage-audit baseline:** measure ordinary agent usage before introducing
   Continuity instructions or tools. Follow [audit-first setup](#start-with-usage-auditing).
-- **Reversible trial:** evaluate explicit knowledge recording with existing prose
+- **Prose-first trial:** evaluate explicit knowledge recording with existing prose
   in control. Follow [trials](trials.md) before changing client setup.
 - **Full adoption:** enable task continuity and qualify checkpoint recovery with
   the [setup steps below](#setup-and-verification).
+
+You can stop using Llewm after either trial or adoption. Adoption does not
+automatically reorganize project docs. Disable the integrations and start a
+fresh session; preserve any knowledge you still need in ordinary project docs.
+See [leaving Llewm](installation.md#remove-or-disable-an-installation).
 
 ### Start with usage auditing
 
@@ -96,7 +101,7 @@ and does not change trial/adoption state.
 
 ### Choose a trial before adoption
 
-Start with a [disposable demo or reversible project trial](trials.md). For a real
+Start with a [disposable demo or prose-first project trial](trials.md). For a real
 trial run `llewm trial start --prose PATHS` before changing client setup. Existing
 prose remains in control, task bootstrap is suppressed and History sync is disabled.
 At the review point, choose `trial adopt --reviewed` or the reviewed prose-handback
