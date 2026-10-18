@@ -661,6 +661,68 @@ func TestTUINamesACurrentTaskOutsideTheFilter(t *testing.T) {
 	}
 }
 
+func TestTUIFilterBarVisibleAtMinimumSize(t *testing.T) {
+	view, source := newFakeTerminal(t)
+	source.current = &checkpoint.Checkpoint{TaskID: strings.Repeat("long-task-name-", 12), Status: "in_progress", CreatedAt: time.Now()}
+	if err := view.load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	screen := simulationScreen(t, 60, 12)
+	check := func(want string) {
+		t.Helper()
+		view.draw(screen)
+		line := screenText(screen)[10]
+		if !strings.Contains(line, want) {
+			t.Fatalf("filter bar = %q, want %q", line, want)
+		}
+		cells, width, _ := screen.GetContents()
+		_, _, attrs := cells[10*width].Style.Decompose()
+		if attrs&tcell.AttrBold == 0 || attrs&tcell.AttrReverse == 0 {
+			t.Fatalf("filter bar lacks emphasis: %v", attrs)
+		}
+	}
+	check("FILTER: all  [f: change]")
+	for _, want := range []string{"everything", "current", "active", "next", "blocked", "stale", "all"} {
+		if err := press(t, view, 'f'); err != nil {
+			t.Fatal(err)
+		}
+		check("FILTER: " + want + "  [f: change]")
+	}
+	view.expanded, view.status = true, "A status message replaces the normal hints"
+	check("FILTER: all  [f: change]")
+	view.expanded = false
+	if err := press(t, view, '4'); err != nil {
+		t.Fatal(err)
+	}
+	check("FILTER: status=all  [f: change]")
+	if err := press(t, view, 'f'); err != nil {
+		t.Fatal(err)
+	}
+	check("FILTER: status=open  [f: change]")
+	if err := press(t, view, '2'); err != nil {
+		t.Fatal(err)
+	}
+	check("FILTER: kind=default  [k: change]")
+	if err := press(t, view, 'k'); err != nil {
+		t.Fatal(err)
+	}
+	check("FILTER: kind=checkpoint  [k: change]")
+	view.stack = []*terminalLevel{{kind: "history", topic: strings.Repeat("long-topic-", 10)}}
+	check("FILTER: kind=all  [k: change]")
+	if err := press(t, view, 'k'); err != nil {
+		t.Fatal(err)
+	}
+	check("FILTER: kind=" + view.level().kindFilter + "  [k: change]")
+	view.inputActive, view.input = true, "search words"
+	check("FILTER: kind=" + view.level().kindFilter + "  [k: change]")
+	view.inputActive = false
+	view.stack = []*terminalLevel{{kind: "record"}}
+	view.draw(screen)
+	if line := strings.TrimSpace(screenText(screen)[10]); line != "" {
+		t.Fatalf("record retained a filter control: %q", line)
+	}
+}
+
 func TestTUIAgo(t *testing.T) {
 	for elapsed, want := range map[time.Duration]string{30 * time.Second: "just now", 5 * time.Minute: "5m ago", 3 * time.Hour: "3h ago", 72 * time.Hour: "3d ago"} {
 		if got := ago(elapsed); got != want {

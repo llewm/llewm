@@ -1203,6 +1203,33 @@ func (v *terminalView) context() string {
 	return ""
 }
 
+// filterLine stays separate from breadcrumbs and status messages, which can
+// grow beyond the terminal width or be replaced by search/error feedback.
+func (v *terminalView) filterLine() string {
+	if level := v.level(); level != nil {
+		if level.kind == "history" {
+			return " FILTER: kind=" + filterValue(level.kindFilter, "all") + "  [k: change]"
+		}
+		return ""
+	}
+	switch v.view {
+	case "tracks":
+		return " FILTER: " + v.filter + "  [f: change]"
+	case "ideas":
+		return " FILTER: status=" + filterValue(v.ideaFilter, "all") + "  [f: change]"
+	case "timeline":
+		return " FILTER: kind=" + filterValue(v.kind, "default") + "  [k: change]"
+	}
+	return ""
+}
+
+func filterValue(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
 func (v *terminalView) draw(s tcell.Screen) {
 	s.Clear()
 	width, height := s.Size()
@@ -1254,6 +1281,9 @@ func (v *terminalView) draw(s tcell.Screen) {
 	put(s, 0, sepY, width, separator+strings.Repeat("─", max(0, width-runewidth.StringWidth(separator))), tcell.StyleDefault.Dim(true))
 	for i := 0; i < v.detailRows && v.detailScroll+i < len(details); i++ {
 		put(s, 0, sepY+1+i, width, details[v.detailScroll+i], tcell.StyleDefault)
+	}
+	if filter := v.filterLine(); filter != "" {
+		put(s, 0, height-2, width, runewidth.FillRight(filter, width), bold.Reverse(true))
 	}
 	status := v.status
 	if status == "" {

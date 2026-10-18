@@ -47,6 +47,11 @@ to narrow the view. Proposed, accepted and historical tracks need no task bindin
 only active or blocked nodes flag a missing task binding as an anomaly. Other recorded
 inconsistencies, such as a completed node with unfinished plans, still appear.
 
+A highlighted `FILTER` bar above the bottom key hints shows the applied filter
+and its change key (`f` or `k`) in Tracks, Work items, Timeline and History results.
+It remains visible when a long task name clips the header, while searching, and
+when a status message or expanded detail is shown.
+
 Empty views explain what is missing. A failed section shows the error and a retry
 hint; the remaining views remain accessible. Health deliberately leaves the MCP
 runtime unobserved: a terminal process cannot prove which server a client runs.
