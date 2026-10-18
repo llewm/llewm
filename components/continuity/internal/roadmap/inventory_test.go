@@ -7,6 +7,32 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/workitem"
 )
 
+func TestTaskBindingRequiredOnlyForWorkUnderway(t *testing.T) {
+	for _, status := range []string{"proposed", "accepted", "completed", "deferred", "active", "blocked"} {
+		t.Run(status, func(t *testing.T) {
+			ctx, service, projectID, _, _ := testService(t)
+			if _, err := service.AppendNode(ctx, Node{ProjectID: projectID, ID: "track", Title: "Track", Status: status, SourcePath: "ROADMAP.md"}); err != nil {
+				t.Fatal(err)
+			}
+			inventory, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: "all"})
+			if err != nil || len(inventory.Items) != 1 {
+				t.Fatalf("inventory: %+v %v", inventory, err)
+			}
+			item := inventory.Items[0]
+			wantAnomaly := status == "active" || status == "blocked"
+			if item.BindingState != "missing" || hasString(item.Anomalies, "missing_task_binding") != wantAnomaly {
+				t.Fatalf("binding state: %+v", item)
+			}
+			stale, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: "stale"})
+			// The stale filter is limited to actionable/current work; an
+			// unstarted blocked track retains its finding in the blocked view.
+			if err != nil || (stale.Total == 1) != (status == "active") {
+				t.Fatalf("stale view: %+v %v", stale, err)
+			}
+		})
+	}
+}
+
 func TestTrackInventoryJoinsBindingsTasksActionsAndAnomalies(t *testing.T) {
 	ctx, service, projectID, _, _ := testService(t)
 	if _, err := service.AppendNode(ctx, Node{ProjectID: projectID, ID: "node-a", Title: "Active work", Status: "active", Priority: 10, SourcePath: "docs/roadmap.md"}); err != nil {
@@ -56,7 +82,7 @@ func TestTrackInventoryJoinsBindingsTasksActionsAndAnomalies(t *testing.T) {
 		t.Fatalf("explicitly bound node without a plan: %#v", active.Anomalies)
 	}
 	accepted := inventory.Items[1]
-	if accepted.Node == nil || accepted.Node.ID != "node-b" || accepted.BindingState != "missing" || !accepted.Resumable || !hasString(accepted.ResumableReasons, "accepted_roadmap_work_without_task") || !hasString(accepted.Anomalies, "missing_task_binding") {
+	if accepted.Node == nil || accepted.Node.ID != "node-b" || accepted.BindingState != "missing" || !accepted.Resumable || !hasString(accepted.ResumableReasons, "accepted_roadmap_work_without_task") || hasString(accepted.Anomalies, "missing_task_binding") {
 		t.Fatalf("unexpected accepted item: %#v", accepted)
 	}
 	orphan := inventory.Items[2]
@@ -68,7 +94,7 @@ func TestTrackInventoryJoinsBindingsTasksActionsAndAnomalies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paged.Total != 3 || len(paged.Items) != 1 || paged.Omitted != 2 || !paged.Truncated {
+	if paged.Total != 2 || len(paged.Items) != 1 || paged.Omitted != 1 || !paged.Truncated {
 		t.Fatalf("unexpected paged inventory: %#v", paged)
 	}
 	exact, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: "all", TaskID: "task-a", Limit: 2})
@@ -90,7 +116,7 @@ func TestTrackInventoryJoinsBindingsTasksActionsAndAnomalies(t *testing.T) {
 		t.Fatal(err)
 	}
 	// node-a is active with an explicit binding but no plan, so it is stale too.
-	if stale.Total != 2 || stale.Items[0].Node == nil || stale.Items[0].Node.ID != "node-a" || stale.Items[1].Node == nil || stale.Items[1].Node.ID != "node-b" {
+	if stale.Total != 1 || stale.Items[0].Node == nil || stale.Items[0].Node.ID != "node-a" {
 		t.Fatalf("unexpected stale inventory: %#v", stale)
 	}
 }

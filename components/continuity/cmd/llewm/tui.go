@@ -221,7 +221,7 @@ func tuiCommand() *cobra.Command {
 }
 
 func newTerminalView(source terminalSource) *terminalView {
-	return &terminalView{source: source, view: "tracks", filter: "current", currentTrack: -1, now: time.Now}
+	return &terminalView{source: source, view: "tracks", filter: "all", currentTrack: -1, now: time.Now}
 }
 
 func (v *terminalView) load(ctx context.Context) error {
@@ -235,15 +235,6 @@ func (v *terminalView) load(ctx context.Context) error {
 			v.work, err = v.source.Work(ctx, v.filter)
 			if err == nil {
 				v.current, err = v.source.Current(ctx)
-			}
-			if err == nil && v.current == nil && v.filter == "current" && len(v.work.Items) == 0 {
-				all, readErr := v.source.Work(ctx, "all")
-				if readErr != nil {
-					err = readErr
-				} else if len(all.Items) > 0 {
-					v.work, v.filter = all, "all"
-					v.status = "No current task yet; showing recorded tracks, including proposals for review."
-				}
 			}
 			if err == nil {
 				err = v.loadProgress(ctx)

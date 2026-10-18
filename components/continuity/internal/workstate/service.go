@@ -332,7 +332,7 @@ func findingSummary(code string) string {
 	summaries := map[string]string{
 		"ambiguous_task_binding":    "Several task identities are active for the same roadmap node.",
 		"missing_checkpoint":        "The bound task has no recorded checkpoint.",
-		"missing_task_binding":      "The roadmap node has no recorded task binding or same-ID task.",
+		"missing_task_binding":      "The active or blocked roadmap node has no recorded task binding or same-ID task.",
 		"missing_track_plan":        "The roadmap node has an explicit task binding but no track plan; propose one from its contract and have it reviewed.",
 		"track_plan_behind":         "The roadmap node status and its latest track plan disagree: a completed node has unfinished plan items, or a finished plan belongs to an unfinished node.",
 		"track_plan_unreviewed":     "The bound roadmap node's track plans are all still proposed; record the review with llewm track-plan record PLAN --creator NAME.",

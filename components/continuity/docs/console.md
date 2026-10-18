@@ -41,6 +41,12 @@ PgUp/PgDn scroll the detail pane; `z` or Enter expands it. Escape first collapse
 expanded detail. `r` refreshes saved data while staying in the current view or
 navigation stack. `?` opens scrollable help; `q` or Ctrl-C exits.
 
+Tracks opens with the `all` filter so imported proposals are visible alongside
+current work. The current task's track remains selected and highlighted. Use `f`
+to narrow the view. Proposed, accepted and historical tracks need no task binding;
+only active or blocked nodes flag a missing task binding as an anomaly. Other recorded
+inconsistencies, such as a completed node with unfinished plans, still appear.
+
 Empty views explain what is missing. A failed section shows the error and a retry
 hint; the remaining views remain accessible. Health deliberately leaves the MCP
 runtime unobserved: a terminal process cannot prove which server a client runs.

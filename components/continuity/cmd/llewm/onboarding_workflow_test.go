@@ -11,6 +11,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/adoption"
 	"github.com/llewm/llewm/components/continuity/internal/app"
+	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/gitenv"
 	"github.com/llewm/llewm/components/continuity/internal/proseimport"
@@ -163,6 +164,27 @@ func TestProseImportPreviewApplyReplayAndTUI(t *testing.T) {
 	inventory, err := a.Roadmap.TrackInventory(context.Background(), a.ProjectID, roadmap.TrackInventoryOptions{Filter: "everything"})
 	if err != nil || len(inventory.Items) == 0 {
 		t.Fatalf("TUI tracks: %+v %v", inventory, err)
+	}
+	if len(inventory.Items[0].Anomalies) != 0 {
+		t.Fatalf("imported proposal without a task is anomalous: %+v", inventory.Items[0])
+	}
+	// A current task must not hide unrelated imported proposals on startup.
+	ctx := context.Background()
+	if _, err := a.Roadmap.AppendNode(ctx, roadmap.Node{ProjectID: a.ProjectID, ID: "current-work", Title: "Current work", Status: "active", SourcePath: "PLAN.md"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Checkpoints.Create(ctx, checkpoint.Checkpoint{ProjectID: a.ProjectID, TaskID: "current-work", Task: "Current work", Status: "in_progress", NextAction: "Continue"}); err != nil {
+		t.Fatal(err)
+	}
+	view = newTerminalView(source)
+	if err := view.load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if view.filter != "all" || len(view.work.Items) != 2 || view.currentTrack < 0 || view.workIndex != view.currentTrack {
+		t.Fatalf("current task hides proposal or loses selection: %+v", view)
+	}
+	if view.work.Items[view.currentTrack].Node.ID != "current-work" {
+		t.Fatal("current task was not highlighted")
 	}
 	p, err := source.Plan(context.Background(), "api-plan", 1)
 	if err != nil {

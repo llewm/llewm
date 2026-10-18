@@ -386,7 +386,7 @@ func TestTUIDrillsFromTrackIntoPlanAndBack(t *testing.T) {
 	if text := strings.Join(screenText(screen), "\n"); !strings.Contains(text, "  Child B") || !strings.Contains(text, "needs root") || strings.Contains(text, "needs child-a") {
 		t.Fatalf("plan rows missing:\n%s", text)
 	}
-	if err := press(t, view, 'f'); err != nil || view.filter != "current" {
+	if err := press(t, view, 'f'); err != nil || view.filter != "all" {
 		t.Fatalf("filter changed inside plan: %s %v", view.filter, err)
 	}
 	if err := press(t, view, tcell.KeyEscape); err != nil || view.level() != nil || view.workIndex != 0 {
@@ -607,7 +607,7 @@ func TestTUIOpensOnTheTrackBeingWorkedOn(t *testing.T) {
 	if view.workIndex != 2 || view.currentTrack != 2 {
 		t.Fatalf("opened on row %d, current %d", view.workIndex, view.currentTrack)
 	}
-	if context := view.context(); !strings.HasPrefix(context, "◉ Now: node-c · in_progress · checkpoint ") || !strings.Contains(context, "(12m ago) · Tracks · filter current") {
+	if context := view.context(); !strings.HasPrefix(context, "◉ Now: node-c · in_progress · checkpoint ") || !strings.Contains(context, "(12m ago) · Tracks · filter all") {
 		t.Fatalf("context = %q", context)
 	}
 	if row := view.rows(120)[2]; !strings.HasPrefix(row, "◉") || !strings.Contains(row, "working now") {

@@ -232,7 +232,11 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 			}
 		case len(item.Tasks) == 0:
 			item.BindingState = "missing"
-			item.Anomalies = append(item.Anomalies, "missing_task_binding")
+			// Planned and historical tracks do not need invented task history.
+			// Only work recorded as underway requires a task binding.
+			if node.Status == "active" || node.Status == "blocked" {
+				item.Anomalies = append(item.Anomalies, "missing_task_binding")
+			}
 		case len(item.Tasks) == 1:
 			item.BindingState, item.SelectedTaskID = item.Tasks[0].BindingSource, item.Tasks[0].TaskID
 		default:
