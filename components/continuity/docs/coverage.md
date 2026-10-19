@@ -1,8 +1,7 @@
 # Requirement coverage
 
-Status: implemented in 7a of `continuity-multi-repo-sync` (migration 059, MCP API
-88); cells sync since 7b (migration 060, MCP API 89). Coverage replaces client-capability evidence and hook qualification runs, two
-record families for one claim: "client X on platform Y does Z, per source S".
+Coverage records attributable observations that a client on a platform meets a
+requirement. Cells travel through History sync; requirements remain in source.
 
 ## Model
 
@@ -51,8 +50,7 @@ llewm coverage record --requirement ID --client C --platform P \
   [--implementation "..."] [--ref commit:HASH]
 ```
 
-Coverage is CLI only (`llewm coverage`, `coverage record`); MCP API 98 removed
-its tools, which had been called once or twice in all recorded sessions.
+Coverage is CLI only (`llewm coverage`, `coverage record`).
 
 ## Doctor and stale cells
 

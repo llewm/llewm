@@ -122,6 +122,35 @@ Editor workspace files (such as VS Code `.code-workspace`) are not project
 authority. `llewm workspace editor` previews one from the manifest and
 `--write` creates it without replacing an existing file.
 
+### Workspace setup
+
+In the folder holding the repositories, preview the manifest, then explicitly save
+it and initialize the shared store:
+
+```sh
+llewm workspace init
+llewm workspace init --write
+llewm init
+```
+
+For independent stores, use `llewm workspace init --mode federated --write`, then
+run `llewm init` inside each member. `llewm workspace show` lists registered and
+missing routes; `llewm workspace route MEMBER` selects a member by name,
+repo/project/lineage ID, or fingerprint. An unlisted repository stays independent.
+
+Preview a topology change with `llewm workspace change --mode federated` (or
+`--mode unified`), then repeat it with `--apply --confirm SHA256` using the returned
+digest. Changed store contents or identities require a fresh preview.
+
+`llewm workspace editor` previews a VS Code workspace; `--write` saves it, and
+`--path dev.code-workspace` selects its destination. This does not change project
+authority.
+
+Workspace paths are relative to the workspace root. `--commit` resolves in the
+member containing the working directory; at the workspace root, select it with
+`--repo MEMBER` (MCP uses `repo`). Narrative commit anchors retain the member in
+`region_locator`, and roadmap sync watermarks retain each member's head.
+
 ## Sync tiers
 
 Sync is independent of repository topology. Any topology can use any tier.

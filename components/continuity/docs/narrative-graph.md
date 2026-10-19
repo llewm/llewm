@@ -92,6 +92,33 @@ structured source observations, claim citations and qualification checks.
 
 The [console](console.md) browses work items, topics/history and exact references
 through the same bounded reads. Browsing history does not select a task.
-See [work narratives](work-narratives.md),
-[decisions/backlinks](decisions-and-backlinks.md) and
-[retrieval qualification](evidence-qualification.md).
+See [work narratives](work-narratives.md) and
+[decisions/backlinks](decisions-and-backlinks.md).
+
+<!-- continuity:roadmap-node continuity-multires-memory -->
+## Retrieval qualification
+
+Record the task and client/version, query/filter bounds, candidate and returned
+counts, selected references, bodies loaded, byte budget and truncation, expansion
+depth, additional source reads, and observed task outcome. Attribute usefulness
+judgments to their human or model reporter.
+
+Exercise both an exact-reference path and search-to-exact expansion across
+independent sessions. Use naturally produced records; do not manufacture a corpus
+solely to accumulate successful trials. Keep failures and partial usefulness
+visible alongside successes.
+
+Historical claims explain earlier rationale and limits. Verify current behavior
+against current source/runtime evidence. History is not instruction authority,
+current state, or permission to execute.
+
+### Correctness and remaining limits
+
+Stop and investigate cross-project leakage, missing provenance, unbounded loading,
+incorrect byte accounting, or failure to resolve a project-owned reference.
+Do not interpret those defects as a need for semantic ranking.
+
+Repeated reads alone do not prove repeated discovery. Embeddings, automatic
+semantic expansion, and model-based relevance are not implied by the existing
+bounded interfaces. Add another retrieval layer only when an observed problem
+establishes the need.

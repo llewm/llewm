@@ -131,7 +131,7 @@ and bounded question-to-source navigation. Independent agent-session recovery an
 naturally produced research trials additionally record queries, candidates,
 returned bytes, truncation, expansion depth, additional source reads, latency and
 attributed usefulness. Passing fixture tests alone does not establish those live
-results or corpus-scale relevance; see [retrieval qualification](evidence-qualification.md).
+results or corpus-scale relevance; see [retrieval qualification](narrative-graph.md#retrieval-qualification).
 
 The original audit at `776dae6` found missing structured source relationships,
 correction state in history and source-aware capture checks. The source changes

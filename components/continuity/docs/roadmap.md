@@ -77,15 +77,6 @@ repairing it. Canonical Markdown contracts remain repository sections.
 See [project-state hygiene](project-state-hygiene.md),
 [roadmap control](roadmap-control.md), and [contracts](contracts.md).
 
-<!-- continuity:roadmap-node continuity-reference-cards -->
-### Retired interfaces
-
-Reference cards, separate evidence tools, completion profiles, authority migration,
-and automatic-next-action controls were consolidated or removed before release.
-Use [work items](work-items.md), [work narratives](work-narratives.md), bounded
-[history retrieval](narrative-graph.md), and explicit checkpoints. There are no
-compatibility aliases for the retired command surfaces.
-
 ## Remaining delivery work
 
 Complete source documentation cleanup before any clean-root creation or publication.

@@ -164,3 +164,16 @@ This is a pre-release local migration, not an OS security boundary or native
 platform qualification. Live machines still require the reviewed installation
 procedure and grant. Public source/binary packaging must be updated to the exact
 checked commit separately.
+
+## Project relocation
+
+Project IDs are opaque and permanent; a root path is the project's current
+location. Worktrees use the main checkout's store and submodules use their
+superproject's unless they have their own `.llewm/` directory. Moving a checkout
+with its store records a relocation. Resolve an ambiguous match explicitly:
+
+```sh
+llewm project show
+llewm project rebind PROJECT_ID      # the same project, moved
+llewm project rebind --new           # an independent project
+```

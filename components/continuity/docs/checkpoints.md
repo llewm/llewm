@@ -9,8 +9,7 @@ make continuation state first-class without requiring a `HANDOFF.md` file or a
 provider-specific session-summary store. Such files and external handoff memories
 remain useful human-readable projections, compatibility fallbacks, or import
 sources; they must identify their source checkpoint/task tip and must not compete
-with structured state through newest-file-wins behavior. See the accepted
-[ECC interoperability direction](ecc-interoperability.md#handoff-projections).
+with structured state through newest-file-wins behavior.
 
 ## Required values and bounds
 

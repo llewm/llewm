@@ -1,13 +1,6 @@
 <!-- continuity:roadmap-node continuity-governed-contracts -->
 # Contracts
 
-Status: implemented in 6f of `continuity-multi-repo-sync` (migration 062, MCP API
-91; decision `contracts-markdown-canonical`). This replaces the governed-contract
-records, their lifecycle transitions, registry projection, authority migrations,
-and evaluation (13 MCP tools and the six technical kinds). The four stored
-revisions were re-expressed as the marked sections listed below, and the
-pre-migration backup keeps the old rows.
-
 ## Model
 
 A contract states one **project shape** so it can be found and quoted exactly:
@@ -74,8 +67,8 @@ llewm contract show ID              # one statement exactly as written, with its
 llewm contract check [--accept]     # only drifted contracts; --accept records them
 ```
 
-Contracts are read with the CLI (`contract list`, `show`, `check`); MCP API 98
-removed the read-only MCP tool. Accepting drift stays a deliberate CLI step.
+Contracts are read with the CLI (`contract list`, `show`, `check`). Accepting
+drift stays a deliberate CLI step.
 
 A contract states a shape; it does not authorize, execute, or prove anything.
 Whether a client meets a requirement is recorded in the [coverage

@@ -25,8 +25,7 @@ Continuity does not execute or block host actions.
 
 The detailed-evidence tier is [work narratives](work-narratives.md): typed,
 append-only claims anchored to commits, files, tasks, and checkpoints, kept
-outside automatic bootstrap loading. Separate commit-narrative evidence records
-were cut in 6e4b (migration 057).
+outside automatic bootstrap loading.
 
 Work items form an append-only proposal tier. Capturing or reading an idea
 does not change the active checkpoint or roadmap. Metadata-only list and bounded
@@ -36,14 +35,8 @@ is appended without rewriting the source idea or acceptance. Idea bodies are nev
 automatic bootstrap content.
 
 Contracts are marked canonical sections of repository Markdown. A device-local
-index records accepted section hashes so reads can report drift. The former
-governed-contract record family and authority activation were removed. A contract
+index records accepted section hashes so reads can report drift. A contract
 statement does not prove conformance or authorize execution. See [contracts](contracts.md).
-
-ECC interoperability is a proposed external-adapter boundary. It would treat
-external memories/handoffs as unreviewed proposals; no ECC adapter is shipped.
-Continuity's structured checkpoint/task state remains the continuation source.
-See [ECC interoperability](ecc-interoperability.md).
 
 Repeated-friction candidates are derived read-only from a bounded window of
 canonical tool observations. They group a redacted failure shape with a later
@@ -66,6 +59,15 @@ If no checkpoint matches, bootstrap may expose only a bounded factual fallback:
 payload-free event metadata, explicit machine-observed authority and uncertainty,
 and directions to targeted checkpoint/freshness reads. It does not reconstruct a
 task from activity.
+
+<!-- continuity:roadmap-node continuity-ecc-interoperability -->
+## External memory adapters
+
+ECC interoperability is a proposed out-of-process adapter boundary; no adapter
+is shipped. External memories and handoffs would enter as unreviewed proposals
+through versioned interfaces, without direct database access or loading ECC code
+into Continuity. Structured checkpoint/task state remains the continuation source.
+The detailed proposal is retained in Continuity planning history.
 
 ## Trial and project layout
 

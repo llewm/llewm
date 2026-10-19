@@ -90,7 +90,6 @@ tamper and unexpected-file refusal, mixed-layout refusal, in-project/symlink
 boundaries, untracked review state with an unchanged Git index, absence of seeded
 secrets/absolute roots/live-store files, public inspect/plan/apply recovery,
 stable semantic re-export and same-lineage collision refusal without writes.
-The metadata catalog and its drilldown commands were removed before release.
 
 This profile does not implement incremental export, deduplicated repository-wide
 object storage, Git LFS, SQLite snapshots, automatic retention, background sync,

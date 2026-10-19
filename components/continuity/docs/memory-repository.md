@@ -210,6 +210,24 @@ Internal behavior should not change by accident. Rules fall into three kinds:
   machine reaches the network: credential helpers and programs, the SSH agent and
   `GIT_SSH_COMMAND`, proxies, `GIT_CONFIG_GLOBAL`, and tracing such as `GIT_TRACE`.
 
+## Setup and status
+
+Run setup explicitly on each machine. The first machine starts a lineage; another
+machine joins that exact lineage before syncing:
+
+```sh
+# First machine
+llewm sync init --remote git@host:org/llewm-memory.git
+# Other machines: use the first machine's exact lineage
+llewm sync init --lineage LINEAGE --remote git@host:org/llewm-memory.git
+llewm sync
+llewm sync status
+```
+
+Use the authentication options below when the existing Git setup cannot access the
+remote without prompting. Automatic sync begins once configured; set
+`manual = true` under `[sync]` for manual operation.
+
 ## Authentication
 
 Syncs run from session hooks and after checkpoints, where nobody can answer a

@@ -1,13 +1,11 @@
 <!-- continuity:roadmap-node continuity-operational-readiness -->
 # Operational readiness states
 
-Status: operationally verified at clean commit
-`b6ee6a257b10ca03d716578f8a478eac934eb7ee`, MCP API 28, and schema 019.
 Continuity distinguishes source completion from an installed, migrated, restarted,
 and surface-qualified runtime. A single
 `completed` label is insufficient for migration-bearing or client-served work.
 
-## Decision
+## Readiness model
 
 Roadmap status continues to describe product meaning: proposed, accepted, active,
 blocked, completed, deferred, or superseded. Operational readiness is an orthogonal
@@ -33,7 +31,7 @@ that already loaded the old binary.
 
 ## Derived readiness
 
-The first vocabulary is intentionally explicit:
+Readiness states are:
 
 - `source_only`: implementation and source checks exist, but no matching installed
   artifact was observed;
@@ -59,24 +57,7 @@ names every unmet gate. `health.current` means installed and runtime identities
 match each other, not necessarily that they match repository HEAD or that a feature
 probe passed.
 
-## First implementation slice
-
-Extend the existing build/runtime health foundation with a bounded read-only
-readiness report available through CLI and MCP. It should:
-
-- compare repository HEAD/dirty state, the installed binary, running MCP identity,
-  compiled latest migration, and live database schema;
-- accept or resolve a small set of named feature probes without executing generic
-  commands;
-- report exact observations, unavailable fields, derived stage, unmet gates, and
-  an explicit recommended operational next action;
-- distinguish checks performed now from caller-reported or previously recorded
-  verification; and
-- remain useful when no MCP process is running by reporting runtime state unknown.
-
-The first slice need not add a migration. Durable operational qualification may use
-a bounded work narrative with exact artifact, schema, and probe anchors until a real
-consumer establishes a separate qualification-record interface.
+## Read the report
 
 The implemented CLI surface is `llewm doctor --readiness`. It reports a missing MCP
 runtime as `unknown`, because a standalone CLI process is not evidence about a
@@ -103,7 +84,7 @@ Writers must not shorten `source-verified` to “finished operationally.” When
 has already agreed to restart a client, report `migrated_restart_pending` and make
 that restart verification the exact next action.
 
-## Acceptance
+## Qualification
 
 Qualification covers source-ahead-of-install, installed migration pending,
 migrated stale runtime, clean current identity without probes, operationally

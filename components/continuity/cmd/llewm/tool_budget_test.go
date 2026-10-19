@@ -14,8 +14,8 @@ import (
 
 // toolDefinitionBudget bounds what an eager MCP client puts in front of the
 // model on every request: each tool's name, description, and input schema.
-// The interface cost audit measured 47 KB (about 12.8k tokens); see
-// docs/interface-cost-audit.md. Raise it only with a reason.
+// See docs/client-integration-reference.md#interface-context-budgets for
+// measurement limits. Raise the budget only with a reason.
 const toolDefinitionBudget = 20 << 10
 
 func TestMCPToolDefinitionsFitTheBudget(t *testing.T) {
