@@ -20,9 +20,6 @@ See [source publication](source-publication.md) and the
   lifecycle observations, narratives and decisions, history retrieval, work items,
   roadmap/plan views, usage auditing, optional History sync, and a read-only console.
   See [Continuity](../components/continuity/README.md).
-- **Reporting:** a separate, explicitly opted-in private Forgejo report adapter
-  with a redacted local outbox and attributable receipts. Live tracker compatibility
-  remains a separate qualification. See [Reporting](../components/reporting/README.md).
 - **Action Control:** a standalone versioned Git commit-message validator.
   Hook installation and action execution are outside its implemented slice.
   See [Action Control](../components/action-control/README.md).
@@ -41,7 +38,7 @@ state the exact version and execution mode each observation covers.
 
 After native qualification, prepare signed public macOS and Windows binaries.
 A thin VS Code interface is a later consumer of the same versioned read surfaces.
-Broader public reporting follows review of report quality and submission scope.
+Ordinary bugs and qualification findings use public GitHub or Forgejo issues.
 Neither signed installers nor an editor extension are currently offered.
 
 ## Future project capabilities

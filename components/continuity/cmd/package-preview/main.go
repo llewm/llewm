@@ -187,29 +187,10 @@ func packagePreview(ctx context.Context, version, targetList, output string) err
 		if err != nil {
 			return err
 		}
-		reporterName := "llewm-report"
-		if osName == "windows" {
-			reporterName += ".exe"
-		}
-		reporterPath := filepath.Join(stage, reporterName)
-		reporter := exec.CommandContext(ctx, "go", "build", "-trimpath", "-buildvcs=true", "-ldflags", "-X main.version="+version+" -X main.commit="+commit, "-o", reporterPath, "./cmd/llewm-report")
-		reporter.Dir = filepath.Join(module, "..", "reporting")
-		reporter.Env = append([]string(nil), command.Env...)
-		reporter.Stdout, reporter.Stderr = os.Stdout, os.Stderr
-		if err := reporter.Run(); err != nil {
-			return fmt.Errorf("build reporting adapter %s: %w", target, err)
-		}
-		reporterBinary, err := os.ReadFile(reporterPath)
-		if err != nil {
-			return err
-		}
-		if err := addAsset("llewm-"+version+"-"+osName+"-"+arch+".zip", "binary-bundle", target, map[string][]byte{binaryName: binary, reporterName: reporterBinary, "INSTALL.txt": []byte(installText), "LICENSE": license, "THIRD_PARTY_NOTICES.txt": notices}, map[string]fs.FileMode{binaryName: 0o755, reporterName: 0o755}); err != nil {
+		if err := addAsset("llewm-"+version+"-"+osName+"-"+arch+".zip", "binary-bundle", target, map[string][]byte{binaryName: binary, "INSTALL.txt": []byte(installText), "LICENSE": license, "THIRD_PARTY_NOTICES.txt": notices}, map[string]fs.FileMode{binaryName: 0o755}); err != nil {
 			return err
 		}
 		if err := os.Remove(binaryPath); err != nil {
-			return err
-		}
-		if err := os.Remove(reporterPath); err != nil {
 			return err
 		}
 	}
@@ -364,8 +345,6 @@ On Linux use sha256sum -c SHA256SUMS; on macOS use shasum -a 256 -c SHA256SUMS.
 On Windows use Get-FileHash -Algorithm SHA256 and compare with SHA256SUMS.
 
 Place llewm (llewm.exe on Windows) in a directory on your user PATH.
-The optional llewm-report executable is the separate private-reporting adapter;
-it remains inactive until you provide explicit configuration and credentials.
 Restart terminals, coding-agent clients and parent IDEs after changing PATH.
 Run llewm version, then llewm doctor in each initialized project.
 For a new project, run llewm init at its Git root before doctor.
@@ -376,6 +355,6 @@ Extract it and follow the repository's client-integrations guide for the local
 plugin registration method supported by your client. Review hooks in the client.
 The plugin's llewm directory contains skills, hooks and .mcp.json.
 
-This archive does not install plugins, migrate databases or enable reporting.
+This archive does not install plugins or migrate databases.
 Cross-compilation does not establish platform or client runtime qualification.
 `

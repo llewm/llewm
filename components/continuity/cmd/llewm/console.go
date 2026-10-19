@@ -9,7 +9,6 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/config"
-	"github.com/llewm/llewm/components/continuity/internal/deliverystatus"
 	"github.com/llewm/llewm/components/continuity/internal/project"
 	"github.com/llewm/llewm/components/continuity/internal/readiness"
 	"github.com/llewm/llewm/components/continuity/internal/release"
@@ -73,16 +72,13 @@ func (s appTerminalSource) Releases(ctx context.Context) (release.View, error) {
 func (s appTerminalSource) Report(ctx context.Context, id string) (*workitem.BugReport, error) {
 	return s.app.WorkItems.Report(ctx, s.app.ProjectID, id, workitem.ReportOptions{})
 }
-func (s appTerminalSource) Delivery(context.Context) (*deliverystatus.Snapshot, error) {
-	return deliverystatus.Read(s.reportStatus, s.app.ProjectID)
-}
 
 func consoleCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "console", Short: "Read versioned console projections for terminal and editor clients"}
-	var taskID, cursor, id, reportStatus string
-	view := &cobra.Command{Use: "view VIEW", Short: "Read project, checkpoints, checkpoint, health, releases, report, or delivery as JSON", Args: cobra.ExactArgs(1), ValidArgs: []string{"project", "checkpoints", "checkpoint", "health", "releases", "report", "delivery"}, RunE: func(cmd *cobra.Command, args []string) error {
+	var taskID, cursor, id string
+	view := &cobra.Command{Use: "view VIEW", Short: "Read project, checkpoints, checkpoint, health, releases, or report as JSON", Args: cobra.ExactArgs(1), ValidArgs: []string{"project", "checkpoints", "checkpoint", "health", "releases", "report"}, RunE: func(cmd *cobra.Command, args []string) error {
 		kind := args[0]
-		if kind != "project" && kind != "checkpoints" && kind != "checkpoint" && kind != "health" && kind != "releases" && kind != "report" && kind != "delivery" {
+		if kind != "project" && kind != "checkpoints" && kind != "checkpoint" && kind != "health" && kind != "releases" && kind != "report" {
 			return fmt.Errorf("unknown console view %q", kind)
 		}
 		if (kind == "checkpoint" || kind == "report") && id == "" {
@@ -94,15 +90,12 @@ func consoleCommand() *cobra.Command {
 		if id != "" && kind != "checkpoint" && kind != "report" {
 			return fmt.Errorf("--id applies only to checkpoint or report")
 		}
-		if reportStatus != "" && kind != "delivery" {
-			return fmt.Errorf("--report-status applies only to delivery")
-		}
 		checkout, err := currentCheckout(cmd)
 		if err != nil {
 			return err
 		}
 		return withReadOnlyApp(cmd, func(a *app.App) error {
-			s := appTerminalSource{app: a, reportStatus: reportStatus, checkout: checkout}
+			s := appTerminalSource{app: a, checkout: checkout}
 			var data any
 			var err error
 			switch kind {
@@ -118,8 +111,6 @@ func consoleCommand() *cobra.Command {
 				data, err = s.Releases(cmd.Context())
 			case "report":
 				data, err = s.Report(cmd.Context(), id)
-			case "delivery":
-				data, err = s.Delivery(cmd.Context())
 			}
 			if err != nil {
 				return err
@@ -130,7 +121,6 @@ func consoleCommand() *cobra.Command {
 	view.Flags().StringVar(&taskID, "task-id", "", "checkpoints: exact task filter")
 	view.Flags().StringVar(&cursor, "cursor", "", "checkpoints: next-page cursor")
 	view.Flags().StringVar(&id, "id", "", "checkpoint/report: selected record ID")
-	view.Flags().StringVar(&reportStatus, "report-status", "", "delivery: metadata snapshot from llewm-report status")
 	parent.AddCommand(view)
 	return parent
 }

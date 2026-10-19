@@ -17,7 +17,6 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
-	"github.com/llewm/llewm/components/continuity/internal/deliverystatus"
 	"github.com/llewm/llewm/components/continuity/internal/history"
 	"github.com/llewm/llewm/components/continuity/internal/project"
 	"github.com/llewm/llewm/components/continuity/internal/readiness"
@@ -39,7 +38,6 @@ type terminalSource interface {
 	Health(context.Context) (readiness.Report, error)
 	Releases(context.Context) (release.View, error)
 	Report(context.Context, string) (*workitem.BugReport, error)
-	Delivery(context.Context) (*deliverystatus.Snapshot, error)
 	Work(ctx context.Context, view string) (workstate.List, error)
 	Timeline(ctx context.Context, kind, cursor string) (timeline.Page, error)
 	Decisions(ctx context.Context, offset int) (decision.ListPage, error)
@@ -58,9 +56,8 @@ type terminalSource interface {
 const terminalPageSize = 20
 
 type appTerminalSource struct {
-	app          *app.App
-	reportStatus string
-	checkout     project.Checkout
+	app      *app.App
+	checkout project.Checkout
 }
 
 func (s appTerminalSource) Current(ctx context.Context) (*checkpoint.Checkpoint, error) {
@@ -97,8 +94,8 @@ func (s appTerminalSource) Plan(ctx context.Context, id string, revision int) (*
 
 var errTerminalQuit = errors.New("quit")
 
-var terminalTopViews = []string{"tracks", "timeline", "decisions", "ideas", "history", "project", "checkpoints", "health", "releases", "delivery"}
-var terminalViewTitles = map[string]string{"tracks": "Tracks", "timeline": "Timeline", "decisions": "Decisions", "ideas": "Work items", "history": "History", "project": "Project", "checkpoints": "Checkpoints", "health": "Health", "releases": "Releases", "delivery": "Delivery"}
+var terminalTopViews = []string{"tracks", "timeline", "decisions", "ideas", "history", "project", "checkpoints", "health", "releases"}
+var terminalViewTitles = map[string]string{"tracks": "Tracks", "timeline": "Timeline", "decisions": "Decisions", "ideas": "Work items", "history": "History", "project": "Project", "checkpoints": "Checkpoints", "health": "Health", "releases": "Releases"}
 var terminalFilters = []string{"open", "current", "active", "next", "blocked", "stale", "all", "everything"}
 var terminalKinds = []string{"", "checkpoint", "roadmap_revision", "work_item", "task_transition", "activity_event"}
 
@@ -173,7 +170,6 @@ type terminalView struct {
 }
 
 func tuiCommand() *cobra.Command {
-	var reportStatus string
 	command := &cobra.Command{Use: "tui", Short: "Browse the complete read-only Continuity console", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) || strings.EqualFold(os.Getenv("TERM"), "dumb") {
 			return errors.New("interactive terminal unavailable; use llewm work list, llewm history search, or llewm history search --linked")
@@ -191,7 +187,7 @@ func tuiCommand() *cobra.Command {
 				return fmt.Errorf("terminal initialization failed: %w; use llewm work list or llewm history search", err)
 			}
 			defer screen.Fini()
-			state := newTerminalView(appTerminalSource{app: application, reportStatus: reportStatus, checkout: checkout})
+			state := newTerminalView(appTerminalSource{app: application, checkout: checkout})
 			if err := state.load(cmd.Context()); err != nil {
 				return err
 			}
@@ -216,7 +212,6 @@ func tuiCommand() *cobra.Command {
 			}
 		})
 	}}
-	command.Flags().StringVar(&reportStatus, "report-status", "", "metadata snapshot from llewm-report status (delivery visibility only)")
 	return command
 }
 
@@ -437,8 +432,6 @@ func (v *terminalView) key(ctx context.Context, e *tcell.EventKey) error {
 		return v.switchView(ctx, 1)
 	case e.Key() == tcell.KeyBacktab:
 		return v.switchView(ctx, -1)
-	case r == '0':
-		v.changeView(terminalTopViews[9])
 	case r >= '1' && r <= '9':
 		v.changeView(terminalTopViews[r-'1'])
 	case e.Key() == tcell.KeyEscape && v.expanded:
@@ -1309,7 +1302,7 @@ var terminalHelp = []string{
 	"",
 	"Tab / Shift-Tab   next / previous view",
 	"1-5               Tracks, Timeline, Decisions, Work items, History",
-	"6-9 / 0           Project, Checkpoints, Health, Releases / Delivery",
+	"6-9               Project, Checkpoints, Health, Releases",
 	"c                 selected track task checkpoints",
 	"b                 preview selected bug report (Work items)",
 	"↑ ↓ Home End      select",

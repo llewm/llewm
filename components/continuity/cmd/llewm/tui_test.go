@@ -11,7 +11,6 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
-	"github.com/llewm/llewm/components/continuity/internal/deliverystatus"
 	"github.com/llewm/llewm/components/continuity/internal/history"
 	"github.com/llewm/llewm/components/continuity/internal/readiness"
 	"github.com/llewm/llewm/components/continuity/internal/release"
@@ -33,7 +32,6 @@ type fakeTerminalSource struct {
 	health             readiness.Report
 	releases           release.View
 	report             *workitem.BugReport
-	delivery           *deliverystatus.Snapshot
 	failure            string
 	checkpointRequests []checkpoint.ListRequest
 	work               workstate.List
@@ -246,7 +244,7 @@ func TestTUIRedirectedTerminalFallback(t *testing.T) {
 
 func TestTUISwitchesTopLevelViews(t *testing.T) {
 	view, _ := newFakeTerminal(t)
-	for _, want := range []string{"timeline", "decisions", "ideas", "history", "project", "checkpoints", "health", "releases", "delivery", "tracks"} {
+	for _, want := range []string{"timeline", "decisions", "ideas", "history", "project", "checkpoints", "health", "releases", "tracks"} {
 		if err := press(t, view, tcell.KeyTab); err != nil {
 			t.Fatal(err)
 		}
@@ -254,7 +252,7 @@ func TestTUISwitchesTopLevelViews(t *testing.T) {
 			t.Fatalf("tab view = %s, want %s", view.view, want)
 		}
 	}
-	if err := press(t, view, tcell.KeyBacktab); err != nil || view.view != "delivery" {
+	if err := press(t, view, tcell.KeyBacktab); err != nil || view.view != "releases" {
 		t.Fatalf("backtab view = %s, %v", view.view, err)
 	}
 	if err := press(t, view, '2'); err != nil || view.view != "timeline" || view.details[0] != "Kind: checkpoint" {
@@ -752,9 +750,6 @@ func (f *fakeTerminalSource) Report(context.Context, string) (*workitem.BugRepor
 	}
 	return f.report, nil
 }
-func (f *fakeTerminalSource) Delivery(context.Context) (*deliverystatus.Snapshot, error) {
-	return f.delivery, nil
-}
 
 func TestTUIConsoleCheckpointChainEvidenceAndBack(t *testing.T) {
 	v, f := newFakeTerminal(t)
@@ -808,7 +803,7 @@ func TestTUIConsoleCheckpointChainEvidenceAndBack(t *testing.T) {
 	}
 }
 
-func TestTUIConsoleNewViewsPreviewReceiptAndErrors(t *testing.T) {
+func TestTUIConsoleNewViewsPreviewAndErrors(t *testing.T) {
 	v, f := newFakeTerminal(t)
 	f.project = projectView{ProjectID: "p", Name: "Fixture project", Root: "/fixture"}
 	f.health = readiness.Report{Stage: "source_ready", RecommendedNextAction: "Install current build", Runtime: readiness.Runtime{Reason: "MCP process not observed"}}
@@ -850,21 +845,6 @@ func TestTUIConsoleNewViewsPreviewReceiptAndErrors(t *testing.T) {
 	if v.level().kind != "report" || !strings.Contains(strings.Join(v.details, "\n"), "Observed fact") {
 		t.Fatalf("preview: %v", v.details)
 	}
-	if err := press(t, v, '0'); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.Join(v.details, "\n"), "No delivery snapshot") {
-		t.Fatalf("missing snapshot invented status: %v", v.details)
-	}
-	now := time.Date(2026, 10, 10, 13, 0, 0, 0, time.UTC)
-	v.now = func() time.Time { return now }
-	f.delivery = &deliverystatus.Snapshot{SchemaVersion: 1, ObservedAt: now.Add(-time.Hour), Authority: "machine_observed", Reports: []deliverystatus.Summary{{ReportID: "sha256:fixture", SourceRef: "work_item:bug", Status: "delivered", Receipt: &deliverystatus.Receipt{Issue: 1, URL: "https://forge.invalid/issues/1", Outcome: "created"}}}}
-	if err := press(t, v, 'r', tcell.KeyRight); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.Join(v.details, "\n"), "Receipt: issue 1") || !strings.Contains(strings.Join(v.details, "\n"), "1h ago") {
-		t.Fatalf("receipt provenance: %v", v.details)
-	}
 }
 
 func TestTUIConsoleTabsRemainVisibleAtMinimumWidth(t *testing.T) {
@@ -872,9 +852,6 @@ func TestTUIConsoleTabsRemainVisibleAtMinimumWidth(t *testing.T) {
 	screen := simulationScreen(t, 60, 12)
 	for i, name := range terminalTopViews {
 		key := rune('1' + i)
-		if i == 9 {
-			key = '0'
-		}
 		if err := press(t, v, key); err != nil {
 			t.Fatal(err)
 		}

@@ -390,7 +390,7 @@ func crumbs(level, previous *terminalLevel) []string {
 	switch level.kind {
 	case "checkpoints":
 		parts = append(parts, "task "+level.ref+fmt.Sprintf(" · page %d", len(level.cursors)+1))
-	case "checkpoint", "release", "report", "delivery", "evidence":
+	case "checkpoint", "release", "report", "evidence":
 		parts = append(parts, level.ref)
 	case "plans", "plan":
 		if previous == nil || previous.track != level.track {

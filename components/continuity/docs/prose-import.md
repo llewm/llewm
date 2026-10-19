@@ -168,8 +168,8 @@ ordinary roadmap review interface rather than silently replacing that state.
 There is no continuous prose-to-DB synchronization. Establish which operational
 state the DB will maintain and avoid duplicate plan maintenance by default.
 Trial retains original prose for comparison and [handback](trials.md); it can
-exercise the same local recovery workflow as adoption. Optional History sync
-and reporting remain separate choices.
+exercise the same local recovery workflow as adoption. History sync remains
+an optional separate choice.
 
 ## Upgrade
 

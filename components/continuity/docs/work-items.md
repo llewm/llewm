@@ -67,10 +67,11 @@ Projection redacts again and caps indented JSON at 32 KiB; oversized reports are
 rejected intact. The SHA-256 ID identifies projected content before the ID is
 populated, not verified causality, a semantic duplicate or submission permission.
 
-Preparation is read-only and makes no network request. The independent
-[Forgejo adapter](../../reporting/README.md) owns queueing, credentials, opt-in
-delivery and receipts. Local bug records still travel through memsync; delivery
-does not change their lifecycle.
+Preparation is read-only and makes no network request. Review the Markdown draft
+before filing an ordinary GitHub or Forgejo issue, then retain the issue URL as a
+link on the local work item. Direct issue filing does not require a local item.
+Local bug records still travel through History sync; filing an issue does not
+change their lifecycle. There is no delivery queue or automatic submission.
 
 ## Lifecycle
 

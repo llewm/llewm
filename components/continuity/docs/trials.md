@@ -81,9 +81,8 @@ During a trial:
 - Mode `audit-only` still selects passive hooks and refuses new MCP startup.
   Use the separate [baseline path](usage.md#audit-only-baselines-and-comparisons)
   for a comparison without plugin/skill context.
-- History sync setup and execution are refused. This is independent of plugin,
-  reporting or external tool permissions; do not enable optional reporting as
-  part of the trial.
+- History sync setup and execution are refused, independently of plugin
+  or external tool permissions.
 - Plugin skills are still installed client instructions. A baseline comparison
   without their influence requires disabling those skills/plugin/MCP as well.
 
@@ -101,7 +100,7 @@ llewm trial adopt --reviewed
 
 Adopt after reviewing the trial and choosing ongoing use. Local hooks and task
 recovery stay enabled; repository instruction authority remains unchanged. It does not
-remove prose, enable sync, enable reporting, or alter approvals. Restart clients
+remove prose, enable sync, or alter approvals. Restart clients
 and qualify exact checkpoint recovery in a fresh session. Keep prose sufficient
 for recovery while deciding what ongoing responsibilities belong in Continuity.
 The baseline remains available after adoption.

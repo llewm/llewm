@@ -27,7 +27,6 @@ visible in narrow terminals; number keys jump directly to a view.
 | 7 | Checkpoints | Paged project handoffs; Right opens the record, predecessor, task and evidence links |
 | 8 | Health | Source, installed executable, schema, client setup warnings and unmet readiness gates |
 | 9 | Releases | Saved release revisions and links to roadmap and narrative evidence |
-| 0 | Delivery | Supplied reporting metadata and receipts |
 
 Arrow keys and Home/End select rows. Right, `l`, or Space opens a selection;
 Left, `h`, Backspace, or Escape returns to the previous screen. Breadcrumbs name
@@ -77,7 +76,7 @@ counts expose omissions. Release browsing includes the latest 100 revisions;
 use a 16 KiB detail budget and identify truncation. These bounds do not grant
 permission to infer missing records or treat reported checks as observed checks.
 
-## Report previews and delivery
+## Report previews
 
 `b` prepares the same redacted v1 draft as `llewm item report`, without saving
 or submitting it. Source claims retain their authority, missing fields are named,
@@ -85,23 +84,8 @@ and reporter diagnostics describe the console process. Expected behavior and
 hypothesis can be supplied through `item report`; the console leaves them blank
 rather than inventing them.
 
-Delivery belongs to the separate reporting adapter. Export its metadata snapshot
-in a private local directory and pass that file explicitly:
-
-```sh
-llewm-report status --config /path/to/private-reporting.json > /private/report-status.json
-llewm --project-root /path/to/project tui --report-status /private/report-status.json
-```
-
-The console reads neither the adapter's config nor its outbox, invokes no delivery,
-and filters the supplied snapshot by permanent project ID. It shows pending or
-delivered state, issue URL, receipt outcome/time, and the snapshot's observation
-time/age. No supplied snapshot means unknown delivery, not an empty outbox.
-Regenerate the snapshot, then press `r` to observe later changes. Receipt `recovered`
-means the adapter observed a matching marker; it does not claim to have witnessed
-the original submission. Snapshots are bounded to 1 MiB and 1,000 reports. They
-contain private targets and issue URLs; keep them device-local and remove scratch
-copies after use.
+Review a draft before filing it through ordinary GitHub or Forgejo issues.
+The console has no delivery queue, credentials, or submission action.
 
 ## Versioned reads for editor clients
 
@@ -115,15 +99,13 @@ llewm console view checkpoint --id CHECKPOINT_ID
 llewm console view health
 llewm console view releases
 llewm console view report --id BUG_ID
-llewm console view delivery --report-status /private/report-status.json
 ```
 
 Each response has `schema_version: 1`, `project_id`, `view`, and `data`. Data contains
 the corresponding canonical project, checkpoint metadata/record, readiness,
-release, bug report, or delivery projection. Missing checkpoint or unsupplied
-snapshot returns `data: null`; read/validation failures go to stderr and fail the
-command. Existing versioned work, plan, decision and history commands remain the
-interfaces for those families. This adds no execution or reporting permission,
+release or bug-report projection. A missing checkpoint returns `data: null`;
+read/validation failures go to stderr and fail the command. Existing versioned
+work, plan, decision and history commands remain the interfaces for those families. This adds no execution or reporting permission,
 changes no MCP tool schema, and requires no database migration.
 
 ## Native qualification

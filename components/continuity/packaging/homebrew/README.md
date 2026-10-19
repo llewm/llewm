@@ -3,8 +3,8 @@
 `Formula/llewm.rb` is a prepared formula for a maintainer-controlled tap. No tap,
 bottle, signed installer, or Homebrew runtime qualification is claimed yet.
 It builds only the Continuity executable and Bash/Zsh/Fish completions, and
-installs the source license and dependency notices. Client plugins and the
-optional reporting adapter are installed separately.
+installs the source license and dependency notices. Install matching client
+plugins separately.
 
 The formula pins the published Git commit
 `43adc25cb586ac1aa4accd00dd34fa64e3dfb5bd`, with package version

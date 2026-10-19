@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
-	"github.com/llewm/llewm/components/continuity/internal/deliverystatus"
 	"github.com/llewm/llewm/components/continuity/internal/readiness"
 	"github.com/llewm/llewm/components/continuity/internal/release"
 	"github.com/mattn/go-runewidth"
@@ -19,7 +18,6 @@ type terminalConsoleState struct {
 	cursors     []string
 	health      readiness.Report
 	releases    release.View
-	delivery    *deliverystatus.Snapshot
 	indexes     map[string]int
 	loaded      map[string]bool
 	errors      map[string]string
@@ -27,7 +25,7 @@ type terminalConsoleState struct {
 
 func (v *terminalView) isConsoleView() bool {
 	switch v.view {
-	case "project", "checkpoints", "health", "releases", "delivery":
+	case "project", "checkpoints", "health", "releases":
 		return true
 	}
 	return false
@@ -57,8 +55,6 @@ func (v *terminalView) ensureConsole(ctx context.Context) error {
 		v.console.health, err = v.source.Health(ctx)
 	case "releases":
 		v.console.releases, err = v.source.Releases(ctx)
-	case "delivery":
-		v.console.delivery, err = v.source.Delivery(ctx)
 	default:
 		return nil
 	}
@@ -77,7 +73,7 @@ func (v *terminalView) consoleSelection() (*int, int, bool) {
 			return &l.index, len(l.checkpoints.Checkpoints), true
 		case "checkpoint", "release", "evidence":
 			return &l.index, len(l.links), true
-		case "report", "delivery":
+		case "report":
 			return &l.index, 1, true
 		}
 		return nil, 0, false
@@ -92,11 +88,6 @@ func (v *terminalView) consoleSelection() (*int, int, bool) {
 		count = len(v.console.checkpoints.Checkpoints)
 	case "releases":
 		count = len(v.console.releases.Releases)
-	case "delivery":
-		count = 0
-		if v.console.delivery != nil {
-			count = len(v.console.delivery.Reports)
-		}
 	}
 	return &v.consoleIndex, count, true
 }
@@ -110,7 +101,7 @@ func (v *terminalView) consoleDetail(ctx context.Context) (bool, error) {
 				v.details = checkpointSummaryLines(l.checkpoints.Checkpoints[l.index])
 			}
 			return true, nil
-		case "checkpoint", "release", "evidence", "report", "delivery":
+		case "checkpoint", "release", "evidence", "report":
 			v.details = append([]string{}, l.body...)
 			if l.index < len(l.links) {
 				v.details = append(v.details, "", "Selected link: "+l.links[l.index].kind+" "+l.links[l.index].target, "→ opens the link; ← returns here.")
@@ -180,15 +171,6 @@ func (v *terminalView) consoleDetail(ctx context.Context) (bool, error) {
 		if c.releases.Truncated {
 			v.details = append(v.details, "", "Showing the latest 100 revisions; llewm release view history --id ID shows a selected release.")
 		}
-	case "delivery":
-		v.details = []string{"No delivery snapshot supplied.", "Export llewm-report status --config FILE to a JSON file, then open tui --report-status FILE.", "Bug previews are available with b in Work items."}
-		if c.delivery != nil {
-			v.details = []string{"No reports for this project in the supplied snapshot."}
-			if v.consoleIndex < len(c.delivery.Reports) {
-				v.details = deliveryLines(c.delivery.Reports[v.consoleIndex])
-			}
-			v.details = append(v.details, "", snapshotLine(c.delivery, v.now()), "This is a supplied snapshot; refresh its file with llewm-report status, then press r.")
-		}
 	}
 	return true, nil
 }
@@ -213,20 +195,6 @@ func releaseLines(r release.Record) []string {
 	}
 	return lines
 }
-func deliveryLines(r deliverystatus.Summary) []string {
-	lines := []string{"Report: " + r.ReportID, "Source: " + r.SourceRef, "Status: " + r.Status, "Target: " + r.Target, "Queued: " + r.QueuedAt.Format(time.RFC3339)}
-	if r.Receipt != nil {
-		lines = append(lines, fmt.Sprintf("Receipt: issue %d · %s", r.Receipt.Issue, r.Receipt.Outcome), "URL: "+r.Receipt.URL, "Recorded: "+r.Receipt.RecordedAt.Format(time.RFC3339))
-	}
-	return lines
-}
-func snapshotLine(s *deliverystatus.Snapshot, now time.Time) string {
-	age := ago(now.Sub(s.ObservedAt))
-	if s.ObservedAt.After(now) {
-		age = "timestamp is in the future"
-	}
-	return "Snapshot: " + s.ObservedAt.Format(time.RFC3339) + " · " + age + " · " + s.Authority
-}
 
 func (v *terminalView) consoleRows(width int) ([]string, bool) {
 	var rows listRows
@@ -240,7 +208,7 @@ func (v *terminalView) consoleRows(width int) ([]string, bool) {
 			for _, link := range l.links {
 				rows.add(link.target, "", "→", link.kind)
 			}
-		case "report", "delivery":
+		case "report":
 			rows.add(l.ref, "", "•", l.kind)
 		default:
 			return nil, false
@@ -263,12 +231,6 @@ func (v *terminalView) consoleRows(width int) ([]string, bool) {
 		case "releases":
 			for _, r := range c.releases.Releases {
 				rows.add(r.Version+" · "+r.Title, fmt.Sprintf("%s@%d", r.ID, r.Revision), statusGlyph(r.Status), r.Status)
-			}
-		case "delivery":
-			if c.delivery != nil {
-				for _, r := range c.delivery.Reports {
-					rows.add(r.SourceRef, r.Target, statusGlyph(r.Status), r.Status)
-				}
 			}
 		}
 	}
@@ -380,7 +342,7 @@ func (v *terminalView) consoleDrill(ctx context.Context) (bool, error) {
 				return true, v.openCheckpoint(ctx, l.checkpoints.Checkpoints[l.index].ID)
 			}
 			return true, nil
-		case "report", "delivery":
+		case "report":
 			v.expanded = true
 			return true, nil
 		}
@@ -415,11 +377,6 @@ func (v *terminalView) consoleDrill(ctx context.Context) (bool, error) {
 				}
 			}
 			return true, v.pushLevel(ctx, l)
-		}
-	case "delivery":
-		if v.console.delivery != nil && v.consoleIndex < len(v.console.delivery.Reports) {
-			r := v.console.delivery.Reports[v.consoleIndex]
-			return true, v.pushLevel(ctx, &terminalLevel{kind: "delivery", ref: r.ReportID, body: append(deliveryLines(r), snapshotLine(v.console.delivery, v.now()))})
 		}
 	case "project", "health":
 		v.expanded = true
@@ -478,7 +435,7 @@ func (v *terminalView) consoleHint() (string, bool) {
 			return "→ open · n/p page · ← back · " + common, true
 		case "checkpoint", "release", "evidence":
 			return "→ link · ← back · " + common, true
-		case "report", "delivery":
+		case "report":
 			return "← back · " + common, true
 		}
 		return "", false
@@ -499,11 +456,6 @@ func (v *terminalView) consoleContext() string {
 			more = " · more (n)"
 		}
 		return fmt.Sprintf("page %d · %d checkpoints%s", len(v.console.cursors)+1, len(v.console.checkpoints.Checkpoints), more)
-	case "delivery":
-		if v.console.delivery != nil {
-			return snapshotLine(v.console.delivery, v.now())
-		}
-		return "no supplied snapshot"
 	case "releases":
 		return fmt.Sprintf("%d of %d revisions", len(v.console.releases.Releases), v.console.releases.Total)
 	case "project":
@@ -561,20 +513,6 @@ func (v *terminalView) refresh(ctx context.Context) error {
 				return err
 			}
 			l.body = strings.Split(report.Markdown(), "\n")
-		case "delivery":
-			snapshot, err := v.source.Delivery(ctx)
-			if err != nil {
-				return err
-			}
-			l.body = []string{"No matching report in the current delivery snapshot."}
-			if snapshot != nil {
-				for _, r := range snapshot.Reports {
-					if r.ReportID == l.ref {
-						l.body = append(deliveryLines(r), snapshotLine(snapshot, v.now()))
-						break
-					}
-				}
-			}
 		case "checkpoint":
 			v.stack = v.stack[:len(v.stack)-1]
 			if err := v.openCheckpoint(ctx, l.checkpoint.ID); err != nil {

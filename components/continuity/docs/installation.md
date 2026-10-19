@@ -595,7 +595,6 @@ Go can install each command separately at that published full commit:
 
 ```sh
 go install github.com/llewm/llewm/components/continuity/cmd/llewm@0f3acba42abd9a2c0ed7866c9c80a921333270b8
-go install github.com/llewm/llewm/components/reporting/cmd/llewm-report@0f3acba42abd9a2c0ed7866c9c80a921333270b8
 go install github.com/llewm/llewm/components/action-control/cmd/action-control@0f3acba42abd9a2c0ed7866c9c80a921333270b8
 ```
 
@@ -609,7 +608,7 @@ modules require separate invocations. The command installs the executable only.
 Builds containing `llewm install` carry their matching plugin assets; run it for
 the chosen client after installing the binary. The earlier published root above
 predates this installer, so use its matching source or preview plugin package
-instead. Installing the reporting executable does not activate reporting.
+instead.
 
 Module-cache installs may report `git_commit: unknown`: they do not carry the
 checkout's embedded VCS settings. Retain `go version -m /path/to/llewm` to inspect
@@ -667,8 +666,8 @@ permission generator's managed entries and any older hand-added rules; preserve
 unrelated approvals and restrictions. Do not delete an entire client config or
 rules directory.
 
-Remove only the identified `llewm` executable (and optional `llewm-report` or
-`action-control` executables) from the installation directory. Remove the saved
+Remove only the identified `llewm` executable (and optional `action-control` or
+`llewm-orchestrate` executables) from the installation directory. Remove the saved
 completion file and PATH/startup line only if they were added for this install
 and no other program needs that directory. Go's module/build caches are shared
 and do not need removal.

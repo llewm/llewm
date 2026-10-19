@@ -17,7 +17,7 @@ func TestConsoleCanonicalReadsDoNotModifyStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, view := range []string{"project", "checkpoints", "checkpoint", "health", "releases", "delivery"} {
+	for _, view := range []string{"project", "checkpoints", "checkpoint", "health", "releases"} {
 		args := []string{"console", "view", view}
 		if view == "checkpoint" {
 			args = append(args, "--id", id)
@@ -37,9 +37,6 @@ func TestConsoleCanonicalReadsDoNotModifyStore(t *testing.T) {
 		}
 		if view == "checkpoints" && !strings.Contains(string(envelope.Data), id) {
 			t.Fatalf("checkpoint missing: %s", body)
-		}
-		if view == "delivery" && string(envelope.Data) != "null" {
-			t.Fatalf("unsupplied delivery invented: %s", body)
 		}
 	}
 	after, err := os.ReadFile(project.Database)

@@ -3,7 +3,7 @@ version: '3'
 tasks:
   fmt:
     cmds:
-      - for: [components/continuity, components/action-control, components/reporting, components/orchestration]
+      - for: [components/continuity, components/action-control, components/orchestration]
         task: fmt-component
         vars: { COMPONENT: '{{.ITEM}}' }
   fmt-component:
@@ -12,7 +12,7 @@ tasks:
     cmds: [go fmt ./...]
   test:
     cmds:
-      - for: [components/continuity, components/action-control, components/reporting, components/orchestration]
+      - for: [components/continuity, components/action-control, components/orchestration]
         task: test-component
         vars: { COMPONENT: '{{.ITEM}}' }
   test-component:
@@ -21,7 +21,7 @@ tasks:
     cmds: [go test ./...]
   vet:
     cmds:
-      - for: [components/continuity, components/action-control, components/reporting, components/orchestration]
+      - for: [components/continuity, components/action-control, components/orchestration]
         task: vet-component
         vars: { COMPONENT: '{{.ITEM}}' }
   vet-component:
@@ -37,7 +37,6 @@ tasks:
     cmds:
       - task: build-continuity
       - task: build-action-control
-      - task: build-reporting
       - task: build-orchestration
   build-continuity:
     internal: true
@@ -47,10 +46,6 @@ tasks:
     internal: true
     dir: components/action-control
     cmds: [go build -buildvcs=true -o ../../dist/action-control ./cmd/action-control]
-  build-reporting:
-    internal: true
-    dir: components/reporting
-    cmds: [go build -buildvcs=true -o ../../dist/llewm-report ./cmd/llewm-report]
   build-orchestration:
     internal: true
     dir: components/orchestration

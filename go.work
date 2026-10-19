@@ -4,5 +4,4 @@ use (
 	./components/action-control
 	./components/continuity
 	./components/orchestration
-	./components/reporting
 )

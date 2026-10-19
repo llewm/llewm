@@ -52,8 +52,8 @@ source-linked tracks/plans, review the interpretation, show the populated TUI,
 and verify a first checkpoint that a fresh session can recover. Preserve
 original trial docs and defer ongoing adoption. Preserve existing configuration
 and history. Show me the exact permission changes and the commands
-the guide requires me to run myself. Keep optional reporting and History sync
-disabled. Distinguish prepared changes, successful shell checks, and behavior
+the guide requires me to run myself. Keep optional History sync disabled.
+Distinguish prepared changes, successful shell checks, and behavior
 actually observed in the running client; leave fresh-session recovery pending
 until it is observed when that check belongs to the chosen path.
 ```
@@ -186,8 +186,7 @@ prerequisites still produce a diagnostic error).
 ## Optional capabilities
 
 Personal [global guidance](global-guidance.md), [usage ingestion](usage.md),
-[History sync](memory-repository.md), and the
-[private reporting adapter](../../reporting/README.md) are separate choices.
+and [History sync](memory-repository.md) are separate choices.
 Ordinary onboarding does not activate them. Review each capability's data,
 destination and authorization before enabling it.
 

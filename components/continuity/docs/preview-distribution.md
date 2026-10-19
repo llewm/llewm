@@ -2,7 +2,7 @@
 
 Packaging produces local binary bundles, matching client packages, a provenance
 manifest and SHA-256 checksums from a clean committed checkout. It does not
-publish, install, migrate storage or activate reporting. Stable/public release,
+publish, install or migrate storage. Stable/public release,
 source-publication and runtime platform qualification remain separate gates.
 
 First verify dependency notices from the repository root (Go and Python 3):
@@ -33,8 +33,8 @@ Linux, macOS and Windows on amd64 and arm64. A comma-separated list such as
 `linux/amd64,windows/amd64` selects specific targets. Builds disable CGO and
 embed VCS identity and explicit preview-version stamps.
 
-Platform ZIPs contain `llewm`, the optional separate `llewm-report`
-adapter (both `.exe` on Windows) and `INSTALL.txt`. Client ZIPs contain the
+Platform ZIPs contain `llewm` (`llewm.exe` on Windows) and `INSTALL.txt`.
+Client ZIPs contain the
 `llewm/` plugin root for Codex or Claude Code. Client manifests get
 the same version without changing source manifests. Only tracked plugin files
 ship; ignored local files are excluded, non-regular files and unsafe paths
@@ -57,9 +57,8 @@ backup/migration of existing stores, then [client integration](client-integratio
 to register the matching local plugin and review hooks. Restart parent IDEs and
 long-running clients. Distributing executables does not distribute project state.
 
-Opt authorized own projects into the
-[private Forgejo adapter](../../reporting/README.md) separately. Llewm's forge
-receives selected product bugs; each project's memsync carries its own history.
+File ordinary product bugs through GitHub or Forgejo issues. Review selected
+report drafts before posting; each project's History sync carries its own history.
 
 Cross-compilation is a build check, not interactive console or client runtime
 qualification. Linux is the current observed host. Native Windows and macOS

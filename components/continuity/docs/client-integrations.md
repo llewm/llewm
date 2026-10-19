@@ -84,7 +84,7 @@ Source-owned plugins still require a manifest version bump when packaged files
 change; the installer digest applies to installer-owned packages only.
 
 Database migrations remain explicit and [backup-gated](installation.md#migration-bearing-updates).
-The installer never migrates a database or configures history sync/reporting.
+The installer never migrates a database or configures History sync.
 
 An existing `llewm` marketplace pointing at a source checkout is a different
 installation. The installer reports the conflict and preserves it. Review its

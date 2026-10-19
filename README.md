@@ -51,7 +51,6 @@ sessions. It builds as the `llewm` executable.
 | --- | --- | --- |
 | [Continuity](components/continuity/README.md) | Implemented preview; native macOS/Windows qualification pending | Session bootstrap, checkpoints, activity ledger, audits, and MCP |
 | [Action Control](components/action-control/README.md) | Standalone validator implemented | Versioned Git commit-message policy validation; no execution or hook installation |
-| [Reporting](components/reporting/README.md) | Private Forgejo adapter; fixture-qualified | Selected product bug reports, local outbox and delivery receipts |
 | [Orchestration](components/orchestration/README.md) | Manual coordination pilot; local fixture-qualified | Collaborative plans, authenticated claims, reassignment and stale-result review |
 
 See the
@@ -73,8 +72,9 @@ keeps acquisition, verified backups, explicit migrations, matching plugins and
 fresh-client recovery together.
 
 [Preview distribution](components/continuity/docs/preview-distribution.md) builds
-versioned binaries and matching client packages. Automatic private product bug
-submission is a separate opt-in through the [Forgejo adapter](components/reporting/README.md).
+versioned binaries and matching client packages.
+Report ordinary bugs through GitHub or Forgejo issues; include the affected component,
+version and reproduction steps. Review any draft before posting it publicly.
 
 From the repository root, with Go installed, each component remains independently
 checkable:
@@ -93,12 +93,6 @@ go test ./...
 go vet ./...
 go build -o ../../dist/action-control ./cmd/action-control
 
-cd ../reporting
-go fmt ./...
-go test ./...
-go vet ./...
-go build -o ../../dist/llewm-report ./cmd/llewm-report
-
 cd ../orchestration
 go fmt ./...
 go test ./...
@@ -108,14 +102,13 @@ go build -o ../../dist/llewm-orchestrate ./cmd/llewm-orchestrate
 
 Alternatively, with [Task](https://taskfile.dev/) installed, run `task check` and
 `task build` from the repository root. Some distributions package the executable
-as `go-task`. Root tasks dispatch to all four component modules; there is no root Go
+as `go-task`. Root tasks dispatch to all three component modules; there is no root Go
 module. Build output goes in root `dist/`.
 
 ## Repository layout
 
 - `components/continuity/`: Continuity's Go module, tests, schemas, plugins, and documentation.
 - `components/action-control/`: Action Control's independent Go module and validator.
-- `components/reporting/`: the independent private Forgejo report-delivery adapter.
 - `components/orchestration/`: the independent manual team coordinator and client.
 - `docs/`: Llewm-wide vision, architecture, and roadmap.
 - `AGENTS.md` and `CLAUDE.md`: project-wide development guidance.

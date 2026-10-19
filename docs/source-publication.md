@@ -16,7 +16,6 @@ Each implemented component remains an independent Go module:
 | Component | Canonical module | Command |
 | --- | --- | --- |
 | Continuity | `github.com/llewm/llewm/components/continuity` | `cmd/llewm` |
-| Reporting | `github.com/llewm/llewm/components/reporting` | `cmd/llewm-report` |
 | Action Control | `github.com/llewm/llewm/components/action-control` | `cmd/action-control` |
 
 A module's semantic version tag includes its repository directory, such as
@@ -95,16 +94,16 @@ would break the one-way model.
 
 ## Contributions and reports
 
-Use public GitHub issues and pull requests for source questions, ordinary bugs,
-and proposed changes once the repository is published and those surfaces are
-enabled. Include the affected component and exact version; maintainers integrate
-accepted changes into Forgejo. Keep credentials, project databases, private
-checkpoints, host details and unredacted transcripts out of public reports.
+Use public GitHub or Forgejo issues for ordinary bugs and qualification findings.
+Use GitHub pull requests for proposed source changes; maintainers integrate
+accepted changes into Forgejo. Include the affected component, exact version,
+observed and expected behavior, and reproduction steps. A local Continuity bug
+can supply a draft through `llewm item report`; review it before sharing and
+retain the resulting issue URL with the local work item. Direct issue filing
+does not require a local bug record.
 
-The [private Forgejo reporting adapter](../components/reporting/README.md) is a
-separate, explicitly configured destination with a source-project allowlist. Its
-automatic private submission is not permission to post to GitHub. It does not
-configure a public or private security-reporting channel. Sensitive reports need
+Keep credentials, project databases, private checkpoints, host details and
+unredacted transcripts out of public reports. Sensitive security reports need
 a privately agreed maintainer route rather than a public issue.
 
 ## Dependency notices

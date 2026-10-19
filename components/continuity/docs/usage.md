@@ -213,9 +213,8 @@ full client integration, and restart into a fresh session. Follow
 [client verification](client-integrations.md#verify-the-fresh-client) for adopted
 projects. During an active trial, full local hooks and session recovery are available
 again; `trial adopt --reviewed` separately records ongoing use. Changing mode
-does not perform that adoption. Keep optional History sync and
-reporting as separate choices; audit mode does not erase their configuration
-or stop independently launched processes.
+does not perform that adoption. Keep optional History sync as a separate choice;
+audit mode does not erase its configuration or stop independently launched processes.
 
 ## Code statistics
 

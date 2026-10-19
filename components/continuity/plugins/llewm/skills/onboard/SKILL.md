@@ -125,8 +125,7 @@ From the chosen project, or with `llewm --project-root PATH` before each command
 
 Adopt an existing project progressively. Do not reconstruct semantic history
 from all commits. Reuse an existing Continuity lineage when appropriate; do not
-configure history sync, usage ingestion, reporting, or personal global guidance
-unless requested. Reporting is a separate explicit opt-in, never a setup default.
+configure history sync, usage ingestion, or personal global guidance unless requested.
 
 Read the checkpoint skill to save a concise first trial/adoption checkpoint with the
 current task, authoritative sources, checks and unresolved setup limits. State
