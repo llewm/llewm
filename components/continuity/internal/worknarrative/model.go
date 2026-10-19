@@ -21,9 +21,28 @@ type Claim struct {
 	Kind string `json:"kind"`
 	// Label preserves an original section heading. It is omitted when empty so
 	// semantic hashes of earlier records are unchanged.
-	Label     string `json:"label,omitempty"`
-	Text      string `json:"text"`
-	Authority string `json:"authority"`
+	Label     string     `json:"label,omitempty"`
+	Text      string     `json:"text"`
+	Authority string     `json:"authority"`
+	Citations []Citation `json:"citations,omitempty"`
+}
+
+// Source is one dated external observation. Its narrative supplies the title,
+// summary claims, creator and immutable identity; no fetched bytes are stored.
+type Source struct {
+	URL           string `json:"url"`
+	AccessedAt    string `json:"accessed_at"`
+	Publisher     string `json:"publisher,omitempty"`
+	PublishedAt   string `json:"published_at,omitempty"`
+	Version       string `json:"version,omitempty"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
+	Authority     string `json:"authority"`
+}
+
+type Citation struct {
+	Source   string `json:"source"`
+	Relation string `json:"relation"`
+	Locator  string `json:"locator,omitempty"`
 }
 
 type Anchor struct {
@@ -37,6 +56,7 @@ type Anchor struct {
 }
 
 type Record struct {
+	Source              *Source    `json:"source,omitempty"`
 	ID                  string     `json:"id"`
 	ProjectID           string     `json:"project_id"`
 	RecordType          string     `json:"record_type"`

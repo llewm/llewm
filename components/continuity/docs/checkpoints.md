@@ -241,7 +241,11 @@ completed, verification, or attempt detail.
 
 `covered` means those cheap structural signals show reusable output;
 `review_recommended` means substantial discovery produced none of them. Light
-discovery emits no report. The threshold is deliberately conservative: at least
+discovery emits no report. API 132 adds structured source-citation coverage when
+observed web discovery crosses the threshold: `cited_claims`, `uncited_findings`
+and `source_observations`. A plain evidence reference, unrelated record or
+checkpoint detail cannot alone mark web coverage complete; uncited outcome or
+verification claims request review. Source coverage does not judge truth. The threshold is deliberately conservative: at least
 six discovery operations across two kinds, or ten operations of one kind.
 The advisory is best effort and never blocks or changes the checkpoint. It cannot
 decide whether a record is correct, complete, useful, or excessive; its purpose is

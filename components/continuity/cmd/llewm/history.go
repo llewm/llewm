@@ -37,6 +37,7 @@ func historyCommand() *cobra.Command {
 			return nil
 		})
 	}}
+	search.Flags().StringVar(&opts.SourceURL, "source-url", "", "exact URL: source observations and claims citing them")
 	search.Flags().StringVar(&opts.Topic, "topic", "", "curated topic ID or alias, or a roadmap node ID (includes descendants)")
 	search.Flags().StringVar(&opts.State, "state", "current", "narrative/decision correction state: current, superseded, or all")
 	search.Flags().StringSliceVar(&opts.Kinds, "kind", nil, "claim kind or record kind; may be repeated")

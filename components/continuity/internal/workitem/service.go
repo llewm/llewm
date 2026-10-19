@@ -321,6 +321,9 @@ func (s Service) Dispose(ctx context.Context, d Disposition) (Disposition, error
 		if kind != "research" {
 			return Disposition{}, fmt.Errorf("only a research item can be answered; this one is a %s", kind)
 		}
+		if err := ValidateAnswerTargets(ctx, tx, d.ProjectID, d.TargetRefs); err != nil {
+			return Disposition{}, err
+		}
 	}
 	if current == "accepted" && d.Status == "accepted" {
 		return Disposition{}, fmt.Errorf("work item is already accepted")

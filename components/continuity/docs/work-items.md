@@ -153,3 +153,10 @@ Migration 056 converted the earlier records in place on each machine:
   `work_item`, and the affected decisions were rehashed;
 - plan provenance (`suggestion_ids`) became `work_item_ids`; and
 - history search indexes items under the `work_item` family.
+
+At API 132, new `answered` dispositions must target resolvable `narrative:ID`,
+`narrative:ID#ORDINAL` or `decision:ID` records in the same project. Catalog external
+documents as [source-observation narratives](research-memory.md) first. History
+expansion of a question includes its latest disposition and finding references.
+Portable histories retain original answer links; history expansion flags targets
+that do not resolve through the current finding-reference interface.

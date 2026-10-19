@@ -3,6 +3,7 @@ package workitem
 import (
 	"context"
 	"fmt"
+	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -180,6 +181,9 @@ func TestListAndRenderBounds(t *testing.T) {
 
 func TestResearchItemsCloseAsAnsweredWithFindings(t *testing.T) {
 	ctx, s, project, _ := testService(t)
+	if _, err := (worknarrative.Service{DB: s.DB}).Append(ctx, worknarrative.Record{ID: "n", ProjectID: project, Title: "Findings", Creator: "test", Trigger: "manual", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Result", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
 	question := capture(t, ctx, s, Item{ProjectID: project, Kind: "research", Title: "Which cache fails?", Body: "Find out", Creator: "human"})
 	idea := capture(t, ctx, s, Item{ProjectID: project, Kind: "idea", Title: "Idea", Body: "Body", Creator: "human"})
 	counts, err := s.Counts(ctx, project)
@@ -194,6 +198,11 @@ func TestResearchItemsCloseAsAnsweredWithFindings(t *testing.T) {
 	}
 	if _, err := s.Dispose(ctx, Disposition{ProjectID: project, ItemID: idea.ID, Status: "answered", Reason: "Found", TargetRefs: []string{"narrative:n"}, Creator: "human"}); err == nil || !strings.Contains(err.Error(), "only a research item") {
 		t.Fatalf("answered an idea: %v", err)
+	}
+	for _, ref := range []string{"narrative:missing", "narrative:n#55", "https://example.org", "decision:missing"} {
+		if _, err := s.Dispose(ctx, Disposition{ProjectID: project, ItemID: question.ID, Status: "answered", Reason: "Found", TargetRefs: []string{ref}, Creator: "human"}); err == nil {
+			t.Fatalf("accepted invalid answer %s", ref)
+		}
 	}
 	if _, err := s.Dispose(ctx, Disposition{ProjectID: project, ItemID: question.ID, Status: "answered", Reason: "Found", TargetRefs: []string{"narrative:n"}, Creator: "human"}); err != nil {
 		t.Fatal(err)

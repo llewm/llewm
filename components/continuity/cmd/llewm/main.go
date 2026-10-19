@@ -575,7 +575,7 @@ func addSelectionFlags(command *cobra.Command, selection *checkpoint.Selection) 
 func narrativeCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "narrative", Short: "Record and retrieve commit-optional work narratives"}
 	var record worknarrative.Record
-	var claimsJSON, anchorsJSON, occurredFrom, occurredTo, commitRef, commitRepository string
+	var claimsJSON, anchorsJSON, sourceJSON, occurredFrom, occurredTo, commitRef, commitRepository string
 	var noNote bool
 	recordCommand := &cobra.Command{Use: "record", Short: "Append one immutable work narrative", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if record.Title == "" || (record.Trigger == "" && commitRef == "") || claimsJSON == "" {
@@ -583,6 +583,11 @@ func narrativeCommand() *cobra.Command {
 		}
 		if err := json.Unmarshal([]byte(claimsJSON), &record.Claims); err != nil {
 			return fmt.Errorf("decode --claims-json: %w", err)
+		}
+		if sourceJSON != "" {
+			if err := json.Unmarshal([]byte(sourceJSON), &record.Source); err != nil {
+				return fmt.Errorf("decode --source-json: %w", err)
+			}
 		}
 		if anchorsJSON != "" {
 			if err := json.Unmarshal([]byte(anchorsJSON), &record.Anchors); err != nil {
@@ -625,6 +630,7 @@ func narrativeCommand() *cobra.Command {
 	recordCommand.Flags().StringVar(&record.Title, "title", "", "short narrative title (required)")
 	recordCommand.Flags().StringVar(&record.Trigger, "trigger", "", "meaningful_checkpoint, accepted_decision, completed_roadmap_slice, commit, or manual")
 	recordCommand.Flags().StringVar(&claimsJSON, "claims-json", "", "JSON array of ordered claim objects (required)")
+	recordCommand.Flags().StringVar(&sourceJSON, "source-json", "", "external source observation JSON: URL, accessed_at, authority and optional publication metadata")
 	recordCommand.Flags().StringVar(&anchorsJSON, "anchors-json", "", "JSON array of ordered anchor objects")
 	recordCommand.Flags().StringVar(&occurredFrom, "occurred-from", "", "optional RFC3339 occurrence start")
 	recordCommand.Flags().StringVar(&occurredTo, "occurred-to", "", "optional RFC3339 occurrence end")

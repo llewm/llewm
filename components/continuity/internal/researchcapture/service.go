@@ -24,6 +24,9 @@ type Candidate struct {
 }
 
 type Report struct {
+	CitedClaims         int      `json:"cited_claims"`
+	UncitedFindings     int      `json:"uncited_findings"`
+	SourceObservations  int      `json:"source_observations"`
 	State               string   `json:"state"`
 	DiscoveryOperations int      `json:"discovery_operations"`
 	DiscoveryKinds      []string `json:"discovery_kinds"`
@@ -77,6 +80,26 @@ func (s Service) ReportForCheckpoint(ctx context.Context, projectID string, cand
 		}
 	}
 	report.DurableRecords = report.Narratives + report.Decisions + report.WorkItems
+	if contains(kinds, "web") {
+		base := ` FROM work_narratives n JOIN work_narrative_claims c ON c.project_id=n.project_id AND c.narrative_id=n.id WHERE n.project_id=? AND EXISTS(SELECT 1 FROM work_narrative_anchors a WHERE a.project_id=n.project_id AND a.narrative_id=n.id AND a.anchor_kind='task' AND a.target=?) AND (?='' OR n.recorded_at>?) AND NOT EXISTS(SELECT 1 FROM superseded_records s WHERE s.project_id=n.project_id AND s.family='narrative' AND s.id=n.id)`
+		args := []any{projectID, candidate.TaskID, since, since}
+		if report.CitedClaims, err = count(ctx, s.DB, `SELECT COUNT(*)`+base+` AND EXISTS(SELECT 1 FROM work_narrative_citations e WHERE e.project_id=n.project_id AND e.narrative_id=n.id AND e.claim_ordinal=c.ordinal)`, args...); err != nil {
+			return nil, err
+		}
+		if report.UncitedFindings, err = count(ctx, s.DB, `SELECT COUNT(*)`+base+` AND json_type(n.payload_json,'$.source') IS NULL AND c.kind IN ('outcome','verification') AND NOT EXISTS(SELECT 1 FROM work_narrative_citations e WHERE e.project_id=n.project_id AND e.narrative_id=n.id AND e.claim_ordinal=c.ordinal)`, args...); err != nil {
+			return nil, err
+		}
+		if report.SourceObservations, err = count(ctx, s.DB, `SELECT COUNT(DISTINCT e.source_id) FROM work_narrative_citations e WHERE e.project_id=? AND e.narrative_id IN (SELECT n.id`+base+`)`, append([]any{projectID}, args...)...); err != nil {
+			return nil, err
+		}
+		if report.CitedClaims == 0 || report.SourceObservations == 0 || report.UncitedFindings > 0 {
+			report.Reasons = []string{"web discovery needs task-linked findings with structured source citations; unrelated records and checkpoint references do not establish source coverage"}
+			if report.UncitedFindings > 0 {
+				report.Reasons = append(report.Reasons, fmt.Sprintf("%d outcome/verification claims lack citations; review which actually depend on web evidence", report.UncitedFindings))
+			}
+			return report, nil
+		}
+	}
 	if report.DurableRecords > 0 || report.EvidenceRefs > 0 || report.CheckpointSignals >= 2 {
 		report.State = "covered"
 		return report, nil
@@ -148,7 +171,7 @@ func discoveryKind(tool, command string) string {
 		return "history"
 	case name == "read", name == "grep", name == "glob", strings.HasSuffix(name, "__read"), strings.HasSuffix(name, "__grep"), strings.HasSuffix(name, "__glob"):
 		return "repository"
-	case strings.Contains(name, "web__run"), strings.Contains(name, "websearch"), strings.Contains(name, "webfetch"):
+	case strings.Contains(name, "web__run"), strings.Contains(name, "websearch"), strings.Contains(name, "webfetch"), strings.Contains(name, "search_service"), strings.Contains(name, "web_search"), strings.Contains(name, "web_fetch"):
 		return "web"
 	}
 	if name != "bash" && !strings.Contains(name, "exec") {
@@ -166,6 +189,15 @@ func discoveryKind(tool, command string) string {
 		}
 	}
 	return ""
+}
+
+func contains(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func checkpointSignals(candidate Candidate) int {

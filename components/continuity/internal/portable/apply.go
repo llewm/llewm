@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -530,6 +531,10 @@ func decodeWorkNarrative(envelope Envelope, payload workNarrativePayload) (workn
 	if len(payload.Claims) == 0 || len(payload.Claims) > worknarrative.MaxClaims || len(payload.Anchors) > worknarrative.MaxAnchors {
 		return worknarrative.Record{}, fmt.Errorf("work narrative %s has invalid claim or anchor counts", envelope.RecordID)
 	}
+	normalizedSource, normalizedClaims, err := worknarrative.NormalizeResearch(payload.Source, payload.Claims)
+	if err != nil || !reflect.DeepEqual(normalizedSource, payload.Source) || !reflect.DeepEqual(normalizedClaims, payload.Claims) {
+		return worknarrative.Record{}, fmt.Errorf("work narrative %s has invalid or noncanonical research metadata: %v", envelope.RecordID, err)
+	}
 	for _, claim := range payload.Claims {
 		if !oneOfValue(claim.Kind, "intent", "outcome", "interface", "constraint", "alternative", "verification", "decision", "next_action", "limitation", "note") || len(claim.Label) > worknarrative.MaxClaimLabelBytes || !oneOfValue(claim.Authority, "machine_observed", "caller_asserted", "user_reported") || !validBoundedText(claim.Text, worknarrative.MaxRecordBytes) || claim.Text == "" {
 			return worknarrative.Record{}, fmt.Errorf("work narrative %s has an invalid claim", envelope.RecordID)
@@ -547,7 +552,7 @@ func decodeWorkNarrative(envelope Envelope, payload workNarrativePayload) (workn
 			return worknarrative.Record{}, fmt.Errorf("work narrative %s has an invalid anchor hash", envelope.RecordID)
 		}
 	}
-	if !sameReferences(envelope.Refs, workNarrativeReferences(payload.Anchors, payload.CreatorInvocationID)) {
+	if !sameReferences(envelope.Refs, workNarrativeReferences(payload.Anchors, payload.CreatorInvocationID, payload.Claims)) {
 		return worknarrative.Record{}, fmt.Errorf("work narrative %s references do not match payload", envelope.RecordID)
 	}
 	recorded, err := parsePortableTime(envelope.RecordedAt)
@@ -565,7 +570,7 @@ func decodeWorkNarrative(envelope Envelope, payload workNarrativePayload) (workn
 	if from != nil && to != nil && from.After(*to) {
 		return worknarrative.Record{}, fmt.Errorf("work narrative %s has reversed occurrence boundary", envelope.RecordID)
 	}
-	return worknarrative.Record{ID: envelope.RecordID, RecordType: worknarrative.RecordType, Title: payload.Title, Trigger: payload.Trigger, OccurredFrom: from, OccurredTo: to, Claims: append([]worknarrative.Claim{}, payload.Claims...), Anchors: append([]worknarrative.Anchor{}, payload.Anchors...), Creator: payload.Creator, CreatorInvocationID: payload.CreatorInvocationID, State: "current", RecordedAt: recorded, SchemaVersion: payload.OperationalSchemaVersion}, nil
+	return worknarrative.Record{Source: payload.Source, ID: envelope.RecordID, RecordType: worknarrative.RecordType, Title: payload.Title, Trigger: payload.Trigger, OccurredFrom: from, OccurredTo: to, Claims: append([]worknarrative.Claim{}, payload.Claims...), Anchors: append([]worknarrative.Anchor{}, payload.Anchors...), Creator: payload.Creator, CreatorInvocationID: payload.CreatorInvocationID, State: "current", RecordedAt: recorded, SchemaVersion: payload.OperationalSchemaVersion}, nil
 }
 
 func validateApplyDependencies(ctx context.Context, tx *sql.Tx, projectID string, decoded decodedOperationalBundle, appendKeys map[string]struct{}) error {
@@ -873,6 +878,21 @@ func validateApplyDependencies(ctx context.Context, tx *sql.Tx, projectID string
 		}
 	}
 	for id, narrative := range decoded.workNarratives {
+		for _, claim := range narrative.Claims {
+			for _, citation := range claim.Citations {
+				target := strings.TrimPrefix(citation.Source, "narrative:")
+				if target == id {
+					return fmt.Errorf("narrative %s cites itself", id)
+				}
+				if source, ok := decoded.workNarratives[target]; ok {
+					if source.Source == nil {
+						return fmt.Errorf("citation target %s is not a source observation", target)
+					}
+				} else if err := worknarrative.ValidateCitationTargets(ctx, tx, projectID, []worknarrative.Claim{{Citations: []worknarrative.Citation{citation}}}); err != nil {
+					return err
+				}
+			}
+		}
 		if _, appendRecord := appendKeys[identityKey("work_narrative", id, 0)]; !appendRecord {
 			continue
 		}
@@ -1223,6 +1243,7 @@ func appendWorkNarratives(ctx context.Context, tx *sql.Tx, projectID string, dec
 
 func encodeImportedWorkNarrative(record worknarrative.Record) (string, string, error) {
 	type semantic struct {
+		Source       *worknarrative.Source  `json:"source,omitempty"`
 		Title        string                 `json:"title"`
 		Trigger      string                 `json:"trigger"`
 		OccurredFrom *time.Time             `json:"occurred_from,omitempty"`
@@ -1233,7 +1254,7 @@ func encodeImportedWorkNarrative(record worknarrative.Record) (string, string, e
 	for index := range record.Anchors {
 		record.Anchors[index].Drift = ""
 	}
-	encoded, err := json.Marshal(semantic{Title: record.Title, Trigger: record.Trigger, OccurredFrom: record.OccurredFrom, OccurredTo: record.OccurredTo, Claims: record.Claims, Anchors: record.Anchors})
+	encoded, err := json.Marshal(semantic{Source: record.Source, Title: record.Title, Trigger: record.Trigger, OccurredFrom: record.OccurredFrom, OccurredTo: record.OccurredTo, Claims: record.Claims, Anchors: record.Anchors})
 	if err != nil {
 		return "", "", err
 	}
@@ -1336,9 +1357,18 @@ func parseOptionalPortableTime(value string) (*time.Time, error) {
 	return &parsed, nil
 }
 
-func workNarrativeReferences(anchors []worknarrative.Anchor, invocationID string) []Reference {
+func workNarrativeReferences(anchors []worknarrative.Anchor, invocationID string, claims []worknarrative.Claim) []Reference {
 	refs := make([]Reference, 0, len(anchors)+1)
 	seen := map[Reference]bool{}
+	for _, claim := range claims {
+		for _, citation := range claim.Citations {
+			ref := Reference{Kind: "narrative", ID: strings.TrimPrefix(citation.Source, "narrative:")}
+			if !seen[ref] {
+				refs = append(refs, ref)
+				seen[ref] = true
+			}
+		}
+	}
 	for _, anchor := range anchors {
 		ref := Reference{Kind: anchor.Kind, ID: anchor.Target}
 		if !seen[ref] {

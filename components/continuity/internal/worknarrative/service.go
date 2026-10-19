@@ -71,6 +71,7 @@ func relativePath(value string) (string, error) {
 }
 
 type semanticRecord struct {
+	Source       *Source    `json:"source,omitempty"`
 	Title        string     `json:"title"`
 	Trigger      string     `json:"trigger"`
 	OccurredFrom *time.Time `json:"occurred_from,omitempty"`
@@ -81,6 +82,9 @@ type semanticRecord struct {
 
 func (s Service) prepare(ctx context.Context, input Record) (Record, string, error) {
 	var err error
+	if input.Source, input.Claims, err = NormalizeResearch(input.Source, input.Claims); err != nil {
+		return Record{}, "", err
+	}
 	if input.ProjectID, err = text("project ID", input.ProjectID, true); err != nil {
 		return Record{}, "", err
 	}
@@ -184,7 +188,7 @@ func (s Service) prepare(ctx context.Context, input Record) (Record, string, err
 	input.RecordedAt = s.now()
 	input.SchemaVersion = SchemaVersion
 	input.State = "current"
-	semantic, err := json.Marshal(semanticRecord{Title: input.Title, Trigger: input.Trigger, OccurredFrom: input.OccurredFrom, OccurredTo: input.OccurredTo, Claims: input.Claims, Anchors: input.Anchors})
+	semantic, err := json.Marshal(semanticRecord{Source: input.Source, Title: input.Title, Trigger: input.Trigger, OccurredFrom: input.OccurredFrom, OccurredTo: input.OccurredTo, Claims: input.Claims, Anchors: input.Anchors})
 	if err != nil {
 		return Record{}, "", err
 	}
@@ -217,6 +221,9 @@ func (s Service) Append(ctx context.Context, input Record) (Record, error) {
 		return Record{}, err
 	}
 	defer tx.Rollback()
+	if err := ValidateCitationTargets(ctx, tx, record.ProjectID, record.Claims); err != nil {
+		return Record{}, err
+	}
 	if record.SupersedesID != "" {
 		var exists int
 		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM work_narratives old WHERE old.project_id=? AND old.id=? AND NOT EXISTS (SELECT 1 FROM superseded_records s WHERE s.project_id=old.project_id AND s.family='narrative' AND s.id=old.id)`, record.ProjectID, record.SupersedesID).Scan(&exists)
@@ -327,13 +334,17 @@ func render(record Record) string {
 	if record.OccurredTo != nil {
 		fmt.Fprintf(&out, "- Occurred to: %s\n", record.OccurredTo.Format(time.RFC3339Nano))
 	}
+	out.WriteString("\n" + RenderSource(record.Source))
 	out.WriteString("\n## Claims\n")
 	for _, claim := range record.Claims {
 		if claim.Label != "" {
 			fmt.Fprintf(&out, "\n- **%s** — %s (`%s`): %s\n", claim.Kind, claim.Label, claim.Authority, claim.Text)
-			continue
+		} else {
+			fmt.Fprintf(&out, "\n- **%s** (`%s`): %s\n", claim.Kind, claim.Authority, claim.Text)
 		}
-		fmt.Fprintf(&out, "\n- **%s** (`%s`): %s\n", claim.Kind, claim.Authority, claim.Text)
+		for _, c := range claim.Citations {
+			fmt.Fprintf(&out, "  Citation: %s %s — %s\n", c.Relation, c.Source, c.Locator)
+		}
 	}
 	out.WriteString("\n## Anchors\n")
 	if len(record.Anchors) == 0 {

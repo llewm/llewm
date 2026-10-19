@@ -35,17 +35,18 @@ var Families = []string{"narrative_claim", "decision", "work_item", "checkpoint"
 type Service struct{ DB *sql.DB }
 
 type SearchOptions struct {
-	State    string   `json:"state,omitempty"`
-	Query    string   `json:"query,omitempty"`
-	Topic    string   `json:"topic,omitempty"`
-	Kinds    []string `json:"kinds,omitempty"`
-	Families []string `json:"families,omitempty"`
-	Since    string   `json:"since,omitempty"`
-	Until    string   `json:"until,omitempty"`
-	Linked   string   `json:"linked,omitempty"`
-	Limit    int      `json:"limit,omitempty"`
-	Offset   int      `json:"offset,omitempty"`
-	MaxBytes int      `json:"max_bytes,omitempty"`
+	SourceURL string   `json:"source_url,omitempty"`
+	State     string   `json:"state,omitempty"`
+	Query     string   `json:"query,omitempty"`
+	Topic     string   `json:"topic,omitempty"`
+	Kinds     []string `json:"kinds,omitempty"`
+	Families  []string `json:"families,omitempty"`
+	Since     string   `json:"since,omitempty"`
+	Until     string   `json:"until,omitempty"`
+	Linked    string   `json:"linked,omitempty"`
+	Limit     int      `json:"limit,omitempty"`
+	Offset    int      `json:"offset,omitempty"`
+	MaxBytes  int      `json:"max_bytes,omitempty"`
 }
 
 type Hit struct {
@@ -105,6 +106,8 @@ var canonicalCounts = map[string]string{
 // test compares a reindexed database with a freshly migrated one.
 var reindexStatements = []string{
 	`DELETE FROM history_chunks`,
+	`DELETE FROM work_narrative_citations`,
+	`INSERT INTO work_narrative_citations SELECT n.project_id,n.id,CAST(c.key AS INTEGER),CAST(e.key AS INTEGER),substr(json_extract(e.value,'$.source'),11),json_extract(e.value,'$.relation'),COALESCE(json_extract(e.value,'$.locator'),'') FROM work_narratives n,json_each(n.payload_json,'$.claims') c,json_each(c.value,'$.citations') e`,
 	`DELETE FROM work_narrative_claims`,
 	`INSERT INTO work_narrative_claims(project_id,narrative_id,ordinal,kind,label,text,authority)
 	 SELECT n.project_id,n.id,CAST(c.key AS INTEGER),json_extract(c.value,'$.kind'),COALESCE(json_extract(c.value,'$.label'),''),json_extract(c.value,'$.text'),json_extract(c.value,'$.authority')
@@ -393,7 +396,8 @@ func descendants(ctx context.Context, db queryer, projectID string, roots []stri
 const linkedClause = `ref IN (
 	SELECT 'narrative:'||c.narrative_id||'#'||c.ordinal FROM work_narrative_anchors a JOIN work_narrative_claims c ON c.project_id=a.project_id AND c.narrative_id=a.narrative_id
 	WHERE a.project_id=? AND (a.target=? OR a.anchor_kind||':'||a.target=?)
-	UNION SELECT 'decision:'||decision_id FROM decision_links WHERE project_id=? AND (target_id=? OR target_kind||':'||target_id=?))`
+	UNION SELECT 'decision:'||decision_id FROM decision_links WHERE project_id=? AND (target_id=? OR target_kind||':'||target_id=?)
+ UNION SELECT 'narrative:'||narrative_id||'#'||claim_ordinal FROM work_narrative_citations WHERE project_id=? AND (source_id=? OR 'narrative:'||source_id=?))`
 
 // Search returns bounded metadata and snippets. Text queries rank by BM25; queries
 // without text read chronologically, oldest first.
@@ -428,7 +432,7 @@ func (s Service) Search(ctx context.Context, projectID string, options SearchOpt
 	if strings.TrimSpace(options.Query) != "" && match == "" {
 		return SearchPage{}, errors.New("query has no searchable terms")
 	}
-	if match == "" && options.Topic == "" && len(options.Kinds) == 0 && len(options.Families) == 0 && options.Since == "" && options.Until == "" && options.Linked == "" {
+	if match == "" && options.Topic == "" && len(options.Kinds) == 0 && len(options.Families) == 0 && options.Since == "" && options.Until == "" && options.Linked == "" && options.SourceURL == "" {
 		return SearchPage{}, errors.New("provide a query, topic, kind, family, linked target, or time range")
 	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -443,6 +447,10 @@ func (s Service) Search(ctx context.Context, projectID string, options SearchOpt
 		where = append(where, "NOT ("+supersededChunkSQL+")")
 	} else if options.State == "superseded" {
 		where = append(where, supersededChunkSQL)
+	}
+	if options.SourceURL != "" {
+		where = append(where, `ref IN (SELECT 'narrative:'||n.id||'#'||c.ordinal FROM work_narratives n JOIN work_narrative_claims c ON c.project_id=n.project_id AND c.narrative_id=n.id WHERE n.project_id=? AND json_extract(n.payload_json,'$.source.url')=? UNION SELECT 'narrative:'||e.narrative_id||'#'||e.claim_ordinal FROM work_narrative_citations e JOIN work_narratives n ON n.project_id=e.project_id AND n.id=e.source_id WHERE n.project_id=? AND json_extract(n.payload_json,'$.source.url')=?)`)
+		args = append(args, projectID, options.SourceURL, projectID, options.SourceURL)
 	}
 	var derivations map[string][]string
 	if options.Topic != "" {
@@ -471,7 +479,7 @@ func (s Service) Search(ctx context.Context, projectID string, options SearchOpt
 	}
 	if options.Linked != "" {
 		where = append(where, linkedClause)
-		args = append(args, projectID, options.Linked, options.Linked, projectID, options.Linked, options.Linked)
+		args = append(args, projectID, options.Linked, options.Linked, projectID, options.Linked, options.Linked, projectID, options.Linked, options.Linked)
 	}
 	if options.Since != "" {
 		where, args = append(where, "recorded_at>=?"), append(args, options.Since)

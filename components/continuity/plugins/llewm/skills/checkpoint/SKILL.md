@@ -133,7 +133,11 @@ the appropriate narrative, decision, resource, or work item, or add missing
 evidence and structured attempt/verification detail to the checkpoint. If it did
 not establish anything durable, do not create filler merely to clear the advisory;
 make that limitation explicit in the checkpoint. `covered` is a structural signal,
-not a quality judgment.
+not a quality judgment. For external research, preserve source observations and
+claim citations using the narrative skill even when tool observations are missing.
+Review `uncited_findings`, `cited_claims` and `source_observations`; an unrelated
+record or a checkpoint reference does not establish web-source coverage. Never
+add invented citations to silence an advisory; state the missing evidence.
 If readiness is false, use its section byte accounting to shorten optional detail
 while preserving the task kernel, important failed attempts, and stable references;
 do not raise the budget or silently discard higher-authority guidance. Dry-run the

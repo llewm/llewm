@@ -3,6 +3,8 @@ package researchcapture
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 	"path/filepath"
 	"testing"
 
@@ -46,6 +48,36 @@ func TestReportForCheckpointRecommendsReviewAndRecognizesCoverage(t *testing.T) 
 	covered, err := service.ReportForCheckpoint(ctx, "p", Candidate{SessionID: "s", TaskID: "task", EvidenceRefs: 1})
 	if err != nil || covered == nil || covered.State != "covered" {
 		t.Fatalf("covered report: %+v err=%v", covered, err)
+	}
+	for i := 0; i < 10; i++ {
+		if _, err := db.ExecContext(ctx, `INSERT INTO events(id,occurred_at,received_at,project_id,session_id,client,event_type,category,actor_type,payload_json,schema_version,content_hash) VALUES(?,'2026-10-05T00:02:00Z','2026-10-05T00:02:00Z','p','s','codex','posttooluse','tool','cloud_model','{"tool":"web__run"}',1,'h')`, fmt.Sprintf("web%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	web, err := service.ReportForCheckpoint(ctx, "p", Candidate{SessionID: "s", TaskID: "task", EvidenceRefs: 1, Completed: 1, Verified: 1})
+	if err != nil || web.State != "review_recommended" {
+		t.Fatalf("unrelated evidence hid source gap: %+v %v", web, err)
+	}
+	narratives := worknarrative.Service{DB: db}
+	if _, err := narratives.Append(ctx, worknarrative.Record{ID: "src", ProjectID: "p", Title: "Source", Creator: "test", Trigger: "manual", Source: &worknarrative.Source{URL: "https://example.org/docs", AccessedAt: "2026-10-05T00:02:00Z", Authority: "caller_asserted"}, Claims: []worknarrative.Claim{{Kind: "note", Text: "Source context", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	record := worknarrative.Record{ID: "finding", ProjectID: "p", Title: "Finding", Creator: "test", Trigger: "manual", Anchors: []worknarrative.Anchor{{Kind: "task", Target: "task", Authority: "caller_asserted"}}, Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Finding with evidence", Authority: "caller_asserted", Citations: []worknarrative.Citation{{Source: "narrative:src", Relation: "supports"}}}}}
+	if _, err := narratives.Append(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	web, err = service.ReportForCheckpoint(ctx, "p", Candidate{SessionID: "s", TaskID: "task"})
+	if err != nil || web.State != "covered" || web.CitedClaims != 1 || web.SourceObservations != 1 {
+		t.Fatalf("citation coverage: %+v %v", web, err)
+	}
+	record.ID = "uncited"
+	record.Claims[0].Citations = nil
+	if _, err := narratives.Append(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	web, err = service.ReportForCheckpoint(ctx, "p", Candidate{SessionID: "s", TaskID: "task"})
+	if err != nil || web.State != "review_recommended" || web.UncitedFindings != 1 {
+		t.Fatalf("uncited findings: %+v %v", web, err)
 	}
 }
 

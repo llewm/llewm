@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/decision"
+	"github.com/llewm/llewm/components/continuity/internal/workitem"
+	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
 type Item struct {
@@ -122,6 +124,23 @@ func load(ctx context.Context, db queryer, projectID, ref string) (Item, error) 
 		if err := db.QueryRowContext(ctx, `SELECT title,recorded_at,body,kind FROM work_items WHERE project_id=? AND id=?`, projectID, id).Scan(&item.Title, &item.RecordedAt, &item.Text, &item.Kind); err != nil {
 			return Item{}, notFound(err, ref)
 		}
+		var status, reason, targets string
+		err := db.QueryRowContext(ctx, `SELECT status,reason,target_refs_json FROM work_item_dispositions WHERE project_id=? AND item_id=? ORDER BY recorded_at DESC,id DESC LIMIT 1`, projectID, id).Scan(&status, &reason, &targets)
+		if err != nil && err != sql.ErrNoRows {
+			return Item{}, err
+		}
+		if err == nil {
+			item.Text = "Status: " + status + "\nReason: " + reason + "\nFindings/targets: " + targets + "\n\n" + item.Text
+			if status == "answered" {
+				var refs []string
+				if err := json.Unmarshal([]byte(targets), &refs); err != nil {
+					return Item{}, err
+				}
+				if err := workitem.ValidateAnswerTargets(ctx, db, projectID, refs); err != nil {
+					item.Text = "Finding resolution: unverified (" + err.Error() + ")\n" + item.Text
+				}
+			}
+		}
 	case "checkpoint":
 		item.Family = "checkpoint"
 		var summary, next, payload string
@@ -166,8 +185,8 @@ func load(ctx context.Context, db queryer, projectID, ref string) (Item, error) 
 func loadNarrative(ctx context.Context, db queryer, projectID, ref, id string) (Item, error) {
 	narrativeID, ordinalText, oneClaim := strings.Cut(id, "#")
 	item := Item{Ref: ref, Family: "narrative_claim"}
-	var trigger string
-	if err := db.QueryRowContext(ctx, `SELECT title,trigger_kind,COALESCE(occurred_from,recorded_at) FROM work_narratives WHERE project_id=? AND id=?`, projectID, narrativeID).Scan(&item.Title, &trigger, &item.RecordedAt); err != nil {
+	var trigger, sourceJSON string
+	if err := db.QueryRowContext(ctx, `SELECT title,trigger_kind,COALESCE(occurred_from,recorded_at),COALESCE(json_extract(payload_json,'$.source'),'null') FROM work_narratives WHERE project_id=? AND id=?`, projectID, narrativeID).Scan(&item.Title, &trigger, &item.RecordedAt, &sourceJSON); err != nil {
 		return Item{}, notFound(err, ref)
 	}
 	query := `SELECT ordinal,kind,label,text,authority FROM work_narrative_claims WHERE project_id=? AND narrative_id=? ORDER BY ordinal`
@@ -194,6 +213,11 @@ func loadNarrative(ctx context.Context, db queryer, projectID, ref, id string) (
 		if err = rows.Scan(&ordinal, &kind, &label, &text, &authority); err != nil {
 			return Item{}, err
 		}
+		citations, err := citationText(ctx, db, projectID, narrativeID, ordinal)
+		if err != nil {
+			return Item{}, err
+		}
+		text += citations
 		heading := kind
 		if label != "" {
 			heading += " — " + label
@@ -219,7 +243,11 @@ func loadNarrative(ctx context.Context, db queryer, projectID, ref, id string) (
 	 FROM work_narrative_anchors WHERE project_id=? AND narrative_id=? ORDER BY ordinal`, []any{projectID, narrativeID}, "", func(value, _ string) { anchors = append(anchors, value) }); err != nil {
 		return Item{}, err
 	}
-	item.Text = strings.Join(parts, "\n\n")
+	var source *worknarrative.Source
+	if err := json.Unmarshal([]byte(sourceJSON), &source); err != nil {
+		return Item{}, err
+	}
+	item.Text = worknarrative.RenderSource(source) + strings.Join(parts, "\n\n")
 	if len(anchors) > 0 {
 		item.Text += "\n\nAnchors: " + strings.Join(anchors, ", ")
 	}

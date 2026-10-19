@@ -44,3 +44,11 @@ rationale may explain behavior without proving it still holds. Surface conflicts
 and cite the relevant references; preserve corrections as new history. If no
 useful history is found or the service is unavailable, state that briefly and
 continue normal discovery. Search failure is not an execution gate.
+
+History search defaults narrative/decision correction state to `current`. Use
+`state: all` or `state: superseded` deliberately for historical research; exact
+old refs remain readable. Read successor notices before relying on a claim.
+`source_url` selects an exact external URL's observations and citing claims;
+`linked: narrative:ID` finds citations to one source observation. Exact expansion
+retains citation relations, locators and source correction state; follow the
+observation ref for dated source metadata. No source is fetched automatically.

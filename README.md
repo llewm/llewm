@@ -29,8 +29,9 @@ larger project history remains available.
 supporting evidence, and limitations as attributable claim chunks, linked to the
 work they inform. Focused search and bounded expansion retrieve selected findings
 without replaying the research session. Agents supply the summaries and citations;
-automatic web-source capture and structured claim-to-source links remain gaps.
-See [research memory: current support and proposed improvements](components/continuity/docs/research-memory.md).
+dated source observations and claim-level evidence links preserve their context.
+Automatic web capture and truth verification are not provided.
+See [research memory and qualification](components/continuity/docs/research-memory.md).
 
 **Coordinate work across agents.** Explicit task bindings, presence observations,
 overlap visibility, and scoped leases support coordination today. Required lease

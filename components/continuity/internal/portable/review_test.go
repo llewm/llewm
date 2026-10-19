@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,6 +60,9 @@ func TestReviewFamiliesRoundTripWithoutPortableFrictionCandidates(t *testing.T) 
 	}
 	research, err := items.Capture(ctx, workitem.Capture{Item: workitem.Item{ID: "cache-question", ProjectID: sourceProject, Kind: "research", Title: "Why does the cache fail?", Body: "Find the cause", Creator: "human-reviewer"}})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (worknarrative.Service{DB: sourceDB}).Append(ctx, worknarrative.Record{ID: "cache-cause", ProjectID: sourceProject, Title: "Findings", Creator: "test", Trigger: "manual", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Permissions", Authority: "caller_asserted"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := items.Dispose(ctx, workitem.Disposition{ProjectID: sourceProject, ItemID: research.ID, Status: "answered", Reason: "Permissions", TargetRefs: []string{"narrative:cache-cause"}, Creator: "human-reviewer"}); err != nil {

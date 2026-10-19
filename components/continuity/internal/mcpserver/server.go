@@ -330,17 +330,18 @@ type DecisionRecordInput struct {
 }
 
 type HistorySearchInput struct {
-	State    string   `json:"state,omitempty" jsonschema:"narrative/decision correction state: current (default), superseded, or all"`
-	Query    string   `json:"query,omitempty" jsonschema:"terms are ANDed; trailing * for prefix"`
-	Topic    string   `json:"topic,omitempty" jsonschema:"topic ID or alias, or roadmap node ID"`
-	Kinds    []string `json:"kinds,omitempty" jsonschema:"claim kinds such as intent or decision"`
-	Families []string `json:"families,omitempty"`
-	Since    string   `json:"since,omitempty" jsonschema:"RFC 3339"`
-	Until    string   `json:"until,omitempty" jsonschema:"RFC 3339, exclusive"`
-	Linked   string   `json:"linked,omitempty" jsonschema:"commit:HASH, roadmap_node:ID, file:PATH: narratives anchored to it, decisions linking to it"`
-	Limit    int      `json:"limit,omitempty"`
-	Offset   int      `json:"offset,omitempty"`
-	MaxBytes int      `json:"max_bytes,omitempty"`
+	SourceURL string   `json:"source_url,omitempty" jsonschema:"exact source URL: observations and citing claims"`
+	State     string   `json:"state,omitempty" jsonschema:"narrative/decision correction state: current (default), superseded, or all"`
+	Query     string   `json:"query,omitempty" jsonschema:"terms are ANDed; trailing * for prefix"`
+	Topic     string   `json:"topic,omitempty" jsonschema:"topic ID or alias, or roadmap node ID"`
+	Kinds     []string `json:"kinds,omitempty" jsonschema:"claim kinds such as intent or decision"`
+	Families  []string `json:"families,omitempty"`
+	Since     string   `json:"since,omitempty" jsonschema:"RFC 3339"`
+	Until     string   `json:"until,omitempty" jsonschema:"RFC 3339, exclusive"`
+	Linked    string   `json:"linked,omitempty" jsonschema:"commit:HASH, roadmap_node:ID, file:PATH: narratives anchored to it, decisions linking to it"`
+	Limit     int      `json:"limit,omitempty"`
+	Offset    int      `json:"offset,omitempty"`
+	MaxBytes  int      `json:"max_bytes,omitempty"`
 }
 
 type HistoryShowInput struct {
@@ -359,6 +360,7 @@ type UsageInput struct {
 }
 
 type NarrativeRecordInput struct {
+	Source              *worknarrative.Source  `json:"source,omitempty"`
 	ID                  string                 `json:"id,omitempty"`
 	Title               string                 `json:"title"`
 	Trigger             string                 `json:"trigger,omitempty" jsonschema:"meaningful_checkpoint, accepted_decision, completed_roadmap_slice, commit, or manual"`
@@ -606,7 +608,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, ResourceShowResult{Detail: &detail}, nil
 		})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_pin", Description: "Pin a resource, procedure, decision, or topic to the project, a topic, a roadmap node, or a task so the bootstrap shows it there; unpin to remove. Without a target, list pins."},
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_pin", Description: "Pin/unpin context for bootstrap scope; without a target, list pins."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input PinInput) (*mcp.CallToolResult, PinResult, error) {
 			if input.Target == "" {
 				lines, err := pin.Current(ctx, application.DB, application.ProjectID)
@@ -686,7 +688,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, result, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_usage", Description: "Report this project's model usage from Claude Code and Codex session files: exact captured tokens and estimated API-rate-equivalent cost with applied rate-card provenance, grouped by session, day, model, client, task, tool, or tool family, with tool-result sizes and session start prompt sizes."},
+	addTool(server, &mcp.Tool{Name: "continuity_usage", Description: "Report exact tokens and estimated cost with rate provenance; group usage by session/day/model/client/task/tool and report context sizes."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, usage.Report, error) {
 			options := usage.Options{By: input.By, Client: input.Client, Limit: input.Limit}
 			for target, value := range map[*time.Time]string{&options.Since: input.Since, &options.Until: input.Until} {
@@ -707,7 +709,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			report, err := usage.Reporter{DB: application.DB, ProjectID: application.ProjectID, Prices: usage.Prices{Overrides: application.Config.Usage.Prices}}.Report(ctx, options)
 			return nil, report, err
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_work", Description: "Read current work. view: pulse (default; routing for the selection), summary, list (tracks), item (one node or task), check (contradictions among records), freshness (checkpoint age, activity), or inventory (nodes with tasks, checkpoints, actions, anomalies)."},
+	addTool(server, &mcp.Tool{Name: "continuity_work", Description: "Read work: pulse (default), summary, list, item, check, freshness, or inventory. Views preserve task/node/action status separately."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input WorkInput) (*mcp.CallToolResult, WorkResult, error) {
 			var result WorkResult
 			var err error
@@ -748,7 +750,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, result, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_presence", Description: "Read bounded device-local live session presence, exact scope overlap, and optional non-mutating worktree cleanup candidates. Presence is distinct from tasks and leases."},
+	addTool(server, &mcp.Tool{Name: "continuity_presence", Description: "Read local session presence, scope overlap, and cleanup candidates; presence is not a lock or proof of process liveness."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input PresenceInput) (*mcp.CallToolResult, presence.Snapshot, error) {
 			now := time.Now().UTC()
 			report, err := application.Presence.List(ctx, application.ProjectID, presence.Query{
@@ -794,7 +796,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, BootstrapOutput{Markdown: markdown, RuntimeWarning: warning}, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_checkpoint", Description: "Save a task handoff (the next session's bootstrap). Open predecessor actions must be completed, superseded, or carried forward; dry_run checks the budget without saving. If a newer incompatible writer requires restart, the structured handoff is staged device-locally and returned as deferred recovery."},
+	addTool(server, &mcp.Tool{Name: "continuity_checkpoint", Description: "Save a handoff; reconcile predecessor actions. dry_run checks budgets. An incompatible stale writer stages deferred recovery instead of saving."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input CheckpointInput) (*mcp.CallToolResult, CheckpointOutput, error) {
 			value := checkpoint.Checkpoint{
 				SessionID: input.SessionID, TaskID: input.TaskID, PredecessorCheckpointID: input.PredecessorCheckpointID, ReviewsTaskID: input.ReviewsTaskID, RequestKey: input.RequestKey, Task: input.Task,
@@ -946,7 +948,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		return nil, decisionReceipt(value), err
 	})
 	addTool(server, &mcp.Tool{Name: "continuity_history_search", Description: "Search history before diagnosis/redesign. Returns bounded snippets; expand relevant refs with history_show, then verify current evidence. No useful match means proceed to code."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistorySearchInput) (*mcp.CallToolResult, history.SearchPage, error) {
-		page, err := application.History.Search(ctx, application.ProjectID, history.SearchOptions{State: input.State, Query: input.Query, Topic: input.Topic, Kinds: input.Kinds, Families: input.Families, Since: input.Since, Until: input.Until, Linked: input.Linked, Limit: input.Limit, Offset: input.Offset, MaxBytes: input.MaxBytes})
+		page, err := application.History.Search(ctx, application.ProjectID, history.SearchOptions{SourceURL: input.SourceURL, State: input.State, Query: input.Query, Topic: input.Topic, Kinds: input.Kinds, Families: input.Families, Since: input.Since, Until: input.Until, Linked: input.Linked, Limit: input.Limit, Offset: input.Offset, MaxBytes: input.MaxBytes})
 		return nil, page, err
 	})
 	addTool(server, &mcp.Tool{Name: "continuity_history_show", Description: "Expand exact history references within a byte budget."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistoryShowInput) (*mcp.CallToolResult, history.ShowPage, error) {
@@ -962,7 +964,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		if err != nil {
 			return nil, Receipt{}, fmt.Errorf("occurred_to: %w", err)
 		}
-		value := worknarrative.Record{ID: input.ID, ProjectID: application.ProjectID, Title: input.Title, Trigger: input.Trigger, OccurredFrom: from, OccurredTo: to, Claims: input.Claims, Anchors: input.Anchors, Creator: input.Creator, CreatorInvocationID: input.CreatorInvocationID, SupersedesID: input.SupersedesID}
+		value := worknarrative.Record{Source: input.Source, ID: input.ID, ProjectID: application.ProjectID, Title: input.Title, Trigger: input.Trigger, OccurredFrom: from, OccurredTo: to, Claims: input.Claims, Anchors: input.Anchors, Creator: input.Creator, CreatorInvocationID: input.CreatorInvocationID, SupersedesID: input.SupersedesID}
 		if input.Commit == "" {
 			record, err := application.Narratives.Append(ctx, value)
 			return nil, narrativeReceipt(worknarrative.RecordResult{Record: record}), err

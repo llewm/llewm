@@ -7,7 +7,7 @@
       ],
       "env": {
         "LLEWM_PLUGIN_CLIENT": "claude-code",
-        "LLEWM_PLUGIN_VERSION": "0.1.34",
+        "LLEWM_PLUGIN_VERSION": "0.1.35",
         "LLEWM_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
       }
     }

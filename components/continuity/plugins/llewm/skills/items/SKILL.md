@@ -34,7 +34,8 @@ stated rationale and stable target references: `accepted` or `deferred` keep an
 item open; `integrated`, `discarded`, and `merged` close it, and `answered`
 closes a research item. `accepted`, `integrated`, and `merged` need a target such
 as a plan item or `work_item:<id>`; `answered` needs the findings (a narrative,
-decision, or document). Do not infer a disposition from silence, discussion,
+decision, or exact narrative claim). External documents must first be cataloged
+as source-observation narratives; answer targets must resolve in this project. Do not infer a disposition from silence, discussion,
 implementation, or retrieval. If a decision is ambiguous, leave the item open.
 
 Read one item by `work_item:<id>` when the packet is truncated or an item needs

@@ -29,6 +29,7 @@ type supersessionPayload struct {
 }
 
 type workNarrativePayload struct {
+	Source                   *worknarrative.Source  `json:"source,omitempty"`
 	Title                    string                 `json:"title"`
 	Trigger                  string                 `json:"trigger"`
 	OccurredFrom             string                 `json:"occurred_from,omitempty"`
@@ -238,9 +239,19 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 			return nil, nil, fmt.Errorf("work narrative payload identity or schema mismatch for %q", record.ID)
 		}
 		record.CreatorInvocationID = creatorInvocationID
+		if record.Source != nil {
+			v := *record.Source
+			v.Publisher = portableText(v.Publisher, projectRoot)
+			v.Version = portableText(v.Version, projectRoot)
+			record.Source = &v
+		}
 		claims := append([]worknarrative.Claim{}, record.Claims...)
 		for i := range claims {
 			claims[i].Text = portableText(claims[i].Text, projectRoot)
+			claims[i].Citations = append([]worknarrative.Citation(nil), claims[i].Citations...)
+			for j := range claims[i].Citations {
+				claims[i].Citations[j].Locator = portableText(claims[i].Citations[j].Locator, projectRoot)
+			}
 		}
 		anchors := append([]worknarrative.Anchor{}, record.Anchors...)
 		for i := range anchors {
@@ -249,7 +260,7 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 			anchors[i].RegionLocator = portableText(anchors[i].RegionLocator, projectRoot)
 			anchors[i].Drift = ""
 		}
-		payload, err := json.Marshal(workNarrativePayload{Title: portableText(record.Title, projectRoot), Trigger: record.Trigger, OccurredFrom: formatOptionalPortableTime(record.OccurredFrom), OccurredTo: formatOptionalPortableTime(record.OccurredTo), Claims: claims, Anchors: anchors, Creator: portableText(record.Creator, projectRoot), CreatorInvocationID: record.CreatorInvocationID, OperationalSchemaVersion: record.SchemaVersion})
+		payload, err := json.Marshal(workNarrativePayload{Source: record.Source, Title: portableText(record.Title, projectRoot), Trigger: record.Trigger, OccurredFrom: formatOptionalPortableTime(record.OccurredFrom), OccurredTo: formatOptionalPortableTime(record.OccurredTo), Claims: claims, Anchors: anchors, Creator: portableText(record.Creator, projectRoot), CreatorInvocationID: record.CreatorInvocationID, OperationalSchemaVersion: record.SchemaVersion})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -259,7 +270,7 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 				taskID = anchor.Target
 			}
 		}
-		refs := workNarrativeReferences(anchors, record.CreatorInvocationID)
+		refs := workNarrativeReferences(anchors, record.CreatorInvocationID, claims)
 		if record.CreatorInvocationID != "" {
 			invocationIDs[record.CreatorInvocationID] = struct{}{}
 		}
