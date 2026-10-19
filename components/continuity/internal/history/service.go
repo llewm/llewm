@@ -35,6 +35,7 @@ var Families = []string{"narrative_claim", "decision", "work_item", "checkpoint"
 type Service struct{ DB *sql.DB }
 
 type SearchOptions struct {
+	State    string   `json:"state,omitempty"`
 	Query    string   `json:"query,omitempty"`
 	Topic    string   `json:"topic,omitempty"`
 	Kinds    []string `json:"kinds,omitempty"`
@@ -48,13 +49,16 @@ type SearchOptions struct {
 }
 
 type Hit struct {
-	Ref         string   `json:"ref"`
-	Family      string   `json:"family"`
-	Kind        string   `json:"kind"`
-	RecordedAt  string   `json:"recorded_at"`
-	Title       string   `json:"title"`
-	Snippet     string   `json:"snippet"`
-	Derivations []string `json:"derivations,omitempty"`
+	State               string   `json:"state"`
+	Successors          []string `json:"successors,omitempty"`
+	SuccessorsTruncated bool     `json:"successors_truncated,omitempty"`
+	Ref                 string   `json:"ref"`
+	Family              string   `json:"family"`
+	Kind                string   `json:"kind"`
+	RecordedAt          string   `json:"recorded_at"`
+	Title               string   `json:"title"`
+	Snippet             string   `json:"snippet"`
+	Derivations         []string `json:"derivations,omitempty"`
 }
 
 type TopicScope struct {
@@ -187,6 +191,10 @@ func truncateBytes(value string, limit int) (string, bool) {
 		return value, false
 	}
 	cut := limit
+	if cut < len("…") {
+		return "", true
+	}
+	cut -= len("…")
 	for cut > 0 && !utf8.RuneStart(value[cut]) {
 		cut--
 	}
@@ -390,6 +398,12 @@ const linkedClause = `ref IN (
 // Search returns bounded metadata and snippets. Text queries rank by BM25; queries
 // without text read chronologically, oldest first.
 func (s Service) Search(ctx context.Context, projectID string, options SearchOptions) (SearchPage, error) {
+	if options.State == "" {
+		options.State = "current"
+	}
+	if !oneOf(options.State, "current", "superseded", "all") {
+		return SearchPage{}, errors.New("state must be current, superseded, or all")
+	}
 	if options.Limit == 0 {
 		options.Limit = DefaultSearchLimit
 	}
@@ -425,6 +439,11 @@ func (s Service) Search(ctx context.Context, projectID string, options SearchOpt
 	page := SearchPage{SchemaVersion: SchemaVersion, Options: options, Hits: []Hit{}, Authority: "mixed", Disclaimer: Disclaimer}
 	where := []string{"project_id=?"}
 	args := []any{projectID}
+	if options.State == "current" {
+		where = append(where, "NOT ("+supersededChunkSQL+")")
+	} else if options.State == "superseded" {
+		where = append(where, supersededChunkSQL)
+	}
 	var derivations map[string][]string
 	if options.Topic != "" {
 		page.Topic, derivations, err = scope(ctx, tx, projectID, options.Topic)
@@ -484,9 +503,16 @@ func (s Service) Search(ctx context.Context, projectID string, options SearchOpt
 		if err = rows.Scan(&hit.Ref, &hit.Family, &hit.Kind, &hit.RecordedAt, &hit.Title, &hit.Snippet); err != nil {
 			return SearchPage{}, err
 		}
+		hit.State, hit.Successors, hit.SuccessorsTruncated, err = correction(ctx, tx, projectID, hit.Ref)
+		if err != nil {
+			return SearchPage{}, err
+		}
 		hit.Snippet, _ = truncateBytes(strings.Join(strings.Fields(hit.Snippet), " "), SnippetBytes)
 		hit.Derivations = derivations[hit.Ref]
-		size := len(hit.Ref) + len(hit.Title) + len(hit.Snippet) + len(hit.Kind) + len(hit.RecordedAt) + len(hit.Family)
+		size := len(hit.Ref) + len(hit.Title) + len(hit.Snippet) + len(hit.Kind) + len(hit.RecordedAt) + len(hit.Family) + len(hit.State)
+		for _, ref := range hit.Successors {
+			size += len(ref)
+		}
 		if page.ContentBytes+size > options.MaxBytes {
 			page.Truncated = true
 			break

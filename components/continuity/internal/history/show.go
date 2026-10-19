@@ -57,6 +57,24 @@ func (s Service) Show(ctx context.Context, projectID string, refs []string, maxB
 		if err != nil {
 			item = Item{Ref: ref, Error: err.Error()}
 		}
+		if item.Error == "" {
+			state, successors, truncated, err := correction(ctx, tx, projectID, ref)
+			if err != nil {
+				return ShowPage{}, err
+			}
+			if state == "superseded" {
+				prefix := "State: superseded"
+				if len(successors) > 0 {
+					prefix += "\nSuccessors: " + strings.Join(successors, ", ")
+				}
+				if truncated {
+					prefix += "\n[successors truncated]"
+				}
+				item.Text = prefix + "\n\n" + item.Text
+			} else if item.Family == "narrative" || item.Family == "narrative_claim" || item.Family == "decision" {
+				item.Text = "State: current\n\n" + item.Text
+			}
+		}
 		remaining := maxBytes - page.ContentBytes
 		if remaining <= 0 {
 			page.Truncated = true
@@ -194,7 +212,11 @@ func loadNarrative(ctx context.Context, db queryer, projectID, ref, id string) (
 		return Item{}, fmt.Errorf("%s not found", ref)
 	}
 	var anchors []string
-	if err = collect(ctx, db, `SELECT anchor_kind||':'||target||CASE WHEN COALESCE(target_revision,'')='' THEN '' ELSE '@'||target_revision END FROM work_narrative_anchors WHERE project_id=? AND narrative_id=? AND anchor_kind<>'file' ORDER BY ordinal`, []any{projectID, narrativeID}, "", func(value, _ string) { anchors = append(anchors, value) }); err != nil {
+	if err = collect(ctx, db, `SELECT anchor_kind||':'||target||CASE WHEN COALESCE(target_revision,'')='' THEN '' ELSE '@'||target_revision END
+	 ||CASE WHEN COALESCE(content_sha256,'')='' THEN '' ELSE ' sha256='||content_sha256 END
+	 ||CASE WHEN COALESCE(region_locator,'')='' THEN '' ELSE ' region='||region_locator END
+	 ||' authority='||authority
+	 FROM work_narrative_anchors WHERE project_id=? AND narrative_id=? ORDER BY ordinal`, []any{projectID, narrativeID}, "", func(value, _ string) { anchors = append(anchors, value) }); err != nil {
 		return Item{}, err
 	}
 	item.Text = strings.Join(parts, "\n\n")

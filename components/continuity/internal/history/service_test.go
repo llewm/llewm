@@ -239,7 +239,7 @@ func TestShowExpandsExactReferencesWithinBudget(t *testing.T) {
 	if len(items) != 5 || items[0].Kind != "intent" || !strings.Contains(items[0].Text, "Why") || !strings.Contains(items[0].Text, "Anchors: roadmap_node:cards-child") {
 		t.Fatalf("claim item = %+v", items[0])
 	}
-	if !strings.Contains(items[1].Text, "#1 [limitation — Known limitations") || strings.Contains(items[1].Text, "Anchors") {
+	if !strings.Contains(items[1].Text, "#1 [limitation — Known limitations") || !strings.Contains(items[1].Text, "Anchors: file:internal/referencecard/service.go sha256=") {
 		t.Fatalf("narrative item = %+v", items[1])
 	}
 	if !strings.Contains(items[2].Text, "Links: subject roadmap_node:cards@1") || items[3].Error == "" || items[4].Error == "" {

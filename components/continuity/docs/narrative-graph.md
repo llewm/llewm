@@ -54,6 +54,13 @@ equivalents. Search supports text, topic, kinds/families, linked references and 
 filters within explicit count/byte bounds. Text uses lexical ranking; without text,
 history is chronological. Results return metadata/snippets and zero body loads.
 Counts, offsets and truncation distinguish partial results from exhaustion.
+MCP API 131 defaults narrative/decision searches to `state: current`;
+`state: superseded` or `state: all` includes corrected history and names successor
+records. Other record families retain their own revision/lifecycle semantics.
+CLI exposes the same selection as `--state`. Exact historical references remain
+readable and show correction state before claim content. Stored file/region
+anchors retain their hash, locator and authority in history expansion; use
+narrative show to check current local-file drift.
 
 Show expands up to 20 exact references within a byte budget, preserving labels,
 authority and source links. Unsupported or unresolved references fail honestly.

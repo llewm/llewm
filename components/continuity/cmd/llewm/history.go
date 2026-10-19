@@ -38,6 +38,7 @@ func historyCommand() *cobra.Command {
 		})
 	}}
 	search.Flags().StringVar(&opts.Topic, "topic", "", "curated topic ID or alias, or a roadmap node ID (includes descendants)")
+	search.Flags().StringVar(&opts.State, "state", "current", "narrative/decision correction state: current, superseded, or all")
 	search.Flags().StringSliceVar(&opts.Kinds, "kind", nil, "claim kind or record kind; may be repeated")
 	search.Flags().StringSliceVar(&opts.Families, "family", nil, "narrative_claim, decision, work_item, checkpoint, procedure, or resource; may be repeated")
 	search.Flags().StringVar(&opts.Since, "since", "", "inclusive RFC 3339 lower bound on recorded time")
@@ -119,7 +120,10 @@ func writeHistorySearchText(cmd *cobra.Command, page history.SearchPage) {
 		if len(hit.Derivations) > 0 {
 			derivation = "\tvia=" + strings.Join(hit.Derivations, ",")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s%s\n  %s\n", hit.Ref, hit.Kind, shortTime(hit.RecordedAt), singleLineText(hit.Title), derivation, singleLineText(hit.Snippet))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s%s\tstate=%s\n  %s\n", hit.Ref, hit.Kind, shortTime(hit.RecordedAt), singleLineText(hit.Title), derivation, hit.State, singleLineText(hit.Snippet))
+		if len(hit.Successors) > 0 {
+			fmt.Fprintf(w, "  Successors: %s (truncated %t)\n", strings.Join(hit.Successors, ", "), hit.SuccessorsTruncated)
+		}
 	}
 	fmt.Fprintln(w, "Expand with: llewm history show REF...")
 	fmt.Fprintln(w, page.Disclaimer)

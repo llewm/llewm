@@ -330,6 +330,7 @@ type DecisionRecordInput struct {
 }
 
 type HistorySearchInput struct {
+	State    string   `json:"state,omitempty" jsonschema:"narrative/decision correction state: current (default), superseded, or all"`
 	Query    string   `json:"query,omitempty" jsonschema:"terms are ANDed; trailing * for prefix"`
 	Topic    string   `json:"topic,omitempty" jsonschema:"topic ID or alias, or roadmap node ID"`
 	Kinds    []string `json:"kinds,omitempty" jsonschema:"claim kinds such as intent or decision"`
@@ -944,8 +945,8 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		value, err := application.Decisions.Append(ctx, decision.Record{ID: input.ID, ProjectID: application.ProjectID, Title: input.Title, Rationale: input.Rationale, Disposition: input.Disposition, Actor: input.Actor, ActorType: input.ActorType, Authority: input.Authority, ReviewSource: input.ReviewSource, SupersedesID: input.SupersedesID, Links: input.Links})
 		return nil, decisionReceipt(value), err
 	})
-	addTool(server, &mcp.Tool{Name: "continuity_history_search", Description: "First discovery step before diagnosing or redesigning existing behavior: search saved intent, decisions, attempts, and outcomes with focused terms. Returns bounded metadata and snippets; expand relevant refs with continuity_history_show, then verify current evidence. No useful match means proceed to code."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistorySearchInput) (*mcp.CallToolResult, history.SearchPage, error) {
-		page, err := application.History.Search(ctx, application.ProjectID, history.SearchOptions{Query: input.Query, Topic: input.Topic, Kinds: input.Kinds, Families: input.Families, Since: input.Since, Until: input.Until, Linked: input.Linked, Limit: input.Limit, Offset: input.Offset, MaxBytes: input.MaxBytes})
+	addTool(server, &mcp.Tool{Name: "continuity_history_search", Description: "Search history before diagnosis/redesign. Returns bounded snippets; expand relevant refs with history_show, then verify current evidence. No useful match means proceed to code."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistorySearchInput) (*mcp.CallToolResult, history.SearchPage, error) {
+		page, err := application.History.Search(ctx, application.ProjectID, history.SearchOptions{State: input.State, Query: input.Query, Topic: input.Topic, Kinds: input.Kinds, Families: input.Families, Since: input.Since, Until: input.Until, Linked: input.Linked, Limit: input.Limit, Offset: input.Offset, MaxBytes: input.MaxBytes})
 		return nil, page, err
 	})
 	addTool(server, &mcp.Tool{Name: "continuity_history_show", Description: "Expand exact history references within a byte budget."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistoryShowInput) (*mcp.CallToolResult, history.ShowPage, error) {
