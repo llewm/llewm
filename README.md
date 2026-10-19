@@ -41,9 +41,12 @@ now provides a manual shared work pool, reviewed assignments and context-preserv
 reassignment. Automatic agent launching and approved execution remain future
 directions. See [parallel tracks](docs/parallel-tracks.md).
 
-**Continuity is the entire current MVP, not the full scope of Llewm.** It preserves
-attributable project rules, task state, attempts, and verification across coding-agent
-sessions. It builds as the `llewm` executable.
+**Continuity is Llewm’s current MVP, not its full scope.** It preserves attributable
+project guidance, tasks, plans, decisions, research, and verification across
+coding-agent sessions, retrieving bounded context when work resumes. It also records
+activity and usage for auditing, with optional History sync across machines.
+Continuity builds as the `llewm` executable; manual orchestration and Action Control
+are separate components.
 
 ## Components
 
