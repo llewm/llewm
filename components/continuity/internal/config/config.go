@@ -2,13 +2,17 @@ package config
 
 import (
 	"github.com/llewm/llewm/components/continuity/internal/adoption"
+	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -101,8 +105,10 @@ type Leases struct {
 // Sync names the memory repository this project's curated history syncs with.
 // Clone is the local working copy; empty means the shared default for Remote.
 type Sync struct {
-	Remote string `toml:"remote,omitempty"`
-	Clone  string `toml:"clone,omitempty"`
+	Folders    []foldersync.Endpoint `toml:"folders,omitempty"`
+	RelayToGit bool                  `toml:"relay_to_git,omitempty"`
+	Remote     string                `toml:"remote,omitempty"`
+	Clone      string                `toml:"clone,omitempty"`
 	// Manual turns off automatic syncs at session start and after checkpoints.
 	Manual bool `toml:"manual,omitempty"`
 	// SessionTimeoutSeconds bounds how long the session-start sync waits on the
@@ -159,7 +165,8 @@ func (s Sync) MemoryClone() (string, error) {
 }
 
 // Automatic reports whether syncs run on their own.
-func (s Sync) Automatic() bool { return s.Remote != "" && !s.Manual }
+func (s Sync) Configured() bool { return s.Remote != "" || len(s.Folders) > 0 }
+func (s Sync) Automatic() bool  { return s.Configured() && !s.Manual }
 
 // MaxSessionTimeout caps the session-start sync well inside the plugins' 15 s
 // SessionStart hook limit, so the bootstrap is still built after a slow sync.
@@ -277,6 +284,9 @@ func Load(root string) (Config, error) {
 			cfg.Backups.Dir = filepath.Join(root, rel)
 		}
 	}
+	if err := cfg.Sync.Validate(); err != nil {
+		return Config{}, err
+	}
 	cfg.Project.Root = root
 	return cfg, nil
 }
@@ -299,7 +309,7 @@ func WriteDefault(root string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	return path, toml.NewEncoder(f).Encode(portableDefault(root))
+	return path, encodeConfig(f, portableDefault(root))
 }
 
 // portableDefault writes paths relative to the checkout so the config survives a
@@ -319,6 +329,9 @@ func portableDefault(root string) Config {
 // SetSync records the sync settings in the project's config file, creating the
 // file with defaults when absent. Other settings are preserved as written.
 func SetSync(root string, value Sync) (string, error) {
+	if err := value.Validate(); err != nil {
+		return "", err
+	}
 	phase, err := adoption.Load(StateDir(root))
 	if err != nil {
 		return "", err
@@ -341,7 +354,7 @@ func SetSync(root string, value Sync) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := toml.NewEncoder(file).Encode(cfg); err != nil {
+	if err := encodeConfig(file, cfg); err != nil {
 		file.Close()
 		return "", err
 	}
@@ -372,4 +385,48 @@ func LoadPlanPolicy(globalRoot string, project trackplan.Policy) (trackplan.Poli
 	}
 	p := trackplan.MergePolicy(global.Policy, project)
 	return p, p.Validate()
+}
+
+func (s Sync) Validate() error {
+	if len(s.Folders) > 8 {
+		return fmt.Errorf("at most eight shared-folder endpoints are supported")
+	}
+	names, stores := map[string]bool{}, map[string]bool{}
+	for _, e := range s.Folders {
+		if e.Name == "git" || !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`).MatchString(e.Name) || !filepath.IsAbs(e.Directory) || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(e.StoreID) {
+			return fmt.Errorf("invalid shared-folder endpoint configuration")
+		}
+		if names[e.Name] || stores[e.StoreID] {
+			return fmt.Errorf("duplicate folder endpoint name or store identity")
+		}
+		names[e.Name], stores[e.StoreID] = true, true
+	}
+	if s.RelayToGit && s.Remote == "" {
+		return fmt.Errorf("relay_to_git requires a configured memory remote")
+	}
+	return nil
+}
+
+// TOML's omitempty handling treats a noncomparable struct containing a zero
+// integer as nonempty. Adding folder slices must not manufacture a [sync] table
+// on ordinary local-only installs. Preserve normal encoding for configured sync.
+func encodeConfig(writer io.Writer, cfg Config) error {
+	var encoded bytes.Buffer
+	if err := toml.NewEncoder(&encoded).Encode(cfg); err != nil {
+		return err
+	}
+	sync := cfg.Sync
+	if len(sync.Folders) == 0 {
+		sync.Folders = nil
+	}
+	if !reflect.ValueOf(sync).IsZero() {
+		_, err := io.Copy(writer, &encoded)
+		return err
+	}
+	var document map[string]any
+	if _, err := toml.Decode(encoded.String(), &document); err != nil {
+		return err
+	}
+	delete(document, "sync")
+	return toml.NewEncoder(writer).Encode(document)
 }

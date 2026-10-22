@@ -42,8 +42,8 @@ func syncCommand() *cobra.Command {
 			}
 			return nil
 		},
-		Short: "Sync curated history with the project's memory repository",
-		Long:  "Export new records, commit, rebase onto the remote, import what arrived, and push. When the remote is unreachable the local commit is kept and the push is retried next time.",
+		Short: "Sync curated history through configured Git and shared-folder endpoints",
+		Long:  "Exchange curated immutable records through configured Git and shared-folder endpoints. Retain verified local copies, validate before import, and relay between destinations only when explicitly enabled. Shared-folder publication does not certify external delivery or peer receipt.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			format, err := outputFormat(output)
@@ -51,24 +51,24 @@ func syncCommand() *cobra.Command {
 				return err
 			}
 			return withApp(cmd, func(application *app.App) error {
-				syncer, err := projectSyncer(application)
-				if err != nil {
-					return err
-				}
-				syncer.NoPrompt = !allowPrompt
-				result, err := syncer.Sync(cmd.Context())
+				result, err := runHistorySync(cmd.Context(), application, false, allowPrompt)
 				if format == "json" {
-					if writeErr := writeJSON(cmd.OutOrStdout(), result); writeErr != nil {
-						return writeErr
+					// Preserve the Git result shape for a single Git endpoint; hybrid/folder
+					// configurations report each destination independently.
+					if len(application.Config.Sync.Folders) == 0 && result.Git != nil {
+						if e := writeJSON(cmd.OutOrStdout(), result.Git); e != nil {
+							return e
+						}
+					} else if e := writeJSON(cmd.OutOrStdout(), result); e != nil {
+						return e
 					}
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "Sync %s: exported %d, imported %d, unpushed commits %d\n%s\n", result.Outcome, result.ExportedRecords, result.ImportedRecords, result.UnpushedCommits, result.Detail)
-					for _, note := range result.LeaseNotes {
-						fmt.Fprintf(cmd.OutOrStdout(), "lease: %s\n", note)
+					if result.Git != nil {
+						fmt.Fprintf(cmd.OutOrStdout(), "Sync %s: exported %d, imported %d, unpushed commits %d\n%s\n", result.Git.Outcome, result.Git.ExportedRecords, result.Git.ImportedRecords, result.Git.UnpushedCommits, result.Git.Detail)
 					}
-				}
-				if err == nil && result.Outcome == memsync.OutcomeCollision {
-					return errors.New("sync stopped: imported records collide with local records")
+					for _, folder := range result.Folders {
+						fmt.Fprintf(cmd.OutOrStdout(), "Folder %s: %s; published locally %d, imported %d; peer receipt %s\n", folder.Endpoint, folder.Outcome, folder.PublishedRecords, folder.ImportedRecords, folder.PeerReceipt)
+					}
 				}
 				return err
 			})
@@ -146,6 +146,9 @@ memory repository holds none.`,
 					target = abs
 				}
 				settings := application.Config.Sync
+				if settings.Remote != remote {
+					settings.RelayToGit = false
+				}
 				settings.Remote, settings.Clone = remote, clone
 				if cmd.Flags().Changed("askpass") {
 					if askpass != "" && !filepath.IsAbs(askpass) {
@@ -231,7 +234,7 @@ memory repository holds none.`,
 				return err
 			}
 			return withReadOnlyApp(cmd, func(application *app.App) error {
-				value, err := projectSyncStatus(cmd, application)
+				value, err := projectSyncStatus(cmd.Context(), application)
 				if err != nil {
 					return err
 				}
@@ -254,7 +257,7 @@ memory repository holds none.`,
 	}
 	status.Flags().StringVar(&statusOutput, "output", "text", "text or json")
 
-	parent.AddCommand(initialize, status)
+	parent.AddCommand(initialize, status, syncFolderCommand(), syncRelayCommand())
 	return parent
 }
 
@@ -334,6 +337,14 @@ func projectSyncer(application *app.App) (memsync.Syncer, error) {
 		}
 	}
 	syncer := memsync.Syncer{DB: application.DB, ProjectID: application.ProjectID, Remote: settings.Remote, Clone: clone, Askpass: settings.Askpass, SSHKey: settings.SSHKey}
+	if _, err := os.Stat(filepath.Join(config.StateDir(application.Root), "history", "lineage")); err == nil {
+		archive, err := projectArchive(application)
+		if err != nil {
+			return memsync.Syncer{}, err
+		}
+		syncer.Archive = &archive
+		syncer.Relay = settings.RelayToGit
+	}
 	if application.Config.Leases.Remote {
 		leases := application.Leases
 		leases.Remote = nil
@@ -353,12 +364,13 @@ func enableCrossMachineLeases(application *app.App) {
 	}
 }
 
-func projectSyncStatus(cmd *cobra.Command, application *app.App) (memsync.Status, error) {
-	value, err := memsync.ReadStatus(cmd.Context(), application.DB, application.ProjectID)
+func projectSyncStatus(ctx context.Context, application *app.App) (historyStatus, error) {
+	base, err := memsync.ReadStatus(ctx, application.DB, application.ProjectID)
+	value := historyStatus{Status: base, Folders: readFolderStatuses(application)}
 	if err != nil {
 		return value, err
 	}
-	if value.Identity, err = application.Portable.Get(cmd.Context(), application.ProjectID); err != nil {
+	if value.Identity, err = application.Portable.Get(ctx, application.ProjectID); err != nil {
 		return value, err
 	}
 	if application.Config.Sync.Remote != "" {
@@ -367,8 +379,9 @@ func projectSyncStatus(cmd *cobra.Command, application *app.App) (memsync.Status
 			return value, err
 		}
 		value.Configured, value.Remote, value.Clone = true, redact.String(syncer.Remote), syncer.Clone
-		value.Settings = syncSettings(cmd.Context(), application.Config.Sync, syncer.Clone)
+		value.Settings = syncSettings(ctx, application.Config.Sync, syncer.Clone)
 	}
+	value.Configured = application.Config.Sync.Configured()
 	return value, nil
 }
 
@@ -439,26 +452,35 @@ func enableAutomaticSync(application *app.App) {
 // sync; the attempt is recorded either way.
 func sessionStartSync(ctx context.Context, application *app.App) string {
 	settings := application.Config.Sync
-	if settings.Remote == "" {
+	if !settings.Configured() {
 		return ""
 	}
+	if settings.Automatic() && len(settings.Folders) > 0 {
+		// Cloud placeholders and remote filesystem drivers can block even metadata
+		// I/O. Never scan a shared folder synchronously in a session-start hook.
+		if executable, err := os.Executable(); err == nil {
+			_ = startBackgroundSync(executable, application.Root)
+		}
+		value, err := projectSyncStatus(ctx, application)
+		if err != nil {
+			return "History sync requested in background; current import status unavailable"
+		}
+		return value.Line(time.Now().UTC()) + " · background sync requested; bootstrap uses last imported history"
+	}
 	if settings.Automatic() {
-		if syncer, err := projectSyncer(application); err == nil {
-			result, _ := syncer.Session(ctx, settings.SessionTimeout())
-			if result.Outcome == memsync.OutcomeDeferred {
-				if executable, err := os.Executable(); err == nil {
-					_ = startBackgroundSync(executable, application.Root)
-				}
+		// Git-only session sync keeps the existing network budget.
+		bounded, cancel := context.WithTimeout(ctx, settings.SessionTimeout())
+		result, _ := runHistorySync(bounded, application, true, false)
+		cancel()
+		if result.Git != nil && result.Git.Outcome == memsync.OutcomeDeferred {
+			if executable, err := os.Executable(); err == nil {
+				_ = startBackgroundSync(executable, application.Root)
 			}
 		}
 	}
-	value, err := memsync.ReadStatus(ctx, application.DB, application.ProjectID)
+	value, err := projectSyncStatus(ctx, application)
 	if err != nil {
 		return ""
-	}
-	value.Configured = true
-	if syncer, err := projectSyncer(application); err == nil {
-		value.Settings = syncSettings(ctx, settings, syncer.Clone)
 	}
 	return value.Line(time.Now().UTC())
 }

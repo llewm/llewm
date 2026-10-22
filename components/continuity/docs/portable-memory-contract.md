@@ -83,6 +83,15 @@ required versions/schemas, duplicate identities, count/hash mismatches, invalid
 references and oversized fields. The current export is complete; timestamps are
 not incremental export cursors.
 
+## Shared-folder and hybrid History sync
+
+[Shared-folder History sync](shared-folder-history.md) uses the same immutable
+current-format envelopes with explicit folder identity and lineage association.
+A private local archive retains observations before application; per-destination
+relay permission allows Git/folder bridges to preserve original bytes and forks.
+Structural relay validation is separate from semantic schema support. External
+provider delivery and peer receipt remain unconfirmed.
+
 ## Temporary LAN exchange
 
 [Temporary LAN history exchange](lan-history.md) transports validated bundles

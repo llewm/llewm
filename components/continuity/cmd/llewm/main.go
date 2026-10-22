@@ -118,7 +118,7 @@ func workCommand() *cobra.Command {
 					}
 				}
 			}
-			if value, err := projectSyncStatus(cmd, application); err == nil {
+			if value, err := projectSyncStatus(cmd.Context(), application); err == nil {
 				if line := value.Line(time.Now().UTC()); line != "" {
 					fmt.Fprintln(cmd.OutOrStdout(), line)
 				}

@@ -213,6 +213,17 @@ Accepted design (decision `history-sync-design`, 2026-09-27):
 - **Device-private data stays local.** Raw events, sessions, usage records, and
   hook telemetry are not synced. The curated export profile defines what travels.
 
+### Shared-folder and hybrid history
+
+An optional [shared-folder transport](../components/continuity/docs/shared-folder-history.md)
+uses immutable curated records in an existing provider-replicated directory. A
+machine may configure one Git memory remote and several folder endpoints.
+Explicit relay permission per destination allows a bridge to forward original
+records, unresolved versions and supported opaque observations between transports.
+Private local archives retain verified observations before semantic import.
+Folder delivery is external and has no implied peer receipt or lease fencing;
+the live SQLite database remains device-local.
+
 ### Temporary exchange before History-sync setup
 
 An optional [temporary LAN exchange](../components/continuity/docs/lan-history.md)

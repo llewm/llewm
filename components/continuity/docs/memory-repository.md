@@ -331,3 +331,12 @@ including an explicitly empty value, are preserved. This starts no bus, enables
 no askpass, and changes no global environment or Git configuration. A configured
 keyring helper still controls its own wallet access; a locked or unavailable
 keyring can require explicit setup before automatic sync succeeds.
+
+## Other transports
+
+Git is optional. [Shared-folder History sync](shared-folder-history.md) can use
+an existing Syncthing/cloud-drive folder, with the operational database and
+private record archive kept separately. Explicit per-destination relaying permits
+hybrid Git/folder setups. Never place a managed Git memory clone itself in a
+file-sync folder. The Git ownership/authentication rules above still apply to
+the Git endpoint; folder publication does not establish provider delivery.

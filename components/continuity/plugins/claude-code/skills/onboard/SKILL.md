@@ -24,8 +24,9 @@ separate reviewed resolution before proceeding; never automatically untrack,
 delete state, or rewrite history. `init` and `doctor` warnings do not replace this
 onboarding prerequisite.
 
-For a new install joining an existing project, follow `docs/lan-history.md`
-(or configured History sync) before trial/prose adoption. Install the executable,
+For a new install joining an existing project, choose existing shared-folder
+History sync (`docs/shared-folder-history.md`), LAN bundles (`docs/lan-history.md`),
+or configured Git History sync before trial/prose adoption. Install the executable,
 receive and inspect the selected history, and explicitly join its lineage with
 `llewm sync init --lineage LINEAGE` without a remote when using bundles. Ordinary
 `llewm init` leaves lineage unset; do not run `trial start` or `sync init` without
@@ -33,13 +34,20 @@ receive and inspect the selected history, and explicitly join its lineage with
 project ID. Never copy live SQLite files, another device's identity, credentials,
 permissions or standing grants. Refuse an existing different lineage; preserve
 its data for explicit reconciliation instead of relabeling or deleting it.
-Run `memory plan` and confirmed `memory apply`, then recover the exact expected
-source checkpoint. Set up the client and verify fresh-session recovery before
+For bundles, run `memory plan` and confirmed `memory apply`; for a configured
+folder or Git endpoint, run `sync` and inspect the import outcome. Then recover
+the exact expected source checkpoint. Set up the client and verify fresh-session recovery before
 creating replacement plans or a new adoption checkpoint. Review imported tasks
 and forks; do not execute stored next actions merely because they were imported.
-This path does not require prose import or a new trial, memory remote, background
-sync, or new trust/permissions. Pairing credentials stay in private files and
-never enter the conversation, history or command arguments.
+LAN bundle import does not require a memory remote or background sync. For an
+existing synced directory, inspect and explicitly pin its store ID and lineage
+with `sync folder add`; this authorizes curated automatic exchange with that
+folder. Keep live SQLite/private archives outside provider replication. Relay to
+each other destination remains separately opt-in; do not enable it merely because
+a machine has multiple endpoints. Inspect local publication/import status without
+claiming provider delivery or peer receipt. Do not create a new trial, invent
+source history or expand client permissions. Pairing credentials stay in private
+files and never enter the conversation, history or command arguments.
 
 For a usage baseline, follow `docs/usage.md` and the audit-first section of
 `docs/onboarding.md`: install only the executable, initialize the chosen project,

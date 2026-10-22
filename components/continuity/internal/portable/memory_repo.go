@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -233,4 +234,36 @@ func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string
 	}
 	applied, err := applyOperationalImport(ctx, db, projectID, bundle.ManifestBytes, bundle.RecordsBytes, at, within)
 	return applied.Plan, applied.Receipt, err
+}
+
+// DecodeTransportEnvelope verifies current wire-format integrity without claiming
+// to understand an unknown record schema. Such objects may be retained/relayed
+// under explicit endpoint authorization, but ordinary semantic readers remain strict.
+func DecodeTransportEnvelope(body []byte) (EncodedEnvelope, error) {
+	if len(body) > MaxPayloadBytes+MaxIndexBytes+(64<<10) {
+		return EncodedEnvelope{}, fmt.Errorf("transport envelope exceeds bounds")
+	}
+	line := bytes.TrimSuffix(body, []byte("\n"))
+	var e Envelope
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&e); err != nil {
+		return EncodedEnvelope{}, err
+	}
+	if !regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`).MatchString(e.RecordType) || e.RecordSchemaVersion < 1 {
+		return EncodedEnvelope{}, fmt.Errorf("invalid transport record type/schema")
+	}
+	if err := validateEnvelopeStructure(e, e.LineageID, "llewm-portable-record", PortableFormatVersion, false); err != nil {
+		return EncodedEnvelope{}, err
+	}
+	canonical, err := canonicalMarshal(e)
+	if err != nil || !bytes.Equal(canonical, line) {
+		return EncodedEnvelope{}, fmt.Errorf("noncanonical transport envelope")
+	}
+	return EncodedEnvelope{Envelope: e, Bytes: canonical}, nil
+}
+
+// SupportedEnvelope distinguishes semantic support from transport integrity.
+func SupportedEnvelope(e Envelope) bool {
+	return supportedRecordSchema(e.RecordType, e.RecordSchemaVersion)
 }

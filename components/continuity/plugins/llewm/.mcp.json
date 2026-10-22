@@ -7,7 +7,7 @@
       ],
       "env": {
         "LLEWM_PLUGIN_CLIENT": "codex",
-        "LLEWM_PLUGIN_VERSION": "0.1.37"
+        "LLEWM_PLUGIN_VERSION": "0.1.38"
       },
       "env_vars": [
         "CODEX_HOME"

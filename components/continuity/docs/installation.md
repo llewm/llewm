@@ -300,7 +300,8 @@ storage, schema, runtime identity, and client instruction files.
 ### Joining existing history
 
 When this install will import another machine's history, receive and inspect it
-before creating a trial lineage or replacement plans. Use the
+before creating a trial lineage or replacement plans. Use
+[shared-folder History sync](shared-folder-history.md), the
 [temporary LAN receiving-install workflow](lan-history.md#new-installs-expecting-existing-history),
 or the existing History-sync setup when a memory remote is available. Explicitly
 join the source lineage, keep a new local instance identity, and verify the exact

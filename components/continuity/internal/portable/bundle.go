@@ -403,13 +403,17 @@ func validateEnvelope(envelope Envelope, lineageID string) error {
 }
 
 func validateEnvelopeFormat(envelope Envelope, lineageID, format string, version int) error {
+	return validateEnvelopeStructure(envelope, lineageID, format, version, true)
+}
+
+func validateEnvelopeStructure(envelope Envelope, lineageID, format string, version int, requireSchema bool) error {
 	if envelope.Format != format || envelope.FormatVersion != version || envelope.LineageID != lineageID || !lineagePattern.MatchString(lineageID) {
 		return fmt.Errorf("unsupported record format, version, or lineage")
 	}
 	// Retired types remain valid historical observations during explicit
 	// transport conversion, although ordinary current-format imports skip them.
 	retiredConversion := version == 2 && RetiredRecordType(envelope.RecordType) && envelope.RecordSchemaVersion == 1
-	if !supportedRecordSchema(envelope.RecordType, envelope.RecordSchemaVersion) && !retiredConversion {
+	if requireSchema && !supportedRecordSchema(envelope.RecordType, envelope.RecordSchemaVersion) && !retiredConversion {
 		return fmt.Errorf("unsupported record schema %s version %d", envelope.RecordType, envelope.RecordSchemaVersion)
 	}
 	if envelope.RecordID == "" || envelope.RecordRevision < 0 || envelope.Authority == "" || !isHash(envelope.ContentSHA256) || !isHash(envelope.EnvelopeSHA256) {

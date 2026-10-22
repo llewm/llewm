@@ -469,13 +469,33 @@ func TestUnknownRecordTypesAreDeferred(t *testing.T) {
 	a.decide(t, "decision-a", "Known record")
 	a.sync(t, OutcomeSynced)
 
-	future := filepath.Join(a.syncer.Clone, portable.MemoryLineageDir(testLineage), "future_type", strings.Repeat("0", 64), strings.Repeat("1", 64)+".json")
-	if err := os.MkdirAll(filepath.Dir(future), 0o700); err != nil {
+	encoded, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: testLineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "future", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: json.RawMessage(`{}`)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(future, []byte("{}\n"), 0o600); err != nil {
+	e := encoded.Envelope
+	e.RecordType = "future_type"
+	e.EnvelopeSHA256 = ""
+	body, _ := json.Marshal(e)
+	canonical, err := portable.CanonicalizeJSON(body)
+	if err != nil {
 		t.Fatal(err)
 	}
+	sum := sha256.Sum256(canonical)
+	e.EnvelopeSHA256 = hex.EncodeToString(sum[:])
+	body, _ = json.Marshal(e)
+	canonical, err = portable.CanonicalizeJSON(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := filepath.Join(a.syncer.Clone, portable.MemoryRecordPath(e))
+	if err := os.MkdirAll(filepath.Dir(future), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(future, append(canonical, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+
 	for _, args := range [][]string{{"add", "--all"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "future"}, {"push", "--quiet", "origin", "HEAD"}} {
 		if output, err := exec.Command("git", append([]string{"-C", a.syncer.Clone}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, output)

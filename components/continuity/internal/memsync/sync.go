@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
-	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
@@ -261,7 +261,9 @@ type Syncer struct {
 	// Leases, when set, also syncs cross-machine leases ([leases] remote):
 	// each cycle mirrors the remote's lease refs and, when it may push,
 	// publishes this machine's local-only grants.
-	Leases *lease.Service
+	Leases  *lease.Service
+	Archive *recordsync.Archive
+	Relay   bool
 }
 
 // Result describes one sync attempt.
@@ -287,7 +289,8 @@ type Result struct {
 	Converted bool `json:"converted,omitempty"`
 	// LeaseNotes reports cross-machine lease events that could not be
 	// mirrored or published, and a lease step that failed.
-	LeaseNotes []string `json:"lease_notes,omitempty"`
+	LeaseNotes      []string `json:"lease_notes,omitempty"`
+	SemanticPending string   `json:"semantic_pending,omitempty"`
 }
 
 func (s Syncer) now() time.Time {
@@ -400,6 +403,15 @@ func (s Syncer) cycle(ctx context.Context, p plan) (Result, error) {
 	export, err := portable.EncodeMemoryExport(local, s.DB, s.ProjectID)
 	if err != nil {
 		return result, fmt.Errorf("export memory records: %w", err)
+	}
+	if s.Archive != nil {
+		if err := s.Archive.CaptureLocal(export.Envelopes); err != nil {
+			return result, err
+		}
+		export.Envelopes, err = s.Archive.Objects(local, s.Endpoint(), s.Relay)
+		if err != nil {
+			return result, err
+		}
 	}
 	lineageDir := portable.MemoryLineageDir(export.Identity.LineageID)
 	written, err := writeNew(s.Clone, export.Envelopes)
@@ -530,6 +542,10 @@ func (s Syncer) cycle(ctx context.Context, p plan) (Result, error) {
 	if result.Collisions > 0 {
 		result.Outcome = OutcomeCollision
 		result.Detail = fmt.Sprintf("%d records have conflicting versions; other records were imported. %s", result.Collisions, result.Detail)
+	}
+	if result.SemanticPending != "" {
+		result.Outcome = OutcomeError
+		result.Detail = "transport processed; " + result.SemanticPending
 	}
 	result.UnpushedCommits = unpushed(local, repo, branch)
 	return result, nil
@@ -692,275 +708,63 @@ func unpushed(ctx context.Context, repo git, branch string) int {
 	return count
 }
 
-// importNew imports envelopes added to the lineage since previous (or all when
-// previous is unknown). A record revision with several versions in the
-// repository is a revision fork: the project keeps its own version (or imports
-// the proposed one when it has none), every version is kept as a fork head, and
-// the imported head advances; `fork resolve` settles it later. An unrevisioned
-// identity with several versions is a collision: it is counted and left out,
-// the rest is imported, and the imported head does not advance, so the
-// collision is reported again until it is resolved. Records this cycle exported
-// (own) came from the project, so they are never planned for import.
+// importNew reads tracked immutable objects into the shared importer. Full scans
+// preserve deferred records and forks even when another transport supplied them.
 func (s Syncer) importNew(ctx context.Context, repo git, lineageDir, previous string, own map[string]bool, result *Result) error {
-	result.Collisions, result.Forks, result.SupersessionForks = 0, 0, 0
 	head, err := repo.run(ctx, "rev-parse", "--verify", "--quiet", "HEAD")
 	if err != nil {
-		return nil // no commits yet: nothing to import
+		return nil
 	}
-	var listing string
-	if previous != "" && isAncestor(ctx, repo, previous, head) {
-		listing, err = repo.run(ctx, "diff", "--name-only", "--diff-filter=A", "--no-renames", previous, head, "--", lineageDir)
-	} else {
-		listing, err = repo.run(ctx, "ls-files", "--", lineageDir)
-	}
+	listing, err := repo.run(ctx, "ls-files", "--", lineageDir)
 	if err != nil {
 		return err
 	}
-	versions := map[string][]portable.EnvelopeSpec{}
-	var order []string
+	root, err := recordsync.OpenRoot(s.Clone)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	identity, err := (portable.Service{DB: s.DB}).Get(ctx, s.ProjectID)
+	if err != nil {
+		return err
+	}
+	if identity == nil {
+		return fmt.Errorf("portable identity required")
+	}
+	var objects []portable.EncodedEnvelope
+	total := 0
 	for _, relative := range strings.Fields(listing) {
-		if own[relative] {
-			identity := filepath.Dir(filepath.FromSlash(relative))
-			if _, seen := versions[identity]; !seen {
-				versions[identity] = nil
-				order = append(order, identity)
-			}
-			continue
-		}
-		// The first directory under the lineage's records is the record type.
-		recordType, _, _ := strings.Cut(strings.TrimPrefix(relative, filepath.ToSlash(lineageDir)+"/"), "/")
-		if portable.RetiredRecordType(recordType) {
-			continue // cut deliberately; nothing reads it any more
-		}
-		if !portable.SupportedRecordType(recordType) {
-			result.DeferredRecords++
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(s.Clone, filepath.FromSlash(relative)))
+		e, err := recordsync.ReadObject(root, filepath.FromSlash(relative), identity.LineageID)
 		if err != nil {
 			return err
 		}
-		spec, err := portable.DecodeMemoryFile(filepath.FromSlash(relative), body)
-		if err != nil {
-			return err
+		total += len(e.Bytes)
+		if total > portable.MaxRecordsBytes || len(objects) >= portable.MaxRecordCount {
+			return fmt.Errorf("memory record scan exceeds bounds")
 		}
-		// The directory above the file is the record identity.
-		identity := filepath.Dir(filepath.FromSlash(relative))
-		if _, seen := versions[identity]; !seen {
-			order = append(order, identity)
-		}
-		versions[identity] = append(versions[identity], spec)
+		objects = append(objects, e)
 	}
-	// Count every version in the repository, including ones imported earlier.
-	all, err := repo.run(ctx, "ls-files", "--", lineageDir)
+	if s.Archive != nil {
+		for _, e := range objects {
+			if _, err := s.Archive.Put(e, s.Endpoint()); err != nil {
+				return err
+			}
+		}
+	}
+	imported, err := (recordsync.Importer{DB: s.DB, ProjectID: s.ProjectID, Now: s.Now}).Import(ctx, objects)
+	result.ImportedRecords += imported.ImportedRecords
+	result.Collisions, result.Forks, result.SupersessionForks, result.DeferredRecords = imported.Collisions, imported.Forks, imported.SupersessionForks, imported.DeferredRecords
 	if err != nil {
+		if s.Archive != nil && errors.Is(err, recordsync.ErrSemanticPending) {
+			result.SemanticPending = redact.String(err.Error())
+			return nil
+		}
 		return err
 	}
-	stored := map[string][]string{}
-	for _, relative := range strings.Fields(all) {
-		identity := filepath.Dir(filepath.FromSlash(relative))
-		stored[identity] = append(stored[identity], relative)
-	}
-	var specs []portable.EnvelopeSpec
-	var forked [][]fork.ObservedHead
-	// Recoveries carry their own bounded proof and must be applied before
-	// interpreting the historical identities they correct, also on fresh peers.
-	var recoveries []portable.EnvelopeSpec
-	for _, values := range versions {
-		for _, spec := range values {
-			if spec.RecordType == "redaction_recovery" {
-				recoveries = append(recoveries, spec)
-			}
-		}
-	}
-	if len(recoveries) > 0 {
-		plan, receipt, err := portable.ImportMemoryRecords(ctx, s.DB, s.ProjectID, recoveries, s.now())
-		if err != nil {
-			return err
-		}
-		if !plan.ApplyAllowed {
-			return fmt.Errorf("redaction recovery observations collide")
-		}
-		if receipt != nil {
-			result.ImportedRecords += receipt.AppendedRecords
-		}
-	}
-	recovered, err := portable.RecoveredEnvelopes(ctx, s.DB, s.ProjectID)
-	if err != nil {
-		return err
-	}
-	for _, identity := range order {
-		if len(versions[identity]) > 0 && versions[identity][0].RecordType == "redaction_recovery" {
-			continue
-		}
-		if len(stored[identity]) > 1 {
-			heads, err := s.forkHeads(stored[identity], recovered)
-			if err != nil {
-				return err
-			}
-			if len(heads) == 1 {
-				spec, err := portable.DecodeMemoryEnvelope(heads[0].Envelope)
-				if err != nil {
-					return err
-				}
-				specs = append(specs, spec)
-				continue
-			}
-			if heads == nil {
-				result.Collisions++
-			} else {
-				forked = append(forked, heads)
-			}
-			continue
-		}
-		if len(versions[identity]) == 0 {
-			continue // exported by this cycle
-		}
-		specs = append(specs, versions[identity][0])
-	}
-	var keep, adopt []fork.ObservedHead
-	if len(forked) > 0 {
-		local, err := portable.LocalEnvelopes(ctx, s.DB, s.ProjectID)
-		if err != nil {
-			return err
-		}
-		for _, heads := range forked {
-			result.Forks++
-			first := heads[0]
-			if held, ok := local[portable.RecordKey(first.RecordType, first.RecordID, first.Revision)]; ok {
-				heads = withLocalHead(heads, held)
-				keep = append(keep, heads...)
-				continue
-			}
-			// The project has no version yet: take the proposed (newest) one so
-			// later revisions have a predecessor, and keep the rest as heads.
-			proposed := newestHead(heads)
-			heads[proposed].Local = true
-			spec, err := portable.DecodeMemoryEnvelope(heads[proposed].Envelope)
-			if err != nil {
-				return err
-			}
-			specs = append(specs, spec)
-			adopt = append(adopt, heads...)
-		}
-	}
-	if err := fork.RecordHeads(ctx, s.DB, s.ProjectID, keep, s.now()); err != nil {
-		return err
-	}
-	if len(specs) > 0 {
-		before, err := supersessionForkRefs(ctx, s.DB, s.ProjectID)
-		if err != nil {
-			return err
-		}
-		plan, receipt, err := portable.ImportMemoryRecords(ctx, s.DB, s.ProjectID, specs, s.now())
-		if err != nil {
-			return err
-		}
-		if !plan.ApplyAllowed {
-			result.Collisions += plan.Counts[portable.PlanCollision]
-			if plan.Counts[portable.PlanInvalid]+plan.Counts[portable.PlanUnsupported] > 0 {
-				return fmt.Errorf("memory import refused: %d invalid, %d unsupported records", plan.Counts[portable.PlanInvalid], plan.Counts[portable.PlanUnsupported])
-			}
-		} else {
-			if receipt != nil {
-				result.ImportedRecords += receipt.AppendedRecords
-			}
-			// Only now does the project hold the adopted versions.
-			if err := fork.RecordHeads(ctx, s.DB, s.ProjectID, adopt, s.now()); err != nil {
-				return err
-			}
-			after, err := supersessionForkRefs(ctx, s.DB, s.ProjectID)
-			if err != nil {
-				return err
-			}
-			for ref := range after {
-				if !before[ref] {
-					result.SupersessionForks++
-				}
-			}
-		}
-	}
-	if result.Collisions == 0 && result.DeferredRecords == 0 {
+	if result.Collisions == 0 && result.DeferredRecords == 0 && result.SemanticPending == "" {
 		result.ImportedHead = head
 	}
 	return nil
-}
-
-// forkHeads decodes every version of one identity. It returns nil when the
-// identity is unrevisioned, which makes several versions a collision.
-func (s Syncer) forkHeads(relatives []string, recovered map[string]portable.EncodedEnvelope) ([]fork.ObservedHead, error) {
-	var heads []fork.ObservedHead
-	var envelopes [][]byte
-	byContent := map[string]int{}
-	for _, relative := range relatives {
-		body, err := os.ReadFile(filepath.Join(s.Clone, filepath.FromSlash(relative)))
-		if err != nil {
-			return nil, err
-		}
-		spec, err := portable.DecodeMemoryFile(filepath.FromSlash(relative), body)
-		if err != nil {
-			return nil, err
-		}
-		encoded, err := portable.EncodeEnvelope(spec)
-		if err != nil {
-			return nil, err
-		}
-		if original, ok := recovered[encoded.Envelope.EnvelopeSHA256]; ok {
-			encoded = original
-		}
-		head := fork.ObservedHead{RecordType: spec.RecordType, RecordID: spec.RecordID, Revision: spec.RecordRevision, ContentSHA256: encoded.Envelope.ContentSHA256, EnvelopeSHA256: encoded.Envelope.EnvelopeSHA256, Envelope: encoded.Bytes, RecordedAt: spec.RecordedAt}
-		key := head.ContentSHA256
-		if head.Revision == 0 {
-			key = head.EnvelopeSHA256
-		}
-		if index, ok := byContent[key]; ok {
-			if head.RecordedAt.After(heads[index].RecordedAt) || head.RecordedAt.Equal(heads[index].RecordedAt) && head.EnvelopeSHA256 > heads[index].EnvelopeSHA256 {
-				heads[index] = head
-			}
-			continue
-		}
-		byContent[key] = len(heads)
-		heads = append(heads, head)
-		envelopes = append(envelopes, encoded.Bytes)
-	}
-	if len(heads) > 1 && heads[0].Revision == 0 {
-		return nil, nil
-	}
-	if fork.EquivalentRoadmapNodeEnvelopes(envelopes) {
-		return heads[:1], nil
-	}
-	return heads, nil
-}
-
-// withLocalHead marks the project's version, adding it when the repository
-// does not have it (it always should, since export runs first).
-func withLocalHead(heads []fork.ObservedHead, held portable.EncodedEnvelope) []fork.ObservedHead {
-	for index := range heads {
-		if heads[index].ContentSHA256 == held.Envelope.ContentSHA256 {
-			heads[index].Local = true
-			return heads
-		}
-	}
-	recorded, _ := time.Parse(time.RFC3339Nano, held.Envelope.RecordedAt)
-	return append(heads, fork.ObservedHead{RecordType: held.Envelope.RecordType, RecordID: held.Envelope.RecordID, Revision: held.Envelope.RecordRevision, ContentSHA256: held.Envelope.ContentSHA256, EnvelopeSHA256: held.Envelope.EnvelopeSHA256, Envelope: held.Bytes, RecordedAt: recorded, Local: true})
-}
-
-// newestHead is the index of the head a fork proposes: the newest, with the
-// larger envelope hash breaking ties, as fork.RevisionForks orders them.
-func newestHead(heads []fork.ObservedHead) int {
-	best := 0
-	for index, head := range heads[1:] {
-		index++
-		if head.RecordedAt.After(heads[best].RecordedAt) || (head.RecordedAt.Equal(heads[best].RecordedAt) && head.ContentSHA256 > heads[best].ContentSHA256) {
-			best = index
-		}
-	}
-	return best
-}
-
-func isAncestor(ctx context.Context, repo git, ancestor, head string) bool {
-	_, err := repo.run(ctx, "merge-base", "--is-ancestor", ancestor, head)
-	return err == nil
 }
 
 func (s Syncer) importedHead(ctx context.Context) (string, error) {
@@ -1092,15 +896,4 @@ func age(elapsed time.Duration) string {
 	return fmt.Sprintf("%dd ago", int(elapsed.Hours()/24))
 }
 
-// supersessionForkRefs names the project's open supersession forks.
-func supersessionForkRefs(ctx context.Context, db *sql.DB, projectID string) (map[string]bool, error) {
-	forks, err := fork.SupersessionForks(ctx, db, projectID, "")
-	if err != nil {
-		return nil, err
-	}
-	refs := make(map[string]bool, len(forks))
-	for _, value := range forks {
-		refs[value.Ref()] = true
-	}
-	return refs, nil
-}
+func (s Syncer) Endpoint() string { return "git:" + recordsync.Hash(s.Remote) }

@@ -40,8 +40,9 @@ required Go version from that revision's go.mod; use https://go.dev/doc/install
 if Go is missing. Keep the Llewm source checkout separate from the target project.
 
 If this install will receive existing Continuity history, follow the guide's
-joining-existing-history workflow before starting a trial or creating replacement
-plans. Receive, inspect, explicitly join its lineage, import and verify the
+joining-existing-history workflow (shared-folder, LAN bundle, or Git) before
+starting a trial or creating replacement plans. Receive, inspect, explicitly join
+its lineage, import and verify the
 expected checkpoint first.
 
 Before creating project state, follow the guide's Git exclusion prerequisite.
@@ -69,7 +70,8 @@ is not part of onboarding. For a pinned build, replace `main` in both guide URLs
 with its commit or tag and use that same revision for the source and linked docs.
 
 For a new machine joining existing project history, use the
-[receiving-install workflow](lan-history.md#new-installs-expecting-existing-history)
+[shared-folder joining workflow](shared-folder-history.md#start-a-folder-endpoint)
+or the [LAN receiving-install workflow](lan-history.md#new-installs-expecting-existing-history)
 before choosing trial or prose adoption.
 
 Once installed, the plugin's `onboard` skill supports the same process. In Codex,
