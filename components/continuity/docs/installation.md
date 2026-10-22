@@ -297,6 +297,16 @@ no initialization files were created. It does not run broader diagnostics
 automatically. Run `llewm doctor` when you want to verify project discovery,
 storage, schema, runtime identity, and client instruction files.
 
+### Joining existing history
+
+When this install will import another machine's history, receive and inspect it
+before creating a trial lineage or replacement plans. Use the
+[temporary LAN receiving-install workflow](lan-history.md#new-installs-expecting-existing-history),
+or the existing History-sync setup when a memory remote is available. Explicitly
+join the source lineage, keep a new local instance identity, and verify the exact
+expected checkpoint and fresh-client recovery. Ordinary `llewm init` leaves the
+lineage unset; no memory repository is required for bundle import.
+
 ### Existing projects
 
 Do not manufacture semantic history from every pre-installation commit. Treat

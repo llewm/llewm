@@ -39,6 +39,11 @@ canonical repository above, build from components/continuity/, and obtain the
 required Go version from that revision's go.mod; use https://go.dev/doc/install
 if Go is missing. Keep the Llewm source checkout separate from the target project.
 
+If this install will receive existing Continuity history, follow the guide's
+joining-existing-history workflow before starting a trial or creating replacement
+plans. Receive, inspect, explicitly join its lineage, import and verify the
+expected checkpoint first.
+
 Before creating project state, follow the guide's Git exclusion prerequisite.
 Verify that the whole .llewm/ directory is ignored and has no tracked files.
 Default to /.llewm/ in the root .gitignore; use the local Git exclude file for
@@ -62,6 +67,10 @@ The URL identifies the product and bounds the reading; local prerequisite and
 configuration checks are still necessary. A full documentation or source audit
 is not part of onboarding. For a pinned build, replace `main` in both guide URLs
 with its commit or tag and use that same revision for the source and linked docs.
+
+For a new machine joining existing project history, use the
+[receiving-install workflow](lan-history.md#new-installs-expecting-existing-history)
+before choosing trial or prose adoption.
 
 Once installed, the plugin's `onboard` skill supports the same process. In Codex,
 invoke `$onboard`; in Claude Code, invoke `/llewm:onboard`, or ask to onboard this

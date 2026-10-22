@@ -213,6 +213,14 @@ Accepted design (decision `history-sync-design`, 2026-09-27):
 - **Device-private data stays local.** Raw events, sessions, usage records, and
   hook telemetry are not synced. The curated export profile defines what travels.
 
+### Temporary exchange before History-sync setup
+
+An optional [temporary LAN exchange](../components/continuity/docs/lan-history.md)
+can move curated bundles before a memory remote is configured. Explicit pairing
+enables only the temporary connection; receiving does not associate a lineage,
+import records, or enable automatic sync. Fresh installs explicitly join the
+inspected source lineage and verify checkpoint recovery before creating new plans.
+
 ### Fork detection is baseline, not coordination
 
 Concurrent heads occur without a second developer: one engineer who switches

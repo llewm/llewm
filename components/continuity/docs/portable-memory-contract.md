@@ -83,6 +83,13 @@ required versions/schemas, duplicate identities, count/hash mismatches, invalid
 references and oversized fields. The current export is complete; timestamps are
 not incremental export cursors.
 
+## Temporary LAN exchange
+
+[Temporary LAN history exchange](lan-history.md) transports validated bundles
+over one explicitly paired, expiring TLS connection before a memory repository
+is configured. Transfer creates private bundle directories only; lineage
+association and semantic import remain explicit local operations.
+
 ## Local workflow
 
 ```sh

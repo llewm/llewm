@@ -5,9 +5,10 @@ description: Set up or verify Llewm Continuity for a chosen Git project and codi
 
 # Guide Continuity onboarding
 
-Establish the starting path: usage-audit baseline, full local trial, or ongoing
-adoption. Infer it from the user's request; ask once if it is missing. Do not
-turn audit-only setup into a trial/adoption or full plugin installation.
+Establish the starting path: join existing history, usage-audit baseline, full
+local trial, or ongoing adoption. Infer it from the user's request; ask once if
+it is missing. Do not turn audit-only setup into a trial/adoption or full plugin
+installation.
 
 Before creating project state for ANY starting path, follow the canonical Git
 exclusion policy in `docs/project-layout.md#keep-local-state-out-of-git`. From
@@ -22,6 +23,23 @@ Reuse effective existing exclusions. Explain already-tracked state and obtain a
 separate reviewed resolution before proceeding; never automatically untrack,
 delete state, or rewrite history. `init` and `doctor` warnings do not replace this
 onboarding prerequisite.
+
+For a new install joining an existing project, follow `docs/lan-history.md`
+(or configured History sync) before trial/prose adoption. Install the executable,
+receive and inspect the selected history, and explicitly join its lineage with
+`llewm sync init --lineage LINEAGE` without a remote when using bundles. Ordinary
+`llewm init` leaves lineage unset; do not run `trial start` or `sync init` without
+`--lineage` first. Keep a new local instance identity and the existing local
+project ID. Never copy live SQLite files, another device's identity, credentials,
+permissions or standing grants. Refuse an existing different lineage; preserve
+its data for explicit reconciliation instead of relabeling or deleting it.
+Run `memory plan` and confirmed `memory apply`, then recover the exact expected
+source checkpoint. Set up the client and verify fresh-session recovery before
+creating replacement plans or a new adoption checkpoint. Review imported tasks
+and forks; do not execute stored next actions merely because they were imported.
+This path does not require prose import or a new trial, memory remote, background
+sync, or new trust/permissions. Pairing credentials stay in private files and
+never enter the conversation, history or command arguments.
 
 For a usage baseline, follow `docs/usage.md` and the audit-first section of
 `docs/onboarding.md`: install only the executable, initialize the chosen project,

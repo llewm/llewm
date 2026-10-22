@@ -562,7 +562,7 @@ func memoryCommand() *cobra.Command {
 	apply.Flags().StringVar(&confirmLineage, "confirm-lineage", "", "exact inspected lineage ID (required)")
 	apply.Flags().StringVar(&confirmProject, "confirm-project", "", "exact selected local project ID (required)")
 
-	parent.AddCommand(export, inspect, plan, apply)
+	parent.AddCommand(export, inspect, plan, apply, memoryLANCommand())
 	return parent
 }
 
