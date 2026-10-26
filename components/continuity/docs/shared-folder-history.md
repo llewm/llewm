@@ -35,8 +35,13 @@ history only, `llewm sync init` creates it. A receiving install instead explicit
 joins the known source lineage with `llewm sync init --lineage LINEAGE`.
 
 `--create` writes a new immutable `.llewm-history.json` marker into the existing
-directory and pins its generated store ID and lineage in local configuration.
-Each shared directory hosts one lineage. Include the marker and the complete
+directory. The marker identifies the container, independently of any project.
+Local endpoint configuration pins that store ID and the selected project lineage.
+One container can hold independent A/B histories: add the existing container to
+each project with its own `--confirm-lineage` and the same `--store-id`.
+Each operation scans and publishes only its selected lineage. All readers of the
+container can nevertheless read every lineage in it, so use separate containers
+and provider access controls for separate audiences. Include the marker and the complete
 `v3/` subtree in external replication; do not filter out its hidden marker.
 Setup does not itself import or publish record objects; `sync` and subsequent
 automatic triggers perform those operations.
@@ -122,6 +127,7 @@ relay_to_git = false
 name = "personal"
 directory = "/private/synced/llewm-history"
 store_id = "32_lowercase_hex_characters_from_the_marker"
+lineage_id = "lineage:32_lowercase_hex_characters_of_the_selected_project"
 relay = false
 ```
 
@@ -146,8 +152,8 @@ of those files is a separate operation with its own semantics.
 
 Readers confine filesystem access to the selected root and reject symlinked,
 nonregular, malformed, oversized, wrong-path or wrong-lineage objects. Unix reads
-also use nonblocking/no-follow opens against replacement races. Each scan is
-bounded by entry, record and byte limits. Validated incoming objects are retained
+also use nonblocking/no-follow opens against replacement races. Only the selected lineage namespace is scanned; other project partitions are
+ignored. Each scan is bounded by entry, record and byte limits. Validated incoming objects are retained
 in the private local archive **before** semantic application. Supported records
 use the same dependency, transaction, collision, fork and resolution rules as Git.
 Incomplete dependencies remain pending and are retried on later scans. Unsupported

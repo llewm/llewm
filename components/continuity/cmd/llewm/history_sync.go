@@ -171,30 +171,16 @@ func syncFolderCommand() *cobra.Command {
 			if err := foldersync.Separate(absolute, config.StateDir(application.Root), application.Config.Storage.Database, application.Config.Backups.Dir, filepath.Join(application.Root, ".git"), clone); err != nil {
 				return err
 			}
-			var marker foldersync.Marker
-			if create {
-				if storeID != "" {
-					return fmt.Errorf("--create does not accept --store-id")
-				}
-				marker, err = foldersync.Create(absolute, lineage)
-			} else {
-				marker, err = foldersync.Inspect(absolute)
-				if err == nil && marker.StoreID != storeID {
-					return fmt.Errorf("explicit confirmation required: --store-id %s", marker.StoreID)
-				}
-			}
+			marker, err := foldersync.Pin(absolute, storeID, create)
 			if err != nil {
 				return err
-			}
-			if marker.LineageID != lineage {
-				return fmt.Errorf("folder lineage differs from selected project")
 			}
 			for _, e := range settings.Folders {
 				if e.StoreID == marker.StoreID {
 					return fmt.Errorf("folder store already configured")
 				}
 			}
-			endpoint := foldersync.Endpoint{Name: args[0], Directory: absolute, StoreID: marker.StoreID, Relay: relay}
+			endpoint := foldersync.Endpoint{Name: args[0], Directory: absolute, StoreID: marker.StoreID, LineageID: lineage, Relay: relay}
 			settings.Folders = append(settings.Folders, endpoint)
 			if _, err := config.SetSync(application.Root, settings); err != nil {
 				return err

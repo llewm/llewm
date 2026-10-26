@@ -184,10 +184,13 @@ type ScanResult struct {
 }
 
 // Scan ignores unrelated provider metadata but reports every noncanonical entry
-// inside the record tree. Partial/missing/corrupt files never reach the importer.
+// inside the selected lineage record tree. Other lineage namespaces are never scanned. Partial/missing/corrupt files never reach the importer.
 // No mtime or shared cursor is used. The caller decides whether a scan is usable.
 func Scan(ctx context.Context, root *os.Root, lineage string) (ScanResult, error) {
 	var result ScanResult
+	if !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(lineage) {
+		return result, fmt.Errorf("invalid scan lineage")
+	}
 	base := portable.MemoryLineageDir(lineage)
 	if _, err := root.Lstat(base); errors.Is(err, os.ErrNotExist) {
 		return result, nil

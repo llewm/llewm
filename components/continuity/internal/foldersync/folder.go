@@ -21,15 +21,15 @@ import (
 const MarkerFile = ".llewm-history.json"
 
 type Marker struct {
-	Format    string `json:"format"`
-	Version   int    `json:"version"`
-	StoreID   string `json:"store_id"`
-	LineageID string `json:"lineage_id"`
+	Format  string `json:"format"`
+	Version int    `json:"version"`
+	StoreID string `json:"store_id"`
 }
 type Endpoint struct {
 	Name      string `toml:"name" json:"name"`
 	Directory string `toml:"directory" json:"directory"`
 	StoreID   string `toml:"store_id" json:"store_id"`
+	LineageID string `toml:"lineage_id" json:"lineage_id"`
 	Relay     bool   `toml:"relay,omitempty" json:"relay"`
 }
 
@@ -37,11 +37,8 @@ func (e Endpoint) ID() string { return "folder:" + e.StoreID }
 
 // Create initializes a new endpoint marker only on explicit setup, never during
 // sync. Its identity is pinned in each device's local configuration.
-func Create(directory, lineage string) (Marker, error) {
+func Create(directory string) (Marker, error) {
 	var marker Marker
-	if !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(lineage) {
-		return marker, fmt.Errorf("invalid lineage")
-	}
 	root, err := recordsync.OpenRoot(directory)
 	if err != nil {
 		return marker, err
@@ -54,7 +51,7 @@ func Create(directory, lineage string) (Marker, error) {
 	if err != nil {
 		return marker, err
 	}
-	marker = Marker{"llewm-shared-history", 1, id, lineage}
+	marker = Marker{"llewm-history-container", 2, id}
 	body, err := json.Marshal(marker)
 	if err != nil {
 		return marker, err
@@ -62,6 +59,23 @@ func Create(directory, lineage string) (Marker, error) {
 	_, err = recordsync.WriteFile(root, MarkerFile, body, false)
 	return marker, err
 }
+
+// Pin is the shared setup path for project and portfolio destinations. Creation
+// is explicit; joining requires confirmation of the exact inspected store ID.
+func Pin(directory, storeID string, create bool) (Marker, error) {
+	if create {
+		if storeID != "" {
+			return Marker{}, fmt.Errorf("--create does not accept --store-id")
+		}
+		return Create(directory)
+	}
+	marker, err := Inspect(directory)
+	if err == nil && marker.StoreID != storeID {
+		return Marker{}, fmt.Errorf("explicit confirmation required: --store-id %s", marker.StoreID)
+	}
+	return marker, err
+}
+
 func Inspect(directory string) (Marker, error) {
 	root, err := recordsync.OpenRoot(directory)
 	if err != nil {
@@ -80,8 +94,8 @@ func readMarker(root *os.Root) (Marker, error) {
 		return marker, err
 	}
 	canonical, _ := json.Marshal(marker)
-	if string(canonical) != string(body) || marker.Format != "llewm-shared-history" || marker.Version != 1 || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(marker.StoreID) || !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(marker.LineageID) {
-		return marker, fmt.Errorf("invalid folder marker")
+	if string(canonical) != string(body) || marker.Format != "llewm-history-container" || marker.Version != 2 || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(marker.StoreID) {
+		return marker, fmt.Errorf("unsupported or invalid folder container marker")
 	}
 	return marker, nil
 }
@@ -128,8 +142,15 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 		result.Outcome = "unavailable"
 		return result, err
 	}
-	if marker.StoreID != s.Endpoint.StoreID || marker.LineageID != s.Archive.Lineage {
+	if marker.StoreID != s.Endpoint.StoreID || s.Endpoint.LineageID != s.Archive.Lineage || !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(s.Endpoint.LineageID) {
 		return result, fmt.Errorf("folder identity/lineage differs from explicit configuration")
+	}
+	identity, err := (portable.Service{DB: s.DB}).Get(ctx, s.ProjectID)
+	if err != nil {
+		return result, err
+	}
+	if identity == nil || identity.LineageID != s.Endpoint.LineageID {
+		return result, fmt.Errorf("folder route differs from selected project's lineage")
 	}
 	// Read first, retaining every structurally verified envelope before semantic
 	// import. A corrupt peer file never replaces a locally verified archive copy.

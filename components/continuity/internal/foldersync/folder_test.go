@@ -2,6 +2,7 @@ package foldersync
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/llewm/llewm/components/continuity/internal/activity"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/database"
@@ -10,12 +11,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
 const testLineage = "lineage:abababababababababababababababab"
 
 func receiver(t *testing.T, directory, storeID string) Syncer {
+	t.Helper()
+	return receiverLineage(t, directory, storeID, testLineage)
+}
+
+func receiverLineage(t *testing.T, directory, storeID, lineage string) Syncer {
 	t.Helper()
 	ctx := context.Background()
 	db, err := database.Initialize(ctx, filepath.Join(t.TempDir(), "continuity.db"))
@@ -27,14 +34,14 @@ func receiver(t *testing.T, directory, storeID string) Syncer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (portable.Service{DB: db}).Initialize(ctx, id, testLineage); err != nil {
+	if _, err := (portable.Service{DB: db}).Initialize(ctx, id, lineage); err != nil {
 		t.Fatal(err)
 	}
-	archive, err := recordsync.OpenArchive(t.TempDir(), testLineage)
+	archive, err := recordsync.OpenArchive(t.TempDir(), lineage)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Syncer{DB: db, ProjectID: id, Archive: archive, Endpoint: Endpoint{Name: "fixture", Directory: directory, StoreID: storeID}}
+	return Syncer{DB: db, ProjectID: id, Archive: archive, Endpoint: Endpoint{Name: "fixture", Directory: directory, StoreID: storeID, LineageID: lineage}}
 }
 func exportCheckpoint(t *testing.T, s Syncer) []portable.EncodedEnvelope {
 	t.Helper()
@@ -63,7 +70,7 @@ func publish(t *testing.T, directory string, objects []portable.EncodedEnvelope)
 }
 func TestOutOfOrderDependenciesAreRetainedAndRetriedTransactionally(t *testing.T) {
 	directory := t.TempDir()
-	marker, err := Create(directory, testLineage)
+	marker, err := Create(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +115,7 @@ func TestUnavailableOrChangedFolderNeverReinitializesOrDeletesHistory(t *testing
 	if err := os.Mkdir(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
-	marker, err := Create(directory, testLineage)
+	marker, err := Create(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +141,7 @@ func TestUnavailableOrChangedFolderNeverReinitializesOrDeletesHistory(t *testing
 	if err := os.Mkdir(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
-	other, err := Create(directory, testLineage)
+	other, err := Create(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +161,7 @@ func TestUnavailableOrChangedFolderNeverReinitializesOrDeletesHistory(t *testing
 }
 func TestPartialConflictAndCorruptFilesCannotBecomeRecords(t *testing.T) {
 	directory := t.TempDir()
-	marker, err := Create(directory, testLineage)
+	marker, err := Create(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,5 +237,121 @@ func TestSharedFolderRefusesProtectedStorage(t *testing.T) {
 	}
 	if err := Separate(t.TempDir(), private); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestContainerIsolatesConcurrentProjectHistories(t *testing.T) {
+	directory := t.TempDir()
+	marker, err := Create(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lineages := []string{testLineage, "lineage:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"}
+	var sources, targets []Syncer
+	var exports [][]portable.EncodedEnvelope
+	for _, lineage := range lineages {
+		source := receiverLineage(t, directory, marker.StoreID, lineage)
+		objects := exportCheckpoint(t, source)
+		if err := source.Archive.CaptureLocal(objects); err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, source)
+		exports = append(exports, objects)
+		targets = append(targets, receiverLineage(t, directory, marker.StoreID, lineage))
+	}
+	var wg sync.WaitGroup
+	failures := make(chan error, len(sources))
+	for _, source := range sources {
+		wg.Add(1)
+		go func(s Syncer) { defer wg.Done(); _, err := s.Sync(context.Background()); failures <- err }(source)
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, target := range targets {
+		result, err := target.Sync(context.Background())
+		if err != nil || result.ImportedRecords != len(exports[i]) || result.PendingFiles+result.InvalidFiles != 0 {
+			t.Fatalf("lineage scoped import: %+v %v", result, err)
+		}
+		retained, err := target.Archive.Objects(context.Background(), "", true)
+		if err != nil || len(retained) != len(exports[i]) {
+			t.Fatalf("archive crossed projects: %v", err)
+		}
+		for _, e := range retained {
+			if e.Envelope.LineageID != lineages[i] {
+				t.Fatal("foreign lineage retained")
+			}
+		}
+		// Compare the original checkpoint body/attribution after recovery.
+		var original, recovered string
+		if err := sources[i].DB.QueryRow(`SELECT summary FROM checkpoints WHERE project_id=?`, sources[i].ProjectID).Scan(&original); err != nil {
+			t.Fatal(err)
+		}
+		if err := target.DB.QueryRow(`SELECT summary FROM checkpoints WHERE project_id=?`, target.ProjectID).Scan(&recovered); err != nil || recovered != original {
+			t.Fatalf("checkpoint not recovered exactly: %q %v", recovered, err)
+		}
+		result, err = target.Sync(context.Background())
+		if err != nil || result.ImportedRecords != 0 || result.PublishedRecords != 0 {
+			t.Fatalf("replay: %+v %v", result, err)
+		}
+	}
+	// Even with a valid container pin, an endpoint/archive/project mismatch must
+	// fail before reading or publishing any objects.
+	mismatch := receiverLineage(t, directory, marker.StoreID, lineages[0])
+	mismatch.Endpoint.LineageID = lineages[1]
+	if _, err := mismatch.Sync(context.Background()); err == nil {
+		t.Fatal("route/archive mismatch accepted")
+	}
+	mismatch.Endpoint.LineageID = lineages[0]
+	mismatch.ProjectID = sources[1].ProjectID
+	mismatch.DB = sources[1].DB
+	if _, err := mismatch.Sync(context.Background()); err == nil {
+		t.Fatal("selected project mismatch accepted")
+	}
+}
+
+func TestContainerRejectsUnsupportedAndSymlinkMarkers(t *testing.T) {
+	for _, body := range []string{
+		`{"format":"llewm-shared-history","version":1,"store_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lineage_id":"` + testLineage + `"}`,
+		`{"format":"llewm-history-container","version":2,"store_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lineage_id":"` + testLineage + `"}`,
+	} {
+		directory := t.TempDir()
+		path := filepath.Join(directory, MarkerFile)
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Inspect(directory); err == nil {
+			t.Fatal("unsupported marker accepted")
+		}
+		if _, err := Create(directory); err == nil {
+			t.Fatal("existing marker replaced")
+		}
+		after, _ := os.ReadFile(path)
+		if string(after) != body {
+			t.Fatal("unsupported marker modified")
+		}
+	}
+	directory := t.TempDir()
+	marker, err := Create(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(marker)
+	external := filepath.Join(t.TempDir(), "marker")
+	if err := os.WriteFile(external, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(directory, MarkerFile)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(directory, MarkerFile)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Inspect(directory); err == nil {
+		t.Fatal("symlink marker accepted")
 	}
 }

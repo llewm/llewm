@@ -72,11 +72,11 @@ func TestHybridThreeMachinesConvergeWithExplicitDestinationRelays(t *testing.T) 
 	b, c := newMachine(t, "bridge", remote), newMachine(t, "git-only", remote)
 	aa, ba, ca := archiveMachine(t, &a), archiveMachine(t, &b), archiveMachine(t, &c)
 	shared := t.TempDir()
-	marker, err := foldersync.Create(shared, testLineage)
+	marker, err := foldersync.Create(shared)
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := foldersync.Endpoint{Name: "personal", Directory: shared, StoreID: marker.StoreID}
+	endpoint := foldersync.Endpoint{Name: "personal", Directory: shared, StoreID: marker.StoreID, LineageID: testLineage}
 	a.decide(t, "from-folder", "Originated on folder-only machine")
 	a.topic(t, "hybrid", "Base")
 	folderCycle(t, a, aa, endpoint)
@@ -242,11 +242,11 @@ func TestHybridRelaysOpaqueEnvelopeBytesWithoutSemanticApplication(t *testing.T)
 		t.Fatalf("unsupported schema not deferred: %+v", result)
 	}
 	shared := t.TempDir()
-	marker, err := foldersync.Create(shared, testLineage)
+	marker, err := foldersync.Create(shared)
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := foldersync.Endpoint{Name: "shared", Directory: shared, StoreID: marker.StoreID, Relay: true}
+	endpoint := foldersync.Endpoint{Name: "shared", Directory: shared, StoreID: marker.StoreID, LineageID: testLineage, Relay: true}
 	folderCycle(t, bridge, ba, endpoint)
 	received := folderCycle(t, consumer, ca, endpoint)
 	if received.DeferredRecords != 1 || received.Outcome != "pending" || consumer.decisions(t) != "known" {
@@ -286,7 +286,7 @@ func TestHybridRetainsAndRelaysHistoryBeforeMissingDependencyArrives(t *testing.
 		t.Fatal(err)
 	}
 	shared := t.TempDir()
-	marker, err := foldersync.Create(shared, testLineage)
+	marker, err := foldersync.Create(shared)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestHybridRetainsAndRelaysHistoryBeforeMissingDependencyArrives(t *testing.
 	if _, err := recordsync.WriteFile(root, portable.MemoryRecordPath(action.Envelope), portable.MemoryFileBytes(action), false); err != nil {
 		t.Fatal(err)
 	}
-	endpoint := foldersync.Endpoint{Name: "partial", Directory: shared, StoreID: marker.StoreID}
+	endpoint := foldersync.Endpoint{Name: "partial", Directory: shared, StoreID: marker.StoreID, LineageID: testLineage}
 	if result, err := (foldersync.Syncer{DB: bridge.db, ProjectID: bridge.project, Archive: ba, Endpoint: endpoint}).Sync(ctx); err == nil || result.Outcome != "pending" {
 		t.Fatal("dependency was not pending")
 	}

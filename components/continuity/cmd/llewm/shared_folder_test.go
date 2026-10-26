@@ -80,7 +80,7 @@ func TestFolderSessionHookQueuesBackgroundWithoutReadingEndpoint(t *testing.T) {
 	var id portable.Identity
 	decodeCLI(t, runCLI(t, "", "sync", "init"), &id)
 	directory := t.TempDir()
-	marker, err := foldersync.Create(directory, id.LineageID)
+	marker, err := foldersync.Create(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestFolderSessionHookQueuesBackgroundWithoutReadingEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Sync.Folders = []foldersync.Endpoint{{Name: "missing", Directory: directory, StoreID: marker.StoreID}}
+	cfg.Sync.Folders = []foldersync.Endpoint{{Name: "missing", Directory: directory, StoreID: marker.StoreID, LineageID: id.LineageID}}
 	if _, err := config.SetSync(root, cfg.Sync); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestFolderSessionHookQueuesBackgroundWithoutReadingEndpoint(t *testing.T) {
 }
 func TestFolderMarkerInspectOutsideProjectAndTrialSyncGate(t *testing.T) {
 	directory := t.TempDir()
-	marker, err := foldersync.Create(directory, "lineage:"+strings.Repeat("a", 32))
+	marker, err := foldersync.Create(directory)
 	if err != nil {
 		t.Fatal(err)
 	}

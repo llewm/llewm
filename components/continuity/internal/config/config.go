@@ -393,7 +393,7 @@ func (s Sync) Validate() error {
 	}
 	names, stores := map[string]bool{}, map[string]bool{}
 	for _, e := range s.Folders {
-		if e.Name == "git" || !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`).MatchString(e.Name) || !filepath.IsAbs(e.Directory) || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(e.StoreID) {
+		if e.Name == "git" || !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`).MatchString(e.Name) || !filepath.IsAbs(e.Directory) || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(e.StoreID) || !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(e.LineageID) {
 			return fmt.Errorf("invalid shared-folder endpoint configuration")
 		}
 		if names[e.Name] || stores[e.StoreID] {
