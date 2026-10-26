@@ -13,8 +13,11 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
+	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/gitenv"
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
+	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
 
 func isolated(t *testing.T) {
@@ -125,7 +128,7 @@ func TestPortfolioProjectsConvergeWithoutCrossGroupHistory(t *testing.T) {
 	ctx := context.Background()
 	a, b := source(t, "a", ""), source(t, "b", "")
 	private, alpha, beta := bare(t), bare(t), bare(t)
-	c := Catalog{Version: 1, Destinations: []Destination{{Name: "private", Remote: private}, {Name: "alpha", Remote: alpha}, {Name: "beta", Remote: beta}}, Projects: []Project{a, b}}
+	c := Catalog{Version: 1, Destinations: []Destination{{Kind: "git", Name: "private", Remote: private}, {Kind: "git", Name: "alpha", Remote: alpha}, {Kind: "git", Name: "beta", Remote: beta}}, Projects: []Project{a, b}}
 	c.Projects[0].Routes = []Route{{"private", true}, {"alpha", false}}
 	c.Projects[1].Routes = []Route{{"private", true}, {"beta", false}}
 	decide(t, a, "a-local")
@@ -219,7 +222,7 @@ func TestPortfolioPinFailuresAndIndependentEndpointFailures(t *testing.T) {
 	p := source(t, "p", "")
 	good, bad := bare(t), filepath.Join(t.TempDir(), "absent.git")
 	p.Routes = []Route{{"bad", false}, {"good", false}}
-	c := Catalog{Version: 1, Destinations: []Destination{{Name: "bad", Remote: bad}, {Name: "good", Remote: good}}, Projects: []Project{p}}
+	c := Catalog{Version: 1, Destinations: []Destination{{Kind: "git", Name: "bad", Remote: bad}, {Kind: "git", Name: "good", Remote: good}}, Projects: []Project{p}}
 	decide(t, p, "survives-failure")
 	results, err := Run(context.Background(), c, "p", false, false)
 	if err == nil || len(results) != 1 || results[0].Outcome != "partial" || results[0].Destinations[1].Outcome != "synced" {
@@ -261,7 +264,7 @@ func TestPortfolioCatalogValidationAndAtomicEdits(t *testing.T) {
 		t.Fatal("read created configuration")
 	}
 	if _, err := store.Update(func(c *Catalog) error {
-		c.Destinations = []Destination{{Name: "private", Remote: "/absolute/private.git"}}
+		c.Destinations = []Destination{{Kind: "git", Name: "private", Remote: "/absolute/private.git"}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -291,7 +294,7 @@ func TestPortfolioCatalogValidationAndAtomicEdits(t *testing.T) {
 	p.Routes = []Route{{"private", false}}
 	q := p
 	q.Name, q.Root, q.ProjectID = "q", t.TempDir(), "project-other"
-	if (Catalog{Version: 1, Destinations: []Destination{{Name: "private", Remote: "/absolute/private.git"}}, Projects: []Project{p, q}}).Validate() == nil {
+	if (Catalog{Version: 1, Destinations: []Destination{{Kind: "git", Name: "private", Remote: "/absolute/private.git"}}, Projects: []Project{p, q}}).Validate() == nil {
 		t.Fatal("same lineage presented as independent project")
 	}
 	if err := os.WriteFile(filepath.Join(store.Directory, "portfolio.lock"), nil, 0600); err != nil {
@@ -327,7 +330,7 @@ func TestPortfolioRefusesForeignCloneBeforePublishing(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Routes = []Route{{"group", true}}
-	c := Catalog{Version: 1, Destinations: []Destination{{Name: "group", Remote: intended, Clone: clone}}, Projects: []Project{p}}
+	c := Catalog{Version: 1, Destinations: []Destination{{Kind: "git", Name: "group", Remote: intended, Clone: clone}}, Projects: []Project{p}}
 	if _, err := Run(context.Background(), c, "p", false, false); err == nil {
 		t.Fatal("used a clone owned by another destination")
 	}
@@ -335,5 +338,213 @@ func TestPortfolioRefusesForeignCloneBeforePublishing(t *testing.T) {
 		if refs := git(t, remote, "for-each-ref", "--format=%(refname)"); refs != "" {
 			t.Fatal("refusing a foreign clone still published history")
 		}
+	}
+}
+
+func folderDestination(t *testing.T, name string) Destination {
+	t.Helper()
+	directory := t.TempDir()
+	marker, err := foldersync.Create(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Destination{Name: name, Kind: "folder", Directory: directory, StoreID: marker.StoreID}
+}
+
+func folderPeer(t *testing.T, p Project, d Destination) {
+	t.Helper()
+	c := Catalog{Version: 1, Destinations: []Destination{d}, Projects: []Project{p}}
+	c.Projects[0].Routes = []Route{{d.Name, false}}
+	run(t, c)
+}
+
+func TestMixedPortfolioContainerGroupsRecoveryAndRelay(t *testing.T) {
+	isolated(t)
+	ctx := context.Background()
+	a, b := source(t, "a", ""), source(t, "b", "")
+	private, beta := folderDestination(t, "private"), folderDestination(t, "beta")
+	alpha := Destination{Kind: "git", Name: "alpha", Remote: bare(t)}
+	c := Catalog{Version: 1, Destinations: []Destination{private, alpha, beta}, Projects: []Project{a, b}}
+	c.Projects[0].Routes = []Route{{"private", true}, {"alpha", false}}
+	c.Projects[1].Routes = []Route{{"private", true}, {"beta", false}}
+	decide(t, a, "a-local")
+	decide(t, b, "b-local")
+	application, err := app.Open(ctx, a.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp, err := application.Checkpoints.Create(ctx, checkpoint.Checkpoint{ProjectID: a.ProjectID, TaskID: "container-recovery", Task: "Recover original container checkpoint", Summary: "Original attributed history", NextAction: "Continue exact task"})
+	application.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(ctx, c, "", true, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadStatus(ctx, c, "", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []Project{a, b} {
+		if _, err := os.Stat(filepath.Join(config.StateDir(p.Root), "history")); !os.IsNotExist(err) {
+			t.Fatal("preview/status created archive")
+		}
+	}
+	run(t, c)
+	pa, pb := source(t, "alpha-peer", a.Lineage), source(t, "beta-peer", b.Lineage)
+	ca := filepath.Join(t.TempDir(), "clone")
+	peerSync(t, pa, alpha.Remote, ca)
+	folderPeer(t, pb, beta)
+	if !hasDecision(t, pa, "a-local") || hasDecision(t, pa, "b-local") || !hasDecision(t, pb, "b-local") || hasDecision(t, pb, "a-local") {
+		t.Fatal("group routing crossed project boundaries")
+	}
+	aggregateA, aggregateB := source(t, "aggregate-a", a.Lineage), source(t, "aggregate-b", b.Lineage)
+	folderPeer(t, aggregateA, private)
+	folderPeer(t, aggregateB, private)
+	if !hasDecision(t, aggregateA, "a-local") || hasDecision(t, aggregateA, "b-local") || !hasDecision(t, aggregateB, "b-local") || hasDecision(t, aggregateB, "a-local") {
+		t.Fatal("aggregate imported another lineage")
+	}
+	recovered, err := app.OpenReadOnly(ctx, aggregateA.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact, err := recovered.Checkpoints.Get(ctx, aggregateA.ProjectID, cp.ID, 16384)
+	recovered.Close()
+	if err != nil || exact == nil || exact.ID != cp.ID || !strings.Contains(exact.Markdown, "Continue exact task") {
+		t.Fatalf("exact checkpoint recovery failed: %+v %v", exact, err)
+	}
+	decide(t, pa, "alpha-received")
+	decide(t, pb, "beta-received")
+	peerSync(t, pa, alpha.Remote, ca)
+	folderPeer(t, pb, beta)
+	run(t, c)
+	folderPeer(t, aggregateA, private)
+	folderPeer(t, aggregateB, private)
+	if !hasDecision(t, aggregateA, "alpha-received") || !hasDecision(t, aggregateB, "beta-received") || hasDecision(t, aggregateA, "beta-received") {
+		t.Fatal("mixed transports did not converge by lineage")
+	}
+	decide(t, aggregateA, "private-a")
+	decide(t, aggregateB, "private-b")
+	folderPeer(t, aggregateA, private)
+	folderPeer(t, aggregateB, private)
+	run(t, c)
+	peerSync(t, pa, alpha.Remote, ca)
+	folderPeer(t, pb, beta)
+	if !hasDecision(t, a, "private-a") || !hasDecision(t, b, "private-b") || hasDecision(t, pa, "private-a") || hasDecision(t, pb, "private-b") {
+		t.Fatal("private observations bypassed route relay authorization")
+	}
+	c.Projects[0].Routes[1].Relay = true
+	c.Projects[1].Routes[1].Relay = true
+	run(t, c)
+	peerSync(t, pa, alpha.Remote, ca)
+	folderPeer(t, pb, beta)
+	if !hasDecision(t, pa, "private-a") || !hasDecision(t, pb, "private-b") {
+		t.Fatal("explicit mixed relay failed")
+	}
+	// Inspect actual container namespaces, not only receiver semantics.
+	if _, err := os.Stat(filepath.Join(beta.Directory, portable.MemoryLineageDir(a.Lineage))); !os.IsNotExist(err) {
+		t.Fatal("Alpha history published into Beta container")
+	}
+	history := git(t, alpha.Remote, "log", "--all", "--format=", "--name-only")
+	if strings.Contains(history, strings.TrimPrefix(b.Lineage, "lineage:")) {
+		t.Fatal("Beta history published into Alpha Git history")
+	}
+	for _, r := range run(t, c) {
+		for _, d := range r.Destinations {
+			for _, attempt := range d.FolderAttempts {
+				if attempt.ImportedRecords+attempt.PublishedRecords+attempt.ObservedRecords != 0 || attempt.PeerReceipt != "unknown" {
+					t.Fatalf("unsettled or misleading folder replay: %+v", attempt)
+				}
+			}
+		}
+	}
+	status, err := ReadStatus(ctx, c, "", true)
+	if err != nil || status[0].Destinations[0].FolderStatus == nil || status[0].Destinations[0].Outcome != "published_locally" {
+		t.Fatalf("missing folder receipt: %+v %v", status, err)
+	}
+}
+
+func TestPortfolioFolderFailuresRemainIndependentAndRetained(t *testing.T) {
+	isolated(t)
+	p := source(t, "p", "")
+	bad, good := folderDestination(t, "bad"), folderDestination(t, "good")
+	p.Routes = []Route{{"bad", false}, {"good", false}}
+	c := Catalog{Version: 1, Destinations: []Destination{bad, good}, Projects: []Project{p}}
+	decide(t, p, "survives-folder-failure")
+	if err := os.Rename(bad.Directory, bad.Directory+"-offline"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Run(context.Background(), c, "p", false, false)
+	if err == nil || r[0].Outcome != "partial" || r[0].Destinations[0].Outcome != "unavailable" || r[0].Destinations[1].Outcome != "published_locally" {
+		t.Fatalf("lost independent folder outcomes: %+v %v", r, err)
+	}
+	if _, err := os.Stat(bad.Directory); !os.IsNotExist(err) {
+		t.Fatal("recreated missing endpoint")
+	}
+	status, err := ReadStatus(context.Background(), c, "p", false)
+	if err != nil || status[0].Destinations[0].Outcome != "unavailable" || status[0].Destinations[1].Outcome != "published_locally" {
+		t.Fatalf("status forgot failed folder: %+v %v", status, err)
+	}
+	if _, err := Run(context.Background(), c, "p", false, true); err == nil {
+		t.Fatal("preview ignored inaccessible folder")
+	}
+	if err := os.Mkdir(bad.Directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := foldersync.Create(bad.Directory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(context.Background(), c, "p", false, false); err == nil {
+		t.Fatal("silently adopted replacement store")
+	}
+	if _, err := os.Stat(filepath.Join(bad.Directory, "v3")); !os.IsNotExist(err) {
+		t.Fatal("published into replacement")
+	}
+	if os.Geteuid() == 0 {
+		return
+	}
+	// Use a real mode denial in this launching process; no alternate executable.
+	if err := os.Chmod(good.Directory, 0000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(good.Directory, 0700)
+	r, err = Run(context.Background(), c, "p", false, false)
+	if err == nil || r[0].Destinations[1].Error == "" {
+		t.Fatal("permission denial was hidden")
+	}
+}
+
+func TestPortfolioDestinationTypesRejectAmbiguityAndOverlap(t *testing.T) {
+	isolated(t)
+	good := folderDestination(t, "folder")
+	for _, mutate := range []func(*Destination){
+		func(d *Destination) { d.Kind = "" }, func(d *Destination) { d.Remote = "/private/repo.git" }, func(d *Destination) { d.Clone = "/private/clone" }, func(d *Destination) { d.SSHKey = "/private/key" }, func(d *Destination) { d.StoreID = "" }, func(d *Destination) { d.Directory = "relative" }, func(d *Destination) { d.Kind = "git" },
+	} {
+		d := good
+		mutate(&d)
+		if (Catalog{Version: 1, Destinations: []Destination{d}}).Validate() == nil {
+			t.Fatalf("ambiguous destination accepted: %+v", d)
+		}
+	}
+	p := source(t, "p", "")
+	p.Routes = []Route{{"folder", false}}
+	cfg, err := config.Load(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good.Directory = filepath.Join(config.StateDir(p.Root), "shared")
+	if err := os.MkdirAll(good.Directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateStorage(Catalog{Version: 1, Destinations: []Destination{good}, Projects: []Project{p}}, good, cfg, p); err == nil {
+		t.Fatal("folder overlapped live store")
+	}
+	// Archive origin identity is container-scoped inside a lineage-specific archive.
+	archive, err := recordsync.OpenArchive(t.TempDir(), p.Lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var absent foldersync.Result
+	if err := archive.Status("folder:"+good.StoreID, &absent); !os.IsNotExist(err) {
+		t.Fatal("invented endpoint receipt")
 	}
 }

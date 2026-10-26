@@ -1,5 +1,5 @@
 // Package portfolio routes independent project histories to explicitly selected
-// memory repositories. A catalog is local configuration, never portable memory.
+// Git repositories or folder containers. A catalog is local configuration, never portable memory.
 package portfolio
 
 import (
@@ -28,13 +28,19 @@ type Catalog struct {
 }
 
 type Destination struct {
-	Name   string `toml:"name" json:"name"`
-	Remote string `toml:"remote" json:"remote"`
-	Clone  string `toml:"clone,omitempty" json:"clone,omitempty"`
-	SSHKey string `toml:"ssh_key,omitempty" json:"ssh_key,omitempty"`
+	Kind      string `toml:"kind" json:"kind"`
+	Directory string `toml:"directory,omitempty" json:"directory,omitempty"`
+	StoreID   string `toml:"store_id,omitempty" json:"store_id,omitempty"`
+	Name      string `toml:"name" json:"name"`
+	Remote    string `toml:"remote,omitempty" json:"remote,omitempty"`
+	Clone     string `toml:"clone,omitempty" json:"clone,omitempty"`
+	SSHKey    string `toml:"ssh_key,omitempty" json:"ssh_key,omitempty"`
 }
 
 func (d Destination) MemoryClone() (string, error) {
+	if d.Kind != "git" {
+		return "", fmt.Errorf("only Git destinations have memory clones")
+	}
 	if d.Clone != "" {
 		return d.Clone, nil
 	}
@@ -61,20 +67,41 @@ func (c Catalog) Validate() error {
 	if c.Version != 1 || len(c.Destinations) > 64 || len(c.Projects) > 256 {
 		return fmt.Errorf("unsupported or oversized portfolio catalog")
 	}
-	names, remotes := map[string]bool{}, map[string]bool{}
+	names, identities := map[string]bool{}, map[string]bool{}
 	for _, d := range c.Destinations {
-		if !namePattern.MatchString(d.Name) || names[d.Name] || remotes[d.Remote] {
+		if !namePattern.MatchString(d.Name) || names[d.Name] {
 			return fmt.Errorf("duplicate or invalid portfolio destination")
 		}
-		if err := ValidateRemote(d.Remote); err != nil {
-			return err
-		}
-		for _, path := range []string{d.Clone, d.SSHKey} {
-			if path != "" && (!filepath.IsAbs(path) || path != filepath.Clean(path)) {
-				return fmt.Errorf("clone and SSH key paths must be absolute and clean")
+		var identity string
+		switch d.Kind {
+		case "git":
+			if d.Directory != "" || d.StoreID != "" {
+				return fmt.Errorf("Git destination cannot have folder fields")
 			}
+			if err := ValidateRemote(d.Remote); err != nil {
+				return err
+			}
+			for _, path := range []string{d.Clone, d.SSHKey} {
+				if path != "" && (!filepath.IsAbs(path) || path != filepath.Clean(path)) {
+					return fmt.Errorf("clone and SSH key paths must be absolute and clean")
+				}
+			}
+			identity = "git:" + d.Remote
+		case "folder":
+			if d.Remote != "" || d.Clone != "" || d.SSHKey != "" {
+				return fmt.Errorf("folder destination cannot have Git fields")
+			}
+			if !filepath.IsAbs(d.Directory) || d.Directory != filepath.Clean(d.Directory) || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(d.StoreID) {
+				return fmt.Errorf("folder destination requires an absolute clean directory and exact store ID")
+			}
+			identity = "folder:" + d.StoreID
+		default:
+			return fmt.Errorf("destination kind must be git or folder")
 		}
-		names[d.Name], remotes[d.Remote] = true, true
+		if identities[identity] {
+			return fmt.Errorf("duplicate portfolio destination identity")
+		}
+		names[d.Name], identities[identity] = true, true
 	}
 	projects, roots, ids, lineages := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, p := range c.Projects {

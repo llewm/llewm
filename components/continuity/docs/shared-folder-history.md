@@ -75,9 +75,9 @@ continue to prohibit History-sync setup and execution.
 
 ## Hybrid configurations and destination authorization
 
-For a private aggregate holding independent projects and separate group Git
+For a private aggregate holding independent projects and separate group
 destinations, use [project-level portfolio federation](portfolio-history.md).
-That manual routing catalog can give one project several Git destinations without
+That manual routing catalog can give one project several Git or folder destinations without
 changing the per-project configuration below. It does not selectively publish
 members of a unified history.
 

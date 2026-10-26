@@ -10,22 +10,29 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/adoption"
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/config"
+	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
+	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/project"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
 type DestinationResult struct {
-	Name     string           `json:"name"`
-	Remote   string           `json:"remote"`
-	Clone    string           `json:"clone"`
-	Relay    bool             `json:"relay"`
-	SSHKey   string           `json:"ssh_key,omitempty"`
-	Outcome  string           `json:"outcome"`
-	Attempts []memsync.Result `json:"attempts,omitempty"`
-	Error    string           `json:"error,omitempty"`
-	Status   *memsync.Status  `json:"status,omitempty"`
+	Kind           string              `json:"kind"`
+	Directory      string              `json:"directory,omitempty"`
+	StoreID        string              `json:"store_id,omitempty"`
+	FolderAttempts []foldersync.Result `json:"folder_attempts,omitempty"`
+	FolderStatus   *foldersync.Result  `json:"folder_status,omitempty"`
+	Name           string              `json:"name"`
+	Remote         string              `json:"remote,omitempty"`
+	Clone          string              `json:"clone,omitempty"`
+	Relay          bool                `json:"relay"`
+	SSHKey         string              `json:"ssh_key,omitempty"`
+	Outcome        string              `json:"outcome"`
+	Attempts       []memsync.Result    `json:"attempts,omitempty"`
+	Error          string              `json:"error,omitempty"`
+	Status         *memsync.Status     `json:"status,omitempty"`
 }
 
 type Result struct {
@@ -84,9 +91,13 @@ func verify(ctx context.Context, p Project) (config.Config, error) {
 }
 
 // Run previews or synchronizes selected routes. Selection is explicit even from
-// an empty folder. Each destination has its own clone and import watermark;
+// an empty folder. Each destination has its own transport receipt;
 // records reach it only through the selected project's lineage export/archive.
 func Run(ctx context.Context, c Catalog, name string, all, dryRun bool) ([]Result, error) {
+	return runSelected(ctx, c, name, all, dryRun, true)
+}
+
+func runSelected(ctx context.Context, c Catalog, name string, all, dryRun, inspectFolders bool) ([]Result, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -99,7 +110,7 @@ func Run(ctx context.Context, c Catalog, name string, all, dryRun bool) ([]Resul
 		if !all && p.Name != name {
 			continue
 		}
-		value, err := runProject(ctx, c, p, dryRun)
+		value, err := runProject(ctx, c, p, dryRun, inspectFolders)
 		results = append(results, value)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("project %s: %w", p.Name, err))
@@ -114,7 +125,7 @@ func Run(ctx context.Context, c Catalog, name string, all, dryRun bool) ([]Resul
 // ReadStatus reads endpoint-scoped attempt history without contacting a remote,
 // creating a clone/archive, registering a project or opening a writable store.
 func ReadStatus(ctx context.Context, c Catalog, name string, all bool) ([]Result, error) {
-	results, previewErr := Run(ctx, c, name, all, true)
+	results, previewErr := runSelected(ctx, c, name, all, true, false)
 	failures := []error{previewErr}
 	for i := range results {
 		r := &results[i]
@@ -130,6 +141,19 @@ func ReadStatus(ctx context.Context, c Catalog, name string, all bool) ([]Result
 		r.Outcome = "status"
 		for j := range r.Destinations {
 			d := &r.Destinations[j]
+			if d.Kind == "folder" {
+				archive := recordsync.Archive{Directory: filepath.Join(config.StateDir(r.Root), "history"), Lineage: r.Lineage}
+				value := foldersync.Result{Endpoint: d.Name, Outcome: "never_run", PeerReceipt: "unknown"}
+				err := archive.Status("folder:"+d.StoreID, &value)
+				if err != nil && !errors.Is(err, os.ErrNotExist) {
+					d.Outcome, d.Error = "error", redact.String(err.Error())
+					failures = append(failures, err)
+					continue
+				}
+				value.Endpoint = d.Name
+				d.FolderStatus, d.Outcome = &value, value.Outcome
+				continue
+			}
 			status, err := memsync.ReadRemoteStatus(ctx, a.DB, a.ProjectID, d.Remote)
 			if err != nil {
 				d.Outcome, d.Error = "error", redact.String(err.Error())
@@ -143,11 +167,14 @@ func ReadStatus(ctx context.Context, c Catalog, name string, all bool) ([]Result
 			}
 		}
 		a.Close()
+		updated, statusErr := finish(*r, "status")
+		*r = updated
+		failures = append(failures, statusErr)
 	}
 	return results, errors.Join(failures...)
 }
 
-func runProject(ctx context.Context, c Catalog, p Project, dryRun bool) (result Result, err error) {
+func runProject(ctx context.Context, c Catalog, p Project, dryRun, inspectFolders bool) (result Result, err error) {
 	result = Result{Project: p, Outcome: "error"}
 	defer func() {
 		if err != nil {
@@ -161,37 +188,28 @@ func runProject(ctx context.Context, c Catalog, p Project, dryRun bool) (result 
 	result.ExistingProjectSync = cfg.Sync.Configured()
 	for _, route := range p.Routes {
 		destination, _ := c.Destination(route.Destination)
-		clone, err := destination.MemoryClone()
+		d := DestinationResult{Name: destination.Name, Kind: destination.Kind, Remote: destination.Remote, Directory: destination.Directory, StoreID: destination.StoreID, SSHKey: destination.SSHKey, Relay: route.Relay, Outcome: "preview"}
+		if destination.Kind == "git" {
+			d.Clone, err = destination.MemoryClone()
+		}
+		if err == nil {
+			err = ValidateStorage(c, destination, cfg, p)
+		}
+		if err == nil && destination.Kind == "folder" && dryRun && inspectFolders {
+			var marker foldersync.Marker
+			marker, err = foldersync.Inspect(d.Directory)
+			if err == nil && marker.StoreID != d.StoreID {
+				err = fmt.Errorf("folder store differs from pinned destination")
+			}
+		}
 		if err != nil {
-			return result, err
+			d.Outcome, d.Error = "unavailable", redact.String(err.Error())
+			err = nil
 		}
-		// A portfolio clone must never be inside any participating code checkout,
-		// store, backup or shared folder (or contain one).
-		protected := []string{config.StateDir(p.Root), cfg.Storage.Database, cfg.Backups.Dir}
-		for _, member := range c.Projects {
-			protected = append(protected, member.Root)
-		}
-		for _, folder := range cfg.Sync.Folders {
-			protected = append(protected, folder.Directory)
-		}
-		for _, other := range c.Destinations {
-			if other.Name == destination.Name {
-				continue
-			}
-			otherClone, err := other.MemoryClone()
-			if err != nil {
-				return result, err
-			}
-			protected = append(protected, otherClone)
-		}
-		if err := separate(clone, protected...); err != nil {
-			return result, fmt.Errorf("portfolio clone overlaps protected project storage: %w", err)
-		}
-		result.Destinations = append(result.Destinations, DestinationResult{Name: destination.Name, Remote: destination.Remote, Clone: clone, SSHKey: destination.SSHKey, Relay: route.Relay, Outcome: "preview"})
+		result.Destinations = append(result.Destinations, d)
 	}
 	if dryRun {
-		result.Outcome = "preview"
-		return result, nil
+		return finish(result, "preview")
 	}
 	// Recheck the binding after opening writable storage and before any remote
 	// operation. No identity is created during preview or configuration.
@@ -227,6 +245,25 @@ func runProject(ctx context.Context, c Catalog, p Project, dryRun bool) (result 
 				d.Outcome, d.Error = "error", err.Error()
 				continue
 			}
+			if d.Kind == "folder" {
+				local, exportErr := portable.EncodeMemoryExport(ctx, a.DB, a.ProjectID)
+				if exportErr == nil {
+					exportErr = archive.CaptureLocal(local.Envelopes)
+				}
+				if exportErr != nil {
+					d.Outcome, d.Error = "error", redact.String(exportErr.Error())
+					continue
+				}
+				attempt, syncErr := (foldersync.Syncer{DB: a.DB, ProjectID: a.ProjectID, Archive: archive, Endpoint: foldersync.Endpoint{Name: d.Name, Directory: d.Directory, StoreID: d.StoreID, LineageID: p.Lineage, Relay: d.Relay}}).Sync(ctx)
+				d.FolderAttempts = append(d.FolderAttempts, attempt)
+				d.Outcome = attempt.Outcome
+				if syncErr != nil {
+					d.Error = redact.String(syncErr.Error())
+				} else if attempt.Outcome != "published_locally" {
+					d.Error = "folder has pending synchronization or semantic import; inspect its receipt"
+				}
+				continue
+			}
 			access := memsync.Access{NoPrompt: true, SSHKey: d.SSHKey}
 			syncer := memsync.Syncer{DB: a.DB, ProjectID: a.ProjectID, Remote: d.Remote, Clone: d.Clone, SSHKey: d.SSHKey, NoPrompt: true, Archive: &archive, Relay: d.Relay}
 			if pass == 0 {
@@ -253,18 +290,79 @@ func runProject(ctx context.Context, c Catalog, p Project, dryRun bool) (result 
 			}
 		}
 	}
+	outcome := "synced"
+	for _, d := range result.Destinations {
+		if d.Kind == "folder" {
+			outcome = "published_locally"
+		}
+	}
+	return finish(result, outcome)
+}
+
+func finish(result Result, outcome string) (Result, error) {
 	var failures []error
 	for _, d := range result.Destinations {
 		if d.Error != "" {
 			failures = append(failures, fmt.Errorf("destination %s: %s", d.Name, d.Error))
 		}
 	}
+	result.Outcome = outcome
 	if len(failures) > 0 {
 		result.Outcome = "partial"
-	} else {
-		result.Outcome = "synced"
 	}
 	return result, errors.Join(failures...)
+}
+
+// ValidateStorage rejects overlap across the catalog and selected project's
+// operational storage, including endpoints used outside portfolio routing.
+// It does not create paths or contact destinations.
+func ValidateStorage(c Catalog, d Destination, cfg config.Config, p Project) error {
+	path := d.Directory
+	if d.Kind == "git" {
+		var err error
+		path, err = d.MemoryClone()
+		if err != nil {
+			return err
+		}
+	}
+	protected := []string{config.StateDir(p.Root), cfg.Storage.Database, cfg.Backups.Dir}
+	if global, err := config.GlobalDir(); err != nil {
+		return err
+	} else {
+		protected = append(protected, global)
+	}
+	for _, member := range c.Projects {
+		protected = append(protected, member.Root)
+	}
+	// The same pinned endpoint can be configured at both project and portfolio
+	// scope. Different endpoints must never share storage.
+	for _, folder := range cfg.Sync.Folders {
+		if d.Kind != "folder" || folder.StoreID != d.StoreID || folder.Directory != d.Directory {
+			protected = append(protected, folder.Directory)
+		}
+	}
+	if cfg.Sync.Remote != "" && (d.Kind != "git" || cfg.Sync.Remote != d.Remote) {
+		clone, err := cfg.Sync.MemoryClone()
+		if err != nil {
+			return err
+		}
+		protected = append(protected, clone)
+	}
+	for _, other := range c.Destinations {
+		if other.Name == d.Name {
+			continue
+		}
+		otherPath := other.Directory
+		if other.Kind == "git" {
+			var err error
+			otherPath, err = other.MemoryClone()
+			if err != nil {
+				return err
+			}
+		}
+		protected = append(protected, otherPath)
+	}
+	return separate(path, protected...)
 }
 
 // resolvePath resolves existing ancestor symlinks without creating a prospective

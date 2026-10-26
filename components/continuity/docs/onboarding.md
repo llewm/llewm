@@ -257,6 +257,10 @@ Personal [global guidance](global-guidance.md), [usage ingestion](usage.md),
 and [History sync](memory-repository.md) are separate choices.
 For independent projects shared with different groups, review
 [portfolio routing](portfolio-history.md) and each destination's access separately.
+A private folder container can aggregate independent project lineages just as a
+Git memory repository can. Group audiences need separate destinations and access
+controls. Verify folder access in the actual IDE/agent launcher; terminal access
+does not establish that a sandboxed client can reach the same path.
 Ordinary onboarding does not activate them. Review each capability's data,
 destination and authorization before enabling it.
 

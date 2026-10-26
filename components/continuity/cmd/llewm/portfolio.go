@@ -2,15 +2,19 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
+	"github.com/llewm/llewm/components/continuity/internal/config"
+	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/portfolio"
 	"github.com/spf13/cobra"
 )
 
 func portfolioCommand() *cobra.Command {
 	parent := &cobra.Command{
-		Use: "portfolio", Short: "Route independent project histories to named memory repositories",
-		Long: "Manage machine-local project routes from any folder. Pin existing project IDs and independent lineages to explicit Git destinations. Configuration does not transfer records; sync is manual. All readers of a destination repository can read every lineage stored there. Relay consent forwards the selected project's retained history, not a private subset.",
+		Use: "portfolio", Short: "Route independent project histories to named Git or folder destinations",
+		Long: "Manage machine-local project routes from any folder. Pin existing project IDs and independent lineages to explicit Git or folder destinations. Configuration does not transfer records; sync is manual. All readers of a destination container or repository can read every lineage stored there. Relay consent forwards the selected project's retained history, not a private subset.",
 	}
 	load := func() (portfolio.Store, portfolio.Catalog, error) {
 		store, err := portfolio.DefaultStore()
@@ -27,15 +31,61 @@ func portfolioCommand() *cobra.Command {
 		}
 		return writeJSON(cmd.OutOrStdout(), catalog)
 	}}
-	destinations := &cobra.Command{Use: "destination", Short: "Configure named Git destinations without contacting them"}
-	var remote, clone, sshKey string
-	addDestination := &cobra.Command{Use: "add NAME", Short: "Name a Git destination; use existing Git authentication", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	destinations := &cobra.Command{Use: "destination", Short: "Configure named Git or folder destinations"}
+	var remote, clone, sshKey, kind, directory, storeID string
+	var create bool
+	addDestination := &cobra.Command{Use: "add NAME", Short: "Name an explicit Git or folder destination", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		store, _, err := load()
 		if err != nil {
 			return err
 		}
 		catalog, err := store.Update(func(c *portfolio.Catalog) error {
-			c.Destinations = append(c.Destinations, portfolio.Destination{Name: args[0], Remote: remote, Clone: clone, SSHKey: sshKey})
+			d := portfolio.Destination{Name: args[0], Kind: kind, Remote: remote, Clone: clone, SSHKey: sshKey, Directory: directory, StoreID: storeID}
+			if kind != "folder" && (create || storeID != "" || directory != "") {
+				return fmt.Errorf("--create, --directory and --store-id require --kind folder")
+			}
+			if kind == "folder" {
+				if create && storeID != "" {
+					return fmt.Errorf("--create does not accept --store-id")
+				}
+				if directory == "" {
+					return fmt.Errorf("--directory is required for folder destinations")
+				}
+				d.Directory, err = filepath.Abs(directory)
+				if err != nil {
+					return err
+				}
+				if create {
+					d.StoreID = strings.Repeat("0", 32)
+				} else if _, err := foldersync.Pin(d.Directory, storeID, false); err != nil {
+					return err
+				}
+			}
+			c.Destinations = append(c.Destinations, d)
+			if err := c.Validate(); err != nil {
+				return err
+			}
+			if kind == "folder" {
+				// Validate all known project storage before marker creation. Configuration
+				// never changes a provider's sharing policy or initializes a project.
+				if err := foldersync.Separate(d.Directory, store.Directory); err != nil {
+					return err
+				}
+				for _, p := range c.Projects {
+					cfg, err := config.Load(p.Root)
+					if err != nil {
+						return err
+					}
+					if err := portfolio.ValidateStorage(*c, d, cfg, p); err != nil {
+						return err
+					}
+				}
+				marker, err := foldersync.Pin(d.Directory, storeID, create)
+				if err != nil {
+					return err
+				}
+				c.Destinations[len(c.Destinations)-1].StoreID = marker.StoreID
+			}
 			return nil
 		})
 		if err != nil {
@@ -43,11 +93,15 @@ func portfolioCommand() *cobra.Command {
 		}
 		return writeJSON(cmd.OutOrStdout(), catalog)
 	}}
-	addDestination.Flags().StringVar(&remote, "remote", "", "exact SSH, HTTP(S), or absolute local Git repository destination (required)")
+	addDestination.Flags().StringVar(&remote, "remote", "", "exact SSH, HTTP(S), or absolute local Git repository destination for --kind git")
 	addDestination.Flags().StringVar(&clone, "clone", "", "absolute existing owned memory clone or separate new clone path; default shared per remote")
 	addDestination.Flags().StringVar(&sshKey, "ssh-key", "", "absolute private-key path used only for this destination; no key contents are stored")
-	_ = addDestination.MarkFlagRequired("remote")
-	removeDestination := &cobra.Command{Use: "remove NAME", Short: "Remove an unused destination; preserve its clone and remote history", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	addDestination.Flags().StringVar(&kind, "kind", "", "git or folder (required)")
+	addDestination.Flags().StringVar(&directory, "directory", "", "existing real folder container directory for --kind folder")
+	addDestination.Flags().StringVar(&storeID, "store-id", "", "exact inspected folder store ID when joining")
+	addDestination.Flags().BoolVar(&create, "create", false, "explicitly create a folder container marker")
+	_ = addDestination.MarkFlagRequired("kind")
+	removeDestination := &cobra.Command{Use: "remove NAME", Short: "Remove an unused destination; preserve its shared files, clone and remote history", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		store, _, err := load()
 		if err != nil {
 			return err
@@ -198,7 +252,11 @@ func portfolioCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), result.Error)
 				}
 				for _, d := range result.Destinations {
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s: %s; relay=%t; %s\n", d.Name, d.Outcome, d.Relay, d.Remote)
+					location := d.Remote
+					if d.Kind == "folder" {
+						location = d.Directory
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s): %s; relay=%t; %s\n", d.Name, d.Kind, d.Outcome, d.Relay, location)
 				}
 			}
 		}
