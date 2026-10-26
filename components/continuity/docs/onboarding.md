@@ -255,6 +255,8 @@ prerequisites still produce a diagnostic error).
 
 Personal [global guidance](global-guidance.md), [usage ingestion](usage.md),
 and [History sync](memory-repository.md) are separate choices.
+For independent projects shared with different groups, review
+[portfolio routing](portfolio-history.md) and each destination's access separately.
 Ordinary onboarding does not activate them. Review each capability's data,
 destination and authorization before enabling it.
 

@@ -27,6 +27,27 @@ import (
 
 const testLineage = "lineage:5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
 
+func TestSyncWatermarkAndStatusAreScopedToDestination(t *testing.T) {
+	ctx := context.Background()
+	m := newMachine(t, "two-destinations", bareRemote(t))
+	m.decide(t, "scoped", "Scoped endpoint watermark")
+	first := m.sync(t, OutcomeSynced)
+	other := m.syncer
+	other.Remote = "/another/independent/destination.git"
+	foreign := Result{Outcome: OutcomeOffline, ImportedHead: "foreign-head", Detail: "Other endpoint unavailable"}
+	if err := other.record(ctx, time.Now().UTC(), &foreign); err != nil {
+		t.Fatal(err)
+	}
+	head, err := m.syncer.importedHead(ctx)
+	if err != nil || head != first.ImportedHead {
+		t.Fatalf("another endpoint's watermark selected: %q vs %q: %v", head, first.ImportedHead, err)
+	}
+	status, err := ReadRemoteStatus(ctx, m.db, m.project, m.syncer.Remote)
+	if err != nil || status.Latest == nil || status.Latest.ID != first.ID || status.OfflineStreak != 0 {
+		t.Fatalf("another endpoint's failure contaminated health: %+v %v", status, err)
+	}
+}
+
 type machine struct {
 	db      *sql.DB
 	project string

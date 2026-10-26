@@ -315,6 +315,14 @@ func (s Syncer) Sync(ctx context.Context) (Result, error) {
 	return s.run(ctx, plan{push: true})
 }
 
+// RecordFailure retains an endpoint setup failure before a sync cycle could
+// start, so destination status does not mistake failed setup for never run.
+func (s Syncer) RecordFailure(ctx context.Context, detail string) (Result, error) {
+	result := Result{Outcome: OutcomeError, Detail: redact.String(detail)}
+	err := s.record(context.WithoutCancel(ctx), s.now(), &result)
+	return result, err
+}
+
 // Session runs the part of a sync a session start waits for: export, commit,
 // fetch, and import, so records from other machines reach the bootstrap. It
 // waits on the remote only within budget and never pushes. OutcomeDeferred asks
@@ -769,7 +777,7 @@ func (s Syncer) importNew(ctx context.Context, repo git, lineageDir, previous st
 
 func (s Syncer) importedHead(ctx context.Context) (string, error) {
 	var head sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT imported_head FROM sync_attempts WHERE project_id=? AND imported_head IS NOT NULL ORDER BY started_at DESC, id DESC LIMIT 1`, s.ProjectID).Scan(&head)
+	err := s.DB.QueryRowContext(ctx, `SELECT imported_head FROM sync_attempts WHERE project_id=? AND remote=? AND imported_head IS NOT NULL ORDER BY started_at DESC, id DESC LIMIT 1`, s.ProjectID, redact.String(s.Remote)).Scan(&head)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -810,8 +818,24 @@ type Status struct {
 // ReadStatus reads the latest attempt, the latest successful one, and how many
 // consecutive attempts since then could not reach the remote.
 func ReadStatus(ctx context.Context, db *sql.DB, projectID string) (Status, error) {
+	return readStatus(ctx, db, projectID, "", false)
+}
+
+// ReadRemoteStatus keeps one destination's health separate from other routes
+// carrying the same project lineage.
+func ReadRemoteStatus(ctx context.Context, db *sql.DB, projectID, remote string) (Status, error) {
+	return readStatus(ctx, db, projectID, remote, true)
+}
+
+func readStatus(ctx context.Context, db *sql.DB, projectID, remote string, scoped bool) (Status, error) {
 	var status Status
-	rows, err := db.QueryContext(ctx, `SELECT id,remote,started_at,finished_at,outcome,exported_records,imported_records,collisions,unpushed_commits,COALESCE(imported_head,''),detail,deferred_records FROM sync_attempts WHERE project_id=? ORDER BY started_at DESC, id DESC LIMIT 64`, projectID)
+	query := `SELECT id,remote,started_at,finished_at,outcome,exported_records,imported_records,collisions,unpushed_commits,COALESCE(imported_head,''),detail,deferred_records FROM sync_attempts WHERE project_id=?`
+	args := []any{projectID}
+	if scoped {
+		query += ` AND remote=?`
+		args = append(args, redact.String(remote))
+	}
+	rows, err := db.QueryContext(ctx, query+` ORDER BY started_at DESC, id DESC LIMIT 64`, args...)
 	if err != nil {
 		return status, err
 	}

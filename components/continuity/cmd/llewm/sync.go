@@ -366,6 +366,9 @@ func enableCrossMachineLeases(application *app.App) {
 
 func projectSyncStatus(ctx context.Context, application *app.App) (historyStatus, error) {
 	base, err := memsync.ReadStatus(ctx, application.DB, application.ProjectID)
+	if application.Config.Sync.Remote != "" {
+		base, err = memsync.ReadRemoteStatus(ctx, application.DB, application.ProjectID, application.Config.Sync.Remote)
+	}
 	value := historyStatus{Status: base, Folders: readFolderStatuses(application)}
 	if err != nil {
 		return value, err

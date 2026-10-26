@@ -77,6 +77,8 @@ fresh-client recovery together.
 
 [Preview distribution](components/continuity/docs/preview-distribution.md) builds
 versioned binaries and matching client packages.
+[Portfolio federation](components/continuity/docs/portfolio-history.md) routes
+independent project histories to a private aggregate and separate developer groups.
 Report ordinary bugs through GitHub or Forgejo issues; include the affected component,
 version and reproduction steps. Review any draft before posting it publicly.
 

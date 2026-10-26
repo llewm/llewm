@@ -70,6 +70,12 @@ continue to prohibit History-sync setup and execution.
 
 ## Hybrid configurations and destination authorization
 
+For a private aggregate holding independent projects and separate group Git
+destinations, use [project-level portfolio federation](portfolio-history.md).
+That manual routing catalog can give one project several Git destinations without
+changing the per-project configuration below. It does not selectively publish
+members of a unified history.
+
 A project can configure one Git memory remote and up to eight named folder
 endpoints on a machine. Other machines may configure a different subset. For
 example: a folder-only desktop, a laptop with that folder and Git, and a Git-only

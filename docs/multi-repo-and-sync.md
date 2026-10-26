@@ -153,6 +153,11 @@ member containing the working directory; at the workspace root, select it with
 
 ## Sync tiers
 
+Independent projects can also use a machine-local
+[portfolio catalog](../components/continuity/docs/portfolio-history.md) for manual
+routing to a private aggregate and separate group Git repositories. Each keeps its
+own lineage; this does not filter members or topics out of a unified project.
+
 Sync is independent of repository topology. Any topology can use any tier.
 
 | Tier | Typical users | Enabled by | Moving parts |

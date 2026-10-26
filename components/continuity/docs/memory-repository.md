@@ -54,6 +54,11 @@ review: when sync authentication, the memory repository layout, or the commit po
 
 ## Ownership
 
+[Portfolio federation](portfolio-history.md) can explicitly route independent
+project lineages to a private aggregate and separate group Git repositories.
+Each managed clone follows this same ownership contract. Git repository readers
+can read every lineage stored there; lineage directories do not enforce access.
+
 - Continuity owns the memory clone and every Git operation in it: export, commit,
   fetch, rebase, import, and push, under a file lock. People and agents do not edit,
   commit to, rebase, reset, or force-push the memory repository or its clones by hand.
