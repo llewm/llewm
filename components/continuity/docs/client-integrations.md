@@ -5,10 +5,17 @@ baseline, use [audit-first onboarding](onboarding.md#start-with-usage-auditing)
 instead; offline collection needs no plugin, MCP server or skills. Existing users
 can follow the [audit-only switching checklist](usage.md#switch-an-existing-setup-to-audit-only).
 
-Install the [Llewm executable](installation.md) on PATH, then run these commands
-from the Git project you want to adopt. `init` initializes project state;
+Install the [Llewm executable](installation.md) on PATH. For requested project
+setup, first [select the topology](onboarding.md#choose-the-project-topology),
+then run these commands from the resolved project/unified workspace root, or each
+selected federated member. `init` initializes project state;
 `install` installs the bundled matching plugin at **user scope** for one client.
 Run installation yourself at a terminal.
+
+For explicitly requested plugin registration before a project exists, preview
+`llewm install --client CLIENT --dry-run`, then run `llewm install --client CLIENT`
+without `init` or `--permissions`. Defer project permissions, bootstrap and recovery
+verification until project setup. Executable-only installation needs no plugin.
 
 ## Codex
 

@@ -19,8 +19,8 @@ components can use sibling directories when implemented.
 
 ## Keep local state out of Git
 
-Exclude the whole project-root `.llewm/` directory **before** `llewm init`, a
-usage baseline, or a trial. It contains machine-local configuration, identities,
+For state inside a Git working tree, exclude the whole project-root `.llewm/`
+directory **before** `llewm init`, a usage baseline, or a trial. It contains machine-local configuration, identities,
 observations, import bundles, receipts and backups. Ignoring only `*.db` or
 `.llewm/continuity/` leaves other local state exposed. Portable knowledge sharing
 uses the supported export or History-sync workflow.
@@ -76,6 +76,14 @@ A linked worktree/submodule uses its owner's store unless it has a local project
 footprint. Legacy state still establishes that scope so it can fail closed rather
 than silently borrowing a different store. Unified/federated workspace manifests
 now live at `.llewm/workspace.toml`.
+
+For a unified workspace whose root is outside Git, there is no Git index or
+effective root ignore file to check. Do not initialize a Git repository to satisfy
+this policy; keep the workspace state private and outside provider replication.
+Federated members still need the normal exclusion checks. The current
+`trial start` Git-protection gate blocks trials at a non-Git unified root;
+`init`/`doctor` may also report unavailable Git checks there. See
+[project topology and current limits](onboarding.md#choose-the-project-topology).
 
 ## Preview a legacy move
 

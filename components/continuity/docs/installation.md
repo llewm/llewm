@@ -5,6 +5,19 @@ For an agent-guided setup and first-session verification, start with
 
 ## Choose the installation scope
 
+**Installation/update only** works from any folder without a Git project. Install
+and verify the executable, or follow [updates](updates.md) using the existing
+installation's provenance. Do not initialize project state or choose trial/adoption
+just to install. Project setup is a later, independent step; see
+[project topology and settings](onboarding.md#choose-the-project-topology).
+
+Choose the actual environment, method and directory. The Linux/macOS and Windows
+user paths below are examples; an existing suitable PATH directory is valid.
+Preserve an existing install's location and package-manager ownership. Source
+builds are the currently documented default; an identified matching preview bundle
+is also supported. Do not assume a public binary release or package-manager
+channel exists. Go is required for a source build, not for running a binary bundle.
+
 For a **usage-audit baseline**, install only the executable and its prerequisites
 using the OS-specific instructions below, then follow
 [audit-first onboarding](onboarding.md#start-with-usage-auditing). Skip full plugin
@@ -282,10 +295,18 @@ or configure its launch environment to include the installation directory.
 Being on `PATH` means available to processes that inherit that path, not every
 account or every already-running process on the machine.
 
-From a Git project directory, verify the installation and initialize local state:
+From any directory, verify executable access without creating project state:
 
 ```sh
 llewm --help
+llewm version --output json
+```
+
+Stop here for installation/update only. For requested project configuration,
+first [select the topology](onboarding.md#choose-the-project-topology), protect
+state wherever it is inside Git, and run from the selected owning root:
+
+```sh
 llewm init
 llewm bootstrap
 llewm work
@@ -345,11 +366,13 @@ verify executable access and local state; they do not verify live hook activatio
 
 When a shell, IDE, or MCP launcher cannot guarantee its working directory, pass
 `--project-root PATH` before the subcommand. The path must exist and may name the
-Git root or any path inside it. For example,
+Git root or a path inside it, a unified workspace root, or a selected federated
+member. A federated group root routes members rather than opening a shared store.
+For example,
 `llewm --project-root /path/to/project mcp` binds that server process to the
 selected project for its lifetime. It does not permit per-call project switching;
 run a separately bound process for another project. Omitting the flag preserves
-current-directory Git-root discovery.
+current-directory project/workspace discovery.
 
 For update checks and agent-led source/binary workflows, see [updates](updates.md).
 Invoke the bundled `update` skill to qualify a requested update using the existing

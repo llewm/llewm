@@ -1,17 +1,42 @@
 ---
 name: onboard
-description: Set up or verify Llewm Continuity for a chosen Git project and coding-agent client, including first-checkpoint recovery. Use for installation, project adoption, or onboarding verification; not for resuming an existing task or changing permissions without user review.
+description: Install or update Llewm independently, then optionally configure a supported project/workspace and coding-agent client, including first-checkpoint recovery. Use for installation, project adoption, or onboarding verification; not for resuming an existing task or changing permissions without user review.
 ---
 
 # Guide Continuity onboarding
 
-Establish the starting path: join existing history, usage-audit baseline, full
-local trial, or ongoing adoption. Infer it from the user's request; ask once if
-it is missing. Do not turn audit-only setup into a trial/adoption or full plugin
-installation.
+Follow `docs/onboarding.md#agent-workflow` from the selected source revision.
+First handle executable installation/update in the actual client environment;
+no project, Git root, adoption choice or project checkpoint is required for an
+installation-only request. Reuse the existing install method, path, pinned source
+and owner; user-directory examples are not required paths. Follow `docs/updates.md`
+for existing installations, including affected-store backups/migrations and active
+client checks. If no project is available, finish installation and leave project
+configuration pending. Do not create a repository or dummy project.
 
-Before creating project state for ANY starting path, follow the canonical Git
-exclusion policy in `docs/project-layout.md#keep-local-state-out-of-git`. From
+Client plugin registration is separate and optional:
+`llewm install --client CLIENT` can run without a project, but `--permissions`
+needs initialized project state. Preview with `--dry-run`; a person runs installation at a terminal. Do not
+require project permissions or recovery checks for executable-only setup.
+
+For requested project configuration, establish topology before initializing:
+read `docs/onboarding.md#choose-the-project-topology` and its repository-topology
+link. Support a single repository/monorepo, owner-resolved worktree/submodule,
+unified workspace or federated member projects. A workspace folder need not be a
+Git repository. Preview membership with `workspace init --mode MODE`; establish
+shared versus independent store ownership before `--write`. Immediate-child
+proposal discovery does not scan recursively or import editor-workspace membership.
+Preserve existing stores; initialization does not merge their history. A plain
+non-Git folder without member repositories is not a supported standalone project.
+
+Explain applicable settings: topology/membership, existing-history join, usage-audit
+baseline/full local trial/adoption, client(s), Git exclusion scope and separate
+optional capabilities. Infer choices already given; ask only for missing choices.
+Do not turn audit-only setup into a trial/adoption or full plugin installation.
+Apply the remaining steps only to the selected project path, not installation-only.
+
+Before creating project state inside a Git working tree for ANY starting path,
+follow the canonical Git exclusion policy in `docs/project-layout.md#keep-local-state-out-of-git`. From
 the confirmed Git root, check `git check-ignore --no-index -q -- .llewm/` and
 `git ls-files -- .llewm`. Require successful whole-directory exclusion and no
 tracked state. If protection is missing, default to adding `/.llewm/` to the root
@@ -23,6 +48,13 @@ Reuse effective existing exclusions. Explain already-tracked state and obtain a
 separate reviewed resolution before proceeding; never automatically untrack,
 delete state, or rewrite history. `init` and `doctor` warnings do not replace this
 onboarding prerequisite.
+
+For a workspace root outside Git, exclusion/index checks are inapplicable; do not
+create Git metadata or claim they passed. Keep state private and out of provider
+replication. `trial start` currently blocks such a unified workspace because it
+requires Git protection; explain this limit and use a selected Git member/demo
+for a trial or deliberately chosen full adoption. `init`/`doctor` may report
+unavailable Git-protection checks. Federated members require the normal checks.
 
 For a new install joining an existing project, choose existing shared-folder
 History sync (`docs/shared-folder-history.md`), LAN bundles (`docs/lan-history.md`),
@@ -116,7 +148,8 @@ skill guides project adoption and live verification; the scoped installer regist
 its bundled plugin through supported client managers. Preserve existing configuration
 and project history. No model or arbitrary execution plan is required.
 
-Establish the intended Git root, execution environment (including WSL or a remote
+Establish the resolved project/workspace root (each selected member for federated
+mode), execution environment (including WSL or a remote
 host), and client from context; ask only for missing choices. Inspect Git state,
 `llewm --help`, `llewm version --output json`, and the selected client's installed
 plugin identity. Do not assume the source checkout is the project to adopt.
@@ -176,6 +209,8 @@ receipt references, not credentials or raw configuration. This lets the `update`
 skill reuse the actual installation path later without repeated discovery. Keep
 other hosts' installation resources distinct.
 
-Finish with the installed version, adopted project, client, checks passed, any
-remaining user action, and the checkpoint reference. Keep native platform or
-client qualifications limited to the versions and environments actually observed.
+Finish with the installed version, configured project(s) if any, client, checks
+passed and remaining user action. Include a checkpoint reference only when project
+trial/adoption recovery belongs to the requested path. If no project exists yet,
+retain an installation receipt outside project state for later resource capture.
+Keep native platform or client qualifications limited to the versions and environments actually observed.

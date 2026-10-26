@@ -5,6 +5,15 @@ guides an authorized agent through acquisition, qualification, backups, explicit
 migrations, plugin refresh and fresh-client verification. There is no unattended
 self-replacing updater or automatic migration from hooks/MCP startup.
 
+Executable-only updates do not require a project in the current folder. Use the
+existing installation's method, path and owner; do not initialize a replacement
+store to qualify an executable. Identify any affected stores or active clients
+from installation receipts and explicit paths. Apply the project backup/migration
+and recovery steps below to those existing stores, even if this workspace has no
+project. With no stores or integrations affected, retain a standalone installation
+receipt and omit project checkpoint/migration/recovery steps. Configure a project
+later through [guided onboarding](onboarding.md#choose-the-project-topology).
+
 ## Source builds available today
 
 Install Git and a Go toolchain matching the target revision's `go.mod`. Use an

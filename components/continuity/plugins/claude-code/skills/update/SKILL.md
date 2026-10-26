@@ -20,8 +20,14 @@ project's Git remote.
 First reuse a current-host installation resource or installer receipt: method,
 source checkout/remote/branch or pinned release, installed executable, affected
 stores, plugin owner and prior checks. Compare `llewm version --output json`,
-actual MCP `continuity_info` and `llewm doctor --output json`. If installation
-provenance is missing, inspect the identified executable/owner and ask for the
+actual MCP `continuity_info` when a client is active, and
+`llewm doctor --output json` for identified existing projects. A project in the current workspace is not
+required for an executable-only update. Do not initialize a store to run update
+checks; identify affected existing stores from receipts and explicit paths. With
+no affected stores or integrations, skip project checkpoint, migration and recovery
+steps and retain a standalone installation receipt. With affected stores/clients,
+keep the shared qualification steps below even when this folder has no project.
+If installation provenance is missing, inspect the identified executable/owner and ask for the
 source location or channel once rather than hunting across disks.
 
 For source builds, run `llewm update check --source-root CHECKOUT --output json`.

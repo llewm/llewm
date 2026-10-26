@@ -1,73 +1,129 @@
 # Guided onboarding
 
-Start here to set up Llewm for one Git project. You can follow the steps yourself
-or ask your coding agent to guide them. The agent checks prerequisites, prepares
-specific changes, and verifies results. Llewm remains a local Go executable with
-no required model or installation service.
+Start here to install or update Llewm, then optionally configure a project.
+Installation does not require a Git project or an adoption decision. Llewm is a
+local Go executable with no required model or installation service.
 
-Before the plugin is installed, paste this request into your coding agent while
-working in the Git project you want to adopt. No Llewm checkout, executable,
-plugin, or Go installation is assumed:
+Paste this request into your coding agent from any folder. No Llewm checkout,
+executable, plugin, or Go installation is assumed:
 
 ```text
-Set up Llewm Continuity for the Git project open in this workspace and the
-coding-agent client running this session.
-My starting path is: [usage-audit baseline / full local trial / full adoption].
-If I have not chosen one, explain these three choices briefly and ask before
-configuring the client. Do not treat usage auditing as permission for adoption.
-
-Canonical source: https://github.com/llewm/llewm
-Start with this onboarding guide:
-https://github.com/llewm/llewm/blob/main/components/continuity/docs/onboarding.md
-Plain-text copy if needed:
-https://raw.githubusercontent.com/llewm/llewm/main/components/continuity/docs/onboarding.md
-
-Read that guide's setup steps, not the rest of the repository. Follow its
-installation.md and client-integrations.md links only for the chosen OS,
-installation method, and client; read other linked sections only when a step
-requires them. Resolve relative links within components/continuity/docs/ at the
-same source revision. Do not search for the product, scan unrelated projects,
-read all documentation, or reconstruct this project's history. If these URLs
-are inaccessible, report the exact failure and ask for the guide or a source
-checkout instead of guessing what Llewm is.
-
-Confirm the target Git root, client, OS/architecture, and whether the client runs
-natively, in WSL, in a container, or on a remote host. Inspect only the relevant
-existing configuration and prerequisites. Ask only for facts you cannot observe.
-Assume Llewm, its plugin, and Go may all be absent. For a source build, use the
-canonical repository above, build from components/continuity/, and obtain the
-required Go version from that revision's go.mod; use https://go.dev/doc/install
-if Go is missing. Keep the Llewm source checkout separate from the target project.
-
-If this install will receive existing Continuity history, follow the guide's
-joining-existing-history workflow (shared-folder, LAN bundle, or Git) before
-starting a trial or creating replacement plans. Receive, inspect, explicitly join
-its lineage, import and verify the
-expected checkpoint first.
-
-Before creating project state, follow the guide's Git exclusion prerequisite.
-Verify that the whole .llewm/ directory is ignored and has no tracked files.
-Default to /.llewm/ in the root .gitignore; use the local Git exclude file for
-personal-only setup. Preserve existing rules, show the change, and do not
-automatically untrack or delete existing state.
-
-Follow only the guide's chosen path. For usage auditing, install the executable
-and collect a baseline without the full plugin, MCP, skills, or an adoption
-checkpoint. For both trial and adoption, import selected project prose into
-source-linked tracks/plans, review the interpretation, show the populated TUI,
-and verify a first checkpoint that a fresh session can recover. Preserve
-original trial docs and defer ongoing adoption. Preserve existing configuration
-and history. Show me the exact permission changes and the commands
-the guide requires me to run myself. Keep optional History sync disabled.
-Distinguish prepared changes, successful shell checks, and behavior
-actually observed in the running client; leave fresh-session recovery pending
-until it is observed when that check belongs to the chosen path.
+Help me install or update Llewm in the environment running this session.
+Follow https://github.com/llewm/llewm/blob/main/components/continuity/docs/onboarding.md
+Read its agent workflow first and follow only the links needed for my setup.
+Complete installation/update separately from project configuration. If I want
+project setup, identify the project topology and explain the supported settings;
+do not assume this workspace folder is a Git repository. Preserve existing
+configuration and history, and report installed versus live-verified results.
 ```
 
-The URL identifies the product and bounds the reading; local prerequisite and
-configuration checks are still necessary. A full documentation or source audit
-is not part of onboarding. For a pinned build, replace `main` in both guide URLs
-with its commit or tag and use that same revision for the source and linked docs.
+## Agent workflow
+
+The canonical source is https://github.com/llewm/llewm. If the guide cannot be
+read through GitHub, use its [plain-text copy](https://raw.githubusercontent.com/llewm/llewm/main/components/continuity/docs/onboarding.md).
+If both fail, report the exact failure and request the guide or an identified
+source checkout; do not guess. For a pinned build, replace `main` in the guide
+URL with its commit or tag. Read linked docs from that same revision, resolving
+relative links within `components/continuity/docs/` unless the link says otherwise.
+Read only the relevant OS, installation method, client and selected project path;
+do not search for the product, scan unrelated projects, read the whole repository,
+or reconstruct project history.
+
+### 1. Install or update independently
+
+Observe the client, OS/architecture, execution environment (native, WSL, container
+or remote host), existing executable/PATH and relevant installation receipts.
+Ask only for facts or choices that cannot be observed. Install in the environment
+that actually runs the client; keep the Llewm source checkout separate from any
+project being configured.
+
+Follow [installation](installation.md) for a new executable and
+[updates](updates.md) for an existing installation. Reuse its actual method,
+location, pinned source/channel and plugin owner. The documented user directories
+are examples, not required locations. A source build needs Git and the Go version
+in the selected revision's `components/continuity/go.mod`; obtain missing Go from
+https://go.dev/doc/install. Use an identified preview bundle when available and
+appropriate; do not invent a public release, package-manager channel or signature.
+An existing package-manager-owned installation must be updated through its owner.
+
+Verify `llewm --help`, `llewm version --output json` and PATH from the client
+launcher. Installation/update alone must not initialize project state, create a
+trial, select adoption, import prose, enable History sync or require a project
+checkpoint. For an update affecting existing stores or active clients, retain the
+backup, compatibility, migration and restart checks in the update guide; absence
+of a project in the current folder does not prove no stores are affected.
+
+The executable and client integration are separate. If explicitly requested,
+preview `llewm install --client CLIENT --dry-run` and have the user run
+`llewm install --client CLIENT` at a terminal. User-scoped plugin registration
+can happen without a project; omit `--permissions` until a project is initialized.
+An audit baseline leaves full plugin/MCP/skills disabled. Preserve unrelated
+settings and distinguish plugin registration, hook trust, permissions and live
+activation. Stop here for installation/update-only requests.
+
+### 2. Select project scope and settings
+
+When project configuration is requested, follow [project selection](#choose-the-project-topology)
+before choosing the [starting path](#choose-a-starting-path). If no project is
+available yet, finish installation and leave project configuration pending;
+do not run `git init`, choose the Llewm source checkout, or create a dummy project.
+A disposable trial demo is a separate explicit choice.
+
+Explain the applicable settings together: repository/workspace membership and
+store ownership; join existing history versus new local history; audit baseline,
+trial or adoption; Codex and/or Claude Code integration; shared versus personal
+Git exclusions; and optional global guidance, usage ingestion and History sync.
+Use existing settings when rerunning setup. Optional capabilities remain disabled
+unless requested. Show exact permission changes and terminal-only commands.
+Follow the chosen path below; an audit baseline does not authorize adoption.
+For trial/adoption, import selected source-linked prose, review the interpretation,
+show the populated TUI and verify exact checkpoint recovery in a fresh session.
+Keep original trial docs and preserve all existing history. Report prepared,
+installed and observed results separately; unobserved fresh-client checks remain
+pending.
+
+## Choose the project topology
+
+An editor workspace and a Llewm project are different scopes. Inspect the selected
+folder and explicitly identified member paths, not unrelated directories. Do not
+infer a shared project from sibling repositories or an editor workspace file.
+
+| Layout | Setup and store ownership |
+| --- | --- |
+| One Git repository, including a monorepo | Initialize its resolved project root; components do not need separate stores. |
+| Linked worktree or submodule | Normally uses the main checkout/superproject store; an existing local project footprint establishes independent scope. Inspect before initializing. |
+| Folder holding several Git repositories, no Git repository at the folder root | Choose one member, a unified workspace (one shared store), or a federated workspace (independent member projects/stores). No `git init` at the folder root is needed. |
+| Empty folder or ordinary non-Git folder without member repositories | Installation/update only until a supported project is selected. An arbitrary non-Git folder is not a standalone Continuity project. |
+
+For multiple repositories, read [repository topology and workspace setup](../../../docs/multi-repo-and-sync.md#repository-topology).
+From the containing folder, preview `llewm workspace init --mode unified` or
+`--mode federated`; inspect membership and existing-store warnings before repeating
+with `--write`. The CLI defaults to unified, but the onboarding agent must establish
+the intended ownership instead of silently accepting that default. Automatic
+proposal discovers only immediate, non-hidden child Git checkouts, not recursive
+or arbitrary editor-workspace folders. Explicit manifest members must be distinct
+relative paths inside the containing folder and may not nest. For unrelated paths
+outside a common supported workspace, configure each repository separately.
+
+With unified mode, run `llewm init` at the workspace root; with federated mode,
+initialize each selected member separately. Run project commands inside the member
+or bind them with `llewm --project-root PATH`. At a federated group root, use
+`workspace show`/`workspace route` rather than opening a shared store. Existing
+member history is not automatically merged by workspace initialization; preserve
+it and use the reviewed topology-change workflow when appropriate. Git-anchored
+commands at a unified root require the member selector (`--repo`, or `repo` over
+MCP); the member containing the working directory supplies the default.
+
+Apply [Git exclusion checks](project-layout.md#keep-local-state-out-of-git) wherever
+state is inside a Git working tree, including federated members. A workspace
+root outside Git has no Git index or effective root `.gitignore`; do not claim
+those checks passed or initialize a repository just to satisfy them. Keep its
+state private and outside file-sync replication. **Current limitation:**
+`trial start` still requires Git exclusion checks and therefore blocks a unified
+workspace trial outside Git. Explain this before trial setup; use a selected
+member/disposable Git demo for a trial, or deliberate full adoption for the
+unified workspace. `init`/`doctor` can also report unavailable Git-protection
+checks at that root. Do not present these diagnostics as live qualification.
 
 For a new machine joining existing project history, use the
 [shared-folder joining workflow](shared-folder-history.md#start-a-folder-endpoint)
@@ -97,8 +153,9 @@ See [leaving Llewm](installation.md#remove-or-disable-an-installation).
 1. Install only the executable using the OS-specific [installation instructions](installation.md).
    A source build needs Git and the Go version declared in `go.mod`; an audit
    baseline does not require the client plugin or MCP server.
-2. First complete the [Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git).
-   From the target Git root, run `llewm init`, then `llewm mode audit-only`.
+2. First complete the [Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git)
+   wherever state is inside a Git working tree.
+   From the selected project root, run `llewm init`, then `llewm mode audit-only`.
    Preserve existing state. This mode does not create
    a trial receipt or record adoption.
 3. For the cleanest baseline, leave all Llewm client integrations disabled and
@@ -131,15 +188,15 @@ explicit choice. Neither path requires maintaining duplicate operational plans.
 
 ## Setup and verification
 
-1. **Choose the project and environment.** Use the Git root of the project to
-   adopt, not automatically the Llewm source checkout. Install separately inside
-   WSL, remote development hosts, and containers that run the client.
+1. **Choose the project and environment.** Complete the independent installation
+   phase and [topology selection](#choose-the-project-topology). Use the resolved
+   project/workspace root, or each federated member, in the correct environment.
 2. **Install the executable.** Follow [installation](installation.md) for source
    builds, persistent PATH, update and removal. [Preview bundles](preview-distribution.md)
    include a matching plugin package. Public remote installation is available
    only after the reviewed source revision is published.
-3. **Protect and initialize local state.** Before creating state, complete the
-   [Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git):
+3. **Protect and initialize local state.** For state inside a Git working tree,
+   complete the [Git exclusion prerequisite](project-layout.md#keep-local-state-out-of-git):
    ensure the entire `.llewm/` directory is ignored and no state is tracked.
    Default to `/.llewm/` in the root `.gitignore`; use Git's local exclude file
    for personal-only adoption. Preserve existing rules and show the diff.

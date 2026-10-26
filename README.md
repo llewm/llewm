@@ -62,7 +62,8 @@ See the
 ## Get started
 
 Start with [guided onboarding](components/continuity/docs/onboarding.md) for an
-agent-assisted audit baseline, full local trial, or adoption. Trial and adoption
+agent-assisted installation/update alone, then optional audit baseline, full local
+trial, or adoption for a repository or multi-repository workspace. Trial and adoption
 include [project-prose import](components/continuity/docs/prose-import.md), a populated
 TUI and verified first checkpoint. Follow [Continuity installation](components/continuity/docs/installation.md) for
 Linux, macOS, Windows, and WSL, then [client integrations](components/continuity/docs/client-integrations.md).
