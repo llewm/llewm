@@ -18,6 +18,9 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 		t.Fatal(err)
 	}
 	source, target := receiver(t, directory, marker.StoreID), receiver(t, directory, marker.StoreID)
+	if err := source.convertV3(ctx); err != nil {
+		t.Fatal(err)
+	}
 	objects := exportCheckpoint(t, source)
 	if err := source.Archive.CaptureLocal(objects); err != nil {
 		t.Fatal(err)
@@ -41,5 +44,52 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 	}
 	if result, err := target.syncBlocks(ctx); err == nil || result.Outcome != "pending" || result.PendingFiles != 1 {
 		t.Fatalf("incomplete inventory accepted: %+v %v", result, err)
+	}
+}
+
+func TestFolderConversionWaitsForAllReplicatedBlocks(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	marker, err := Create(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, target := receiver(t, directory, marker.StoreID), receiver(t, directory, marker.StoreID)
+	objects := exportCheckpoint(t, source)
+	publish(t, directory, objects)
+	if err := target.convertV3(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, object := range objects {
+		if _, err := os.Stat(filepath.Join(directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
+			t.Fatalf("v3 recovery copy missing: %v", err)
+		}
+	}
+	root, err := recordsync.OpenRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, err := recordsync.ScanBlocks(ctx, root, testLineage)
+	root.Close()
+	if err != nil || len(scan.Blocks) != 1 {
+		t.Fatalf("converted blocks: %d %v", len(scan.Blocks), err)
+	}
+	dir, _ := recordsync.BlockDirectory(testLineage)
+	path := filepath.Join(directory, dir, scan.Blocks[0].Hash+".block")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := target.syncBlocks(ctx); err == nil || result.Outcome != "pending" {
+		t.Fatalf("incomplete conversion accepted: %+v %v", result, err)
+	}
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := target.syncBlocks(ctx); err != nil || result.ImportedRecords != len(objects) {
+		t.Fatalf("complete conversion not imported: %+v %v", result, err)
 	}
 }

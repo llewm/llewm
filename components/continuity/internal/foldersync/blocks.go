@@ -53,6 +53,10 @@ func (s Syncer) syncBlocks(ctx context.Context) (result Result, err error) {
 		result.Outcome = "pending"
 		return result, fmt.Errorf("folder block inventory is incomplete or invalid")
 	}
+	if err := verifyConversion(root, marker, s.Archive.Lineage, scan.Blocks); err != nil {
+		result.Outcome = "pending"
+		return result, err
+	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: s.Archive.Lineage}
 	for _, block := range scan.Blocks {
 		for _, object := range block.Objects {
