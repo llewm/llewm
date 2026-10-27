@@ -155,3 +155,10 @@ notes were never written; commits without a narrative show their Git metadata
 only. Use `-n` to limit commits, an optional revision to choose the starting
 commit, and `--repo` to select a workspace member. Git notes are not read by this
 command. Narrative recording and note writing are unchanged.
+
+On a terminal `llewm log` uses `less` when available (and writes directly for
+pipes, dumb terminals, or with `--no-pager`). Use `--author`, `--since`, `--until`,
+and repeatable `--path` to filter; a revision or `A..B` / `A...B` range chooses
+history. `--oneline` gives a compact view; add `--expand` to include narratives.
+`--missing` selects commits without a current narrative, and `-n` limits matching
+commits. The default limit is 20.
