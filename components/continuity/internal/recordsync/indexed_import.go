@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 
@@ -41,13 +40,10 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 		}
 		seen[block.Hash] = true
 	}
+	// Clearing the index here would also discard publication membership for
+	// every endpoint. The transport coordinator must first obtain complete
+	// inventories for those endpoints and rebuild them together.
 	objects, err := s.blockObjects(ctx, blocks)
-	if errors.Is(err, ErrIndexRebuild) {
-		if err := s.Clear(ctx); err != nil {
-			return ImportResult{}, err
-		}
-		objects, err = s.blockObjects(ctx, blocks)
-	}
 	if err != nil {
 		return ImportResult{}, err
 	}

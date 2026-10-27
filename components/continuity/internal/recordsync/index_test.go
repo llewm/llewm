@@ -121,3 +121,32 @@ func TestBlockInventoryRejectsDamagedIdentityAndReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestImportRebuildRequestPreservesPublicationMembership(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "rebuild-publications")
+	object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "record", RecordRevision: 1, RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{object})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	if err := index.AddBlock(ctx, block); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?)`, project, Hash("other endpoint"), block.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='corrupt' WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.ImportBlocks(ctx, []Block{block}); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("expected rebuild request: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=?`, project).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("publication membership changed: %d %v", count, err)
+	}
+}

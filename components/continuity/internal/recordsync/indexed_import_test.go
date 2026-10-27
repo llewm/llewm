@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -177,6 +178,15 @@ func TestBlockImportMatchesFullScan(t *testing.T) {
 		}
 		want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, objects)
 		got, gotErr := index.ImportBlocks(ctx, selected)
+		if round >= 3 {
+			if !errors.Is(gotErr, ErrIndexRebuild) {
+				t.Fatalf("round %d did not request an explicit rebuild: %v", round, gotErr)
+			}
+			if err := index.Clear(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got, gotErr = index.ImportBlocks(ctx, selected)
+		}
 		if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
 			t.Fatalf("round %d: full=%+v %v indexed=%+v %v", round, want, wantErr, got, gotErr)
 		}
