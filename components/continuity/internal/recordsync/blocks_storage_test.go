@@ -28,6 +28,16 @@ func TestBlockPublicationAndIncompleteScan(t *testing.T) {
 	if added, err := PublishBlock(root, lineage, block); err != nil || added {
 		t.Fatalf("replay: added=%v err=%v", added, err)
 	}
+	path, err := blockPath(lineage, block.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read, err := ReadBlock(root, lineage, path); err != nil || !bytes.Equal(read.Bytes, block.Bytes) {
+		t.Fatalf("tracked block read: %v", err)
+	}
+	if _, err := ReadBlock(root, lineage, filepath.Join("wrong", block.Hash+".block")); err == nil {
+		t.Fatal("accepted block in the wrong namespace")
+	}
 	base, err := BlockDirectory(lineage)
 	if err != nil {
 		t.Fatal(err)

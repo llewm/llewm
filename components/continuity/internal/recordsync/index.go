@@ -48,6 +48,15 @@ func (s Index) AddBlock(ctx context.Context, block Block) error {
 	if stale != 0 {
 		return fmt.Errorf("%w: version changed", ErrIndexRebuild)
 	}
+	if err := s.addBlockWithin(ctx, tx, verified); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// addBlockWithin accepts only a block validated by DecodeBlock and lets the
+// caller stage publication intent in the same transaction.
+func (s Index) addBlockWithin(ctx context.Context, tx *sql.Tx, verified Block) error {
 	result, err := tx.ExecContext(ctx, `INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, verified.Hash, IndexVersion)
 	if err != nil {
 		return err
@@ -57,7 +66,7 @@ func (s Index) AddBlock(ctx context.Context, block Block) error {
 		return err
 	}
 	if inserted == 0 {
-		return tx.Commit()
+		return nil
 	}
 	for _, object := range verified.Objects {
 		e := object.Envelope
@@ -70,7 +79,7 @@ func (s Index) AddBlock(ctx context.Context, block Block) error {
 			}
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Clear discards the derived inventory so it can be rebuilt from verified
@@ -81,7 +90,7 @@ func (s Index) Clear(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets"} {
+	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}

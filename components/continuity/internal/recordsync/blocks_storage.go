@@ -25,6 +25,10 @@ func (a Archive) AuthorizedBlocks(ctx context.Context, endpoint string, relay bo
 	if err != nil {
 		return nil, err
 	}
+	return packBlocks(a.Lineage, objects)
+}
+
+func packBlocks(lineage string, objects []portable.EncodedEnvelope) ([]Block, error) {
 	sort.Slice(objects, func(i, j int) bool { return bytes.Compare(objects[i].Bytes, objects[j].Bytes) < 0 })
 	var result []Block
 	for start := 0; start < len(objects); {
@@ -36,7 +40,7 @@ func (a Archive) AuthorizedBlocks(ctx context.Context, endpoint string, relay bo
 		if end == start {
 			return nil, fmt.Errorf("one envelope exceeds block bounds")
 		}
-		block, err := EncodeBlock(a.Lineage, objects[start:end])
+		block, err := EncodeBlock(lineage, objects[start:end])
 		if err != nil {
 			return nil, err
 		}
@@ -77,6 +81,23 @@ func PublishBlock(root *os.Root, lineage string, block Block) (bool, error) {
 		return false, err
 	}
 	return WriteFile(root, path, block.Bytes, false)
+}
+
+// ReadBlock validates one exact content-addressed path. Git callers should
+// pass tracked paths, rather than treating untracked working-tree files as
+// received history.
+func ReadBlock(root *os.Root, lineage, path string) (Block, error) {
+	name := filepath.Base(path)
+	hash := strings.TrimSuffix(name, ".block")
+	expected, err := blockPath(lineage, hash)
+	if err != nil || name != hash+".block" || path != expected {
+		return Block{}, fmt.Errorf("invalid block path")
+	}
+	body, err := ReadFile(root, path, MaxBlockBytes)
+	if err != nil {
+		return Block{}, err
+	}
+	return DecodeBlock(lineage, hash, body)
 }
 
 type BlockScanResult struct {
@@ -128,17 +149,12 @@ func ScanBlocks(ctx context.Context, root *os.Root, lineage string) (BlockScanRe
 				result.Invalid++
 				continue
 			}
-			body, err := ReadFile(root, filepath.Join(base, name), MaxBlockBytes)
+			block, err := ReadBlock(root, lineage, filepath.Join(base, name))
 			if err != nil {
 				result.Pending++
 				continue
 			}
-			block, err := DecodeBlock(lineage, hash, body)
-			if err != nil {
-				result.Pending++
-				continue
-			}
-			totalBytes += len(body) - len(blockHeader)
+			totalBytes += len(block.Bytes) - len(blockHeader)
 			totalRecords += len(block.Objects)
 			if totalBytes > portable.MaxRecordsBytes || totalRecords > portable.MaxRecordCount {
 				return result, fmt.Errorf("block scan records exceed bounds")

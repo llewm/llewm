@@ -37,3 +37,13 @@ CREATE TABLE history_index_valid_sets (
     index_version INTEGER NOT NULL,
     PRIMARY KEY(project_id, set_hash)
 ) STRICT;
+
+-- Local publication intent. Each block is staged in the validated inventory
+-- first; a later sync republishes it if endpoint delivery was interrupted.
+CREATE TABLE history_index_publications (
+    project_id TEXT NOT NULL,
+    endpoint_hash TEXT NOT NULL,
+    block_hash TEXT NOT NULL,
+    PRIMARY KEY(project_id, endpoint_hash, block_hash),
+    FOREIGN KEY(project_id, block_hash) REFERENCES history_index_blocks(project_id, block_hash) ON DELETE CASCADE
+) STRICT;
