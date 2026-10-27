@@ -91,6 +91,10 @@ func TestAuthorizedBlocksRespectRecordOrigins(t *testing.T) {
 			if repeated[i].Hash != blocks[i].Hash || !bytes.Equal(repeated[i].Bytes, blocks[i].Bytes) {
 				t.Fatal("packing the same set changed its blocks")
 			}
+			reference, err := EncodeBlock(lineage, blocks[i].Objects)
+			if err != nil || reference.Hash != blocks[i].Hash || !bytes.Equal(reference.Bytes, blocks[i].Bytes) {
+				t.Fatalf("validated pack differs from reference encoding: %v", err)
+			}
 		}
 		var objects []portable.EncodedEnvelope
 		for _, block := range blocks {

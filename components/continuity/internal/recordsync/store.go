@@ -304,11 +304,21 @@ func (a Archive) Put(e portable.EncodedEnvelope, origin string) (bool, error) {
 	if validated.Envelope.LineageID != a.Lineage {
 		return false, fmt.Errorf("archive lineage mismatch")
 	}
+	return a.putValidated(validated, origin)
+}
+
+// putValidated is used only after the caller has decoded and checked the
+// envelope's exact bytes and lineage, including through DecodeBlock.
+func (a Archive) putValidated(validated portable.EncodedEnvelope, origin string) (bool, error) {
 	root, err := OpenRoot(a.Directory)
 	if err != nil {
 		return false, err
 	}
 	defer root.Close()
+	return putValidatedRoot(root, validated, origin)
+}
+
+func putValidatedRoot(root *os.Root, validated portable.EncodedEnvelope, origin string) (bool, error) {
 	// Record provenance first, so a crash cannot turn a received object into a
 	// locally originated object during the next operational export.
 	marker := filepath.Join("origins", validated.Envelope.EnvelopeSHA256, Hash(origin))

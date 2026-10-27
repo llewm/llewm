@@ -3,6 +3,8 @@ package recordsync
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,25 +27,36 @@ func (a Archive) AuthorizedBlocks(ctx context.Context, endpoint string, relay bo
 	if err != nil {
 		return nil, err
 	}
-	return packBlocks(a.Lineage, objects)
+	return packValidatedBlocks(a.Lineage, objects)
 }
 
-func packBlocks(lineage string, objects []portable.EncodedEnvelope) ([]Block, error) {
+// packValidatedBlocks accepts only envelopes already decoded and checked for
+// canonical bytes and lineage. It avoids decoding the same bytes twice while
+// retaining the same deterministic block representation as EncodeBlock.
+func packValidatedBlocks(lineage string, objects []portable.EncodedEnvelope) ([]Block, error) {
 	sort.Slice(objects, func(i, j int) bool { return bytes.Compare(objects[i].Bytes, objects[j].Bytes) < 0 })
 	var result []Block
 	for start := 0; start < len(objects); {
 		end, size := start, len(blockHeader)
 		for end < len(objects) && end-start < MaxBlockRecords && size+len(objects[end].Bytes)+1 <= MaxBlockBytes {
+			if objects[end].Envelope.LineageID != lineage || (end > 0 && bytes.Equal(objects[end-1].Bytes, objects[end].Bytes)) {
+				return nil, fmt.Errorf("invalid or duplicate validated envelope")
+			}
 			size += len(objects[end].Bytes) + 1
 			end++
 		}
 		if end == start {
 			return nil, fmt.Errorf("one envelope exceeds block bounds")
 		}
-		block, err := EncodeBlock(lineage, objects[start:end])
-		if err != nil {
-			return nil, err
+		var body bytes.Buffer
+		body.Grow(size)
+		body.WriteString(blockHeader)
+		for _, object := range objects[start:end] {
+			body.Write(object.Bytes)
+			body.WriteByte('\n')
 		}
+		sum := sha256.Sum256(body.Bytes())
+		block := Block{Hash: hex.EncodeToString(sum[:]), Bytes: body.Bytes(), Objects: append([]portable.EncodedEnvelope(nil), objects[start:end]...)}
 		result = append(result, block)
 		start = end
 	}
@@ -64,7 +77,7 @@ func ConvertV3Snapshot(lineage string, scan ScanResult) ([]Block, error) {
 	objects := append([]portable.EncodedEnvelope(nil), scan.Objects...)
 	seen := make(map[string]bool, len(objects))
 	total := 0
-	for _, object := range objects {
+	for i, object := range objects {
 		validated, err := portable.DecodeTransportEnvelope(object.Bytes)
 		if err != nil || validated.Envelope.LineageID != lineage {
 			return nil, fmt.Errorf("v3 conversion found an invalid envelope")
@@ -73,12 +86,13 @@ func ConvertV3Snapshot(lineage string, scan ScanResult) ([]Block, error) {
 			return nil, fmt.Errorf("v3 conversion found a duplicate envelope")
 		}
 		seen[validated.Envelope.EnvelopeSHA256] = true
+		objects[i] = validated
 		total += len(validated.Bytes)
 		if total > portable.MaxRecordsBytes {
 			return nil, fmt.Errorf("v3 conversion exceeds byte limit")
 		}
 	}
-	return packBlocks(lineage, objects)
+	return packValidatedBlocks(lineage, objects)
 }
 
 // BlockDirectory is the experimental block namespace. It does not replace
@@ -140,6 +154,17 @@ type BlockScanResult struct {
 // ScanBlocks reads only complete, validated blocks in the selected lineage.
 // Partial files and provider conflict copies are reported, never imported.
 func ScanBlocks(ctx context.Context, root *os.Root, lineage string) (BlockScanResult, error) {
+	return scanBlocks(ctx, root, lineage, func(path string) (Block, error) { return ReadBlock(root, lineage, path) })
+}
+
+// ScanIndexedBlocks uses a validated disposable inventory for repeated reads.
+// Index corruption is surfaced to the coordinator; incomplete files remain
+// pending and never become imported observations.
+func (s Index) ScanBlocks(ctx context.Context, root *os.Root) (BlockScanResult, error) {
+	return scanBlocks(ctx, root, s.Lineage, func(path string) (Block, error) { return s.ReadBlock(ctx, root, path) })
+}
+
+func scanBlocks(ctx context.Context, root *os.Root, lineage string, read func(string) (Block, error)) (BlockScanResult, error) {
 	var result BlockScanResult
 	base, err := BlockDirectory(lineage)
 	if err != nil {
@@ -180,8 +205,11 @@ func ScanBlocks(ctx context.Context, root *os.Root, lineage string) (BlockScanRe
 				result.Invalid++
 				continue
 			}
-			block, err := ReadBlock(root, lineage, filepath.Join(base, name))
+			block, err := read(filepath.Join(base, name))
 			if err != nil {
+				if errors.Is(err, ErrIndexRebuild) {
+					return result, err
+				}
 				result.Pending++
 				continue
 			}

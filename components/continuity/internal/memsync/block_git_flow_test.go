@@ -81,7 +81,7 @@ func TestExperimentalBlockFlowThroughGit(t *testing.T) {
 				root.Close()
 				t.Fatal(err)
 			}
-			if err := index.ObservePublication(ctx, archive, endpoint, block); err != nil {
+			if _, err := index.ObservePublication(ctx, archive, endpoint, block); err != nil {
 				root.Close()
 				t.Fatal(err)
 			}

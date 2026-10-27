@@ -12,46 +12,57 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
 
-// ObservePublication records destination provenance before indexing a received
-// block. Replaying verified destination blocks also rebuilds a lost catalog.
-func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint string, block Block) error {
+// ObservePublication validates the derived inventory, records each envelope's
+// destination provenance, and then records publication membership. Inventory
+// rows are not semantic import receipts; callers import only after this succeeds.
+func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint string, block Block) (int, error) {
 	if endpoint == "" || archive.Lineage != s.Lineage {
-		return fmt.Errorf("publication endpoint and matching lineage are required")
+		return 0, fmt.Errorf("publication endpoint and matching lineage are required")
 	}
-	verified, err := DecodeBlock(s.Lineage, block.Hash, block.Bytes)
-	if err != nil || block.Hash == "" {
-		return fmt.Errorf("invalid observed block")
+	if err := validateBlockBytes(block); err != nil || block.Hash == "" {
+		return 0, fmt.Errorf("invalid observed block")
+	}
+	objects, err := s.blockObjects(ctx, []Block{block})
+	if err != nil {
+		return 0, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
-		return err
+		return 0, err
 	}
 	var stale int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND index_version<>?`, s.ProjectID, IndexVersion).Scan(&stale); err != nil {
-		return err
+		return 0, err
 	}
 	if stale != 0 {
-		return fmt.Errorf("%w: version changed", ErrIndexRebuild)
+		return 0, fmt.Errorf("%w: version changed", ErrIndexRebuild)
 	}
-	for _, object := range verified.Objects {
+	root, err := OpenRoot(archive.Directory)
+	if err != nil {
+		return 0, err
+	}
+	defer root.Close()
+	addedCount := 0
+	for _, object := range objects {
 		if err := ctx.Err(); err != nil {
-			return err
+			return addedCount, err
 		}
-		if _, err := archive.Put(object, endpoint); err != nil {
-			return err
+		added, err := putValidatedRoot(root, object, endpoint)
+		if err != nil {
+			return addedCount, err
+		}
+		if added {
+			addedCount++
 		}
 	}
-	if err := s.addBlockWithin(ctx, tx, verified); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, Hash(endpoint), block.Hash); err != nil {
+		return addedCount, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, Hash(endpoint), verified.Hash); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return addedCount, tx.Commit()
 }
 
 // PlanPublication stages immutable publication intent before returning blocks
@@ -184,7 +195,7 @@ func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint st
 			missing = append(missing, object)
 		}
 	}
-	newBlocks, err := packBlocks(s.Lineage, missing)
+	newBlocks, err := packValidatedBlocks(s.Lineage, missing)
 	if err != nil {
 		return nil, err
 	}

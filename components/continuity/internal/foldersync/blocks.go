@@ -43,7 +43,8 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 	if identity == nil || identity.LineageID != s.Endpoint.LineageID {
 		return result, fmt.Errorf("folder route differs from selected project's lineage")
 	}
-	scan, err := recordsync.ScanBlocks(ctx, root, s.Archive.Lineage)
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: s.Archive.Lineage}
+	scan, err := index.ScanBlocks(ctx, root)
 	if err != nil {
 		return result, err
 	}
@@ -56,18 +57,10 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 		result.Outcome = "pending"
 		return result, err
 	}
-	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: s.Archive.Lineage}
 	for _, block := range scan.Blocks {
-		for _, object := range block.Objects {
-			added, err := s.Archive.Put(object, s.Endpoint.ID())
-			if err != nil {
-				return result, err
-			}
-			if added {
-				result.ObservedRecords++
-			}
-		}
-		if err := index.ObservePublication(ctx, s.Archive, s.Endpoint.ID(), block); err != nil {
+		added, err := index.ObservePublication(ctx, s.Archive, s.Endpoint.ID(), block)
+		result.ObservedRecords += added
+		if err != nil {
 			return result, err
 		}
 	}

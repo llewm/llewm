@@ -54,7 +54,7 @@ func TestBlockFlowAcrossTwoPeers(t *testing.T) {
 			t.Fatalf("scan: %+v %v", scan, err)
 		}
 		for _, block := range scan.Blocks {
-			if err := index.ObservePublication(ctx, archive, endpoint, block); err != nil {
+			if _, err := index.ObservePublication(ctx, archive, endpoint, block); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -57,12 +57,13 @@ func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]
 	}
 	defer root.Close()
 	var blocks []recordsync.Block
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
 	count, total := 0, 0
 	for _, path := range strings.Fields(listing) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		block, err := recordsync.ReadBlock(root, lineage, filepath.FromSlash(path))
+		block, err := index.ReadBlock(ctx, root, filepath.FromSlash(path))
 		if err != nil {
 			return nil, fmt.Errorf("invalid tracked history block: %w", err)
 		}
@@ -167,7 +168,7 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
 	for _, block := range blocks {
-		if err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
+		if _, err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
 			return recordsync.ImportResult{}, err
 		}
 	}
@@ -207,7 +208,7 @@ func (s Syncer) convertTrackedV3(ctx context.Context, repo git, identity portabl
 	}
 	defer root.Close()
 	for _, block := range blocks {
-		if err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
+		if _, err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
 			return 0, err
 		}
 		if _, err := recordsync.PublishBlock(root, identity.LineageID, block); err != nil {

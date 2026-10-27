@@ -140,7 +140,7 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, block := range scan.Blocks {
-		if err := index.ObservePublication(ctx, archive, endpoint, block); err != nil {
+		if _, err := index.ObservePublication(ctx, archive, endpoint, block); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -219,7 +219,7 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	if err := index.Clear(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := index.ObservePublication(ctx, archive, "folder:destination", blocks[0]); err != nil {
+	if _, err := index.ObservePublication(ctx, archive, "folder:destination", blocks[0]); err != nil {
 		t.Fatal(err)
 	}
 	if restored, err := index.PlanPublication(ctx, archive, "folder:destination", false); err != nil || len(restored) != 1 || restored[0].Hash != blocks[0].Hash {

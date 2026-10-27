@@ -74,7 +74,7 @@ func (s Syncer) Convert(ctx context.Context) error {
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: s.Endpoint.LineageID}
 	manifest := conversionManifest{Format: "llewm-folder-block-conversion", Version: 1, StoreID: marker.StoreID, Lineage: s.Endpoint.LineageID, Blocks: []string{}}
 	for _, block := range blocks {
-		if err := index.ObservePublication(ctx, s.Archive, s.Endpoint.ID(), block); err != nil {
+		if _, err := index.ObservePublication(ctx, s.Archive, s.Endpoint.ID(), block); err != nil {
 			return err
 		}
 		live, liveErr := Inspect(s.Endpoint.Directory)

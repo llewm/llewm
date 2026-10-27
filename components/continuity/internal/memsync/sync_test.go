@@ -55,7 +55,7 @@ type machine struct {
 	syncer  Syncer
 }
 
-func newMachine(t *testing.T, name, remote string) machine {
+func newMachine(t testing.TB, name, remote string) machine {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -78,14 +78,14 @@ func newMachine(t *testing.T, name, remote string) machine {
 	return machine{db: db, project: projectID, syncer: Syncer{DB: db, ProjectID: projectID, Remote: remote, Clone: clone}}
 }
 
-func (m machine) decide(t *testing.T, id, title string) {
+func (m machine) decide(t testing.TB, id, title string) {
 	t.Helper()
 	if _, err := (decision.Service{DB: m.db}).Append(context.Background(), decision.Record{ProjectID: m.project, ID: id, Title: title, Rationale: "Because " + title, Disposition: "accepted", Actor: "owner", ActorType: "human", Authority: "caller_asserted"}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (m machine) sync(t *testing.T, want string) Result {
+func (m machine) sync(t testing.TB, want string) Result {
 	t.Helper()
 	result, err := m.syncer.Sync(context.Background())
 	if err != nil || result.Outcome != want {
@@ -112,7 +112,7 @@ func (m machine) decisions(t *testing.T) string {
 	return strings.Join(ids, ",")
 }
 
-func bareRemote(t *testing.T) string {
+func bareRemote(t testing.TB) string {
 	t.Helper()
 	// No global identity: memory commits must still work.
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)

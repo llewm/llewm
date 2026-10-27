@@ -7,10 +7,50 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
+
+// ReadBlock uses the disposable inventory only when it reconstructs the exact
+// hash-bound bytes. A cache miss is fully decoded by AddBlock; a damaged cache
+// returns ErrIndexRebuild rather than trusting its contents.
+func (s Index) ReadBlock(ctx context.Context, root *os.Root, path string) (Block, error) {
+	name := filepath.Base(path)
+	hash := strings.TrimSuffix(name, ".block")
+	expected, err := blockPath(s.Lineage, hash)
+	if err != nil || name != hash+".block" || path != expected {
+		return Block{}, fmt.Errorf("invalid block path")
+	}
+	body, err := ReadFile(root, path, MaxBlockBytes)
+	if err != nil {
+		return Block{}, err
+	}
+	block := Block{Hash: hash, Bytes: body}
+	if err := validateBlockBytes(block); err != nil {
+		return Block{}, err
+	}
+	objects, err := s.blockObjects(ctx, []Block{block})
+	if err != nil {
+		return Block{}, err
+	}
+	block.Objects = objects
+	return block, nil
+}
+
+func validateBlockBytes(block Block) error {
+	if len(block.Bytes) > MaxBlockBytes || len(block.Bytes) <= len(blockHeader) || !bytes.HasPrefix(block.Bytes, []byte(blockHeader)) {
+		return fmt.Errorf("invalid history block")
+	}
+	sum := sha256.Sum256(block.Bytes)
+	if block.Hash != hex.EncodeToString(sum[:]) {
+		return fmt.Errorf("history block hash mismatch")
+	}
+	return nil
+}
 
 // ImportBlocks is the experimental block-backed import path. It deliberately
 // runs the existing semantic importer over the complete supplied block set;
@@ -24,12 +64,8 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 	seen := make(map[string]bool, len(blocks))
 	total := 0
 	for _, block := range blocks {
-		if len(block.Bytes) > MaxBlockBytes || len(block.Bytes) <= len(blockHeader) || !bytes.HasPrefix(block.Bytes, []byte(blockHeader)) {
-			return ImportResult{}, fmt.Errorf("invalid history block")
-		}
-		sum := sha256.Sum256(block.Bytes)
-		if block.Hash != hex.EncodeToString(sum[:]) {
-			return ImportResult{}, fmt.Errorf("history block hash mismatch")
+		if err := validateBlockBytes(block); err != nil {
+			return ImportResult{}, err
 		}
 		if seen[block.Hash] {
 			return ImportResult{}, fmt.Errorf("duplicate block")

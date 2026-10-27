@@ -151,6 +151,42 @@ func TestImportRebuildRequestPreservesPublicationMembership(t *testing.T) {
 	}
 }
 
+func TestIndexedReadRejectsDamagedInventory(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "indexed-read")
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{fixture(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if _, err := PublishBlock(root, lineage, block); err != nil {
+		t.Fatal(err)
+	}
+	path, err := blockPath(lineage, block.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	for i := 0; i < 2; i++ {
+		read, err := index.ReadBlock(ctx, root, path)
+		if err != nil || len(read.Objects) != 1 || read.Hash != block.Hash {
+			t.Fatalf("indexed read %d: %+v %v", i, read, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='wrong' WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.ReadBlock(ctx, root, path); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("damaged inventory accepted: %v", err)
+	}
+	if _, err := index.ScanBlocks(ctx, root); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("scan hid damaged inventory: %v", err)
+	}
+}
+
 func TestRebuildRestoresEndpointMembershipAtomically(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "rebuild-endpoints")
 	object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "record", RecordRevision: 1, RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
