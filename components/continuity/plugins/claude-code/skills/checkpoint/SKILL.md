@@ -59,6 +59,9 @@ is missing, ask for it instead of inventing a task.
   this client to finish the task. Supply the observed `session_id`; Continuity
   scopes the marker to this client and local instance. A later checkpoint clears
   it unless explicitly marked again. Do not mark ordinary handoffs.
+  Mark offline maintenance handoffs that require closing this client, running a
+  terminal procedure, and reopening it to verify the result, even when the
+  maintenance script runs before the client is reopened.
 - `predecessor_checkpoint_id`: required once the task has checkpoints: the exact
   current tip you continued (the bootstrap's checkpoint ID for that task). Omit it
   only for a new task. A save that names a stale tip is refused because another
