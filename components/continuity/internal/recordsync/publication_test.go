@@ -245,8 +245,11 @@ func TestStaleOtherEndpointDoesNotBlockPublication(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=? AND block_hash=?`, project, blocks[0].Hash); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); !errors.Is(err, ErrIndexRebuild) {
-		t.Fatalf("stale destination accepted: %v", err)
+	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); err != nil {
+		t.Fatalf("reconstructable stale destination did not recover: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=? AND block_hash=?`, project, blocks[0].Hash); err != nil {
+		t.Fatal(err)
 	}
 	// A different destination containing different authorized records can
 	// progress, while the stale endpoint remains explicitly recoverable.

@@ -1,6 +1,7 @@
 package recordsync
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -125,6 +126,87 @@ func (s Index) RepairBlock(ctx context.Context, block Block) error {
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_narrative_tip WHERE project_id=?`, s.ProjectID); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+// RepairStored reconstructs every indexed block from its stored canonical
+// envelopes, validates its content hash, then atomically replaces only derived
+// record/reference rows. Endpoint memberships remain untouched. If any block
+// cannot be reconstructed, nothing is changed and its transport copy is needed.
+func (s Index) RepairStored(ctx context.Context) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT b.block_hash,r.envelope_json FROM history_index_blocks b LEFT JOIN history_index_records r ON r.project_id=b.project_id AND r.block_hash=b.block_hash WHERE b.project_id=? ORDER BY b.block_hash,r.envelope_json`, s.ProjectID)
+	if err != nil {
+		return err
+	}
+	type candidate struct {
+		hash string
+		body bytes.Buffer
+	}
+	var candidates []candidate
+	count, size := 0, 0
+	for rows.Next() {
+		var hash string
+		var body sql.NullString
+		if err := rows.Scan(&hash, &body); err != nil {
+			rows.Close()
+			return err
+		}
+		if !body.Valid {
+			rows.Close()
+			return fmt.Errorf("%w: block %s needs its transport copy", ErrIndexRebuild, hash)
+		}
+		count++
+		size += len(body.String) + 1
+		if count > portable.MaxRecordCount || size > portable.MaxRecordsBytes {
+			rows.Close()
+			return fmt.Errorf("%w: stored inventory exceeds bounds", ErrIndexRebuild)
+		}
+		if len(candidates) == 0 || candidates[len(candidates)-1].hash != hash {
+			candidates = append(candidates, candidate{hash: hash})
+			candidates[len(candidates)-1].body.WriteString(blockHeader)
+		}
+		entry := &candidates[len(candidates)-1]
+		if entry.body.Len()+len(body.String)+1 > MaxBlockBytes {
+			rows.Close()
+			return fmt.Errorf("%w: block %s exceeds bounds", ErrIndexRebuild, hash)
+		}
+		entry.body.WriteString(body.String)
+		entry.body.WriteByte('\n')
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	verified := make([]Block, 0, len(candidates))
+	for _, candidate := range candidates {
+		block, err := DecodeBlock(s.Lineage, candidate.hash, candidate.body.Bytes())
+		if err != nil {
+			return fmt.Errorf("%w: block %s needs its transport copy", ErrIndexRebuild, candidate.hash)
+		}
+		verified = append(verified, block)
+	}
+	for _, table := range []string{"history_index_refs", "history_index_records", "history_index_valid_sets", "history_index_narrative_tip"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=? WHERE project_id=?`, IndexVersion, s.ProjectID); err != nil {
+		return err
+	}
+	for _, block := range verified {
+		if err := s.insertBlockObjects(ctx, tx, block); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

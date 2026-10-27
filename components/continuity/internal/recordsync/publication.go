@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
@@ -23,6 +24,12 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 		return 0, fmt.Errorf("invalid observed block")
 	}
 	objects, err := s.blockObjects(ctx, []Block{block})
+	if errors.Is(err, ErrIndexRebuild) {
+		if repairErr := s.RepairBlock(ctx, block); repairErr != nil {
+			return 0, repairErr
+		}
+		objects, err = s.blockObjects(ctx, []Block{block})
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -72,6 +79,17 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 // verified destination blocks before planning additions. An incomplete or
 // invalid destination scan must be retried before rebuilding its catalog.
 func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, error) {
+	blocks, err := s.planPublication(ctx, archive, endpoint, relay)
+	if !errors.Is(err, ErrIndexRebuild) {
+		return blocks, err
+	}
+	if repairErr := s.RepairStored(ctx); repairErr != nil {
+		return nil, repairErr
+	}
+	return s.planPublication(ctx, archive, endpoint, relay)
+}
+
+func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, error) {
 	if endpoint == "" || archive.Lineage != s.Lineage {
 		return nil, fmt.Errorf("publication endpoint and matching lineage are required")
 	}

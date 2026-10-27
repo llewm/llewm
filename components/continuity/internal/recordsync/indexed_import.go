@@ -87,6 +87,14 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 	// every endpoint. The transport coordinator must first obtain complete
 	// inventories for those endpoints and rebuild them together.
 	objects, err := s.blockObjects(ctx, blocks)
+	if errors.Is(err, ErrIndexRebuild) {
+		for _, block := range blocks {
+			if repairErr := s.RepairBlock(ctx, block); repairErr != nil {
+				return ImportResult{}, repairErr
+			}
+		}
+		objects, err = s.blockObjects(ctx, blocks)
+	}
 	if err != nil {
 		return ImportResult{}, err
 	}

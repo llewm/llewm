@@ -142,8 +142,11 @@ func TestImportRebuildRequestPreservesPublicationMembership(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='corrupt' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.ImportBlocks(ctx, []Block{block}); !errors.Is(err, ErrIndexRebuild) {
-		t.Fatalf("expected rebuild request: %v", err)
+	if _, err := index.ImportBlocks(ctx, []Block{block}); errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("validated block did not repair its inventory: %v", err)
+	}
+	if _, err := index.blockObjects(ctx, []Block{block}); err != nil {
+		t.Fatalf("inventory remains damaged: %v", err)
 	}
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=?`, project).Scan(&count); err != nil || count != 1 {
@@ -220,6 +223,49 @@ func TestRepairBlockPreservesOtherEndpointMembership(t *testing.T) {
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, project, block.Hash).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("lost endpoint membership: %d %v", count, err)
+	}
+}
+
+func TestRepairStoredIsAtomicAndPreservesMembership(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "repair-stored")
+	first, err := EncodeBlock(lineage, []portable.EncodedEnvelope{fixture(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondObject, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "second", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := EncodeBlock(lineage, []portable.EncodedEnvelope{secondObject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {first}, "git:b": {second}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, project, second.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.RepairStored(ctx); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("incomplete inventory accepted: %v", err)
+	}
+	var stale int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND index_version=0`, project).Scan(&stale); err != nil || stale != 2 {
+		t.Fatalf("partial repair committed: %d %v", stale, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json=? WHERE project_id=? AND block_hash=?`, string(secondObject.Bytes), project, second.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.RepairStored(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var members int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=?`, project).Scan(&members); err != nil || members != 2 {
+		t.Fatalf("repair changed endpoint memberships: %d %v", members, err)
 	}
 }
 
