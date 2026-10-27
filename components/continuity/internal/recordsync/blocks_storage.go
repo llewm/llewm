@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -98,7 +97,7 @@ func ConvertV3Snapshot(lineage string, scan ScanResult) ([]Block, error) {
 // BlockDirectory is the experimental block namespace. It does not replace
 // the current record-per-file transport until both transports are qualified.
 func BlockDirectory(lineage string) (string, error) {
-	if !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(lineage) {
+	if !lineagePattern.MatchString(lineage) {
 		return "", fmt.Errorf("invalid block lineage")
 	}
 	return filepath.Join("v4", strings.TrimPrefix(lineage, "lineage:"), "blocks"), nil

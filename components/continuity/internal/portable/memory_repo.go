@@ -236,6 +236,8 @@ func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string
 	return applied.Plan, applied.Receipt, err
 }
 
+var transportRecordTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
 // DecodeTransportEnvelope verifies current wire-format integrity without claiming
 // to understand an unknown record schema. Such objects may be retained/relayed
 // under explicit endpoint authorization, but ordinary semantic readers remain strict.
@@ -250,7 +252,7 @@ func DecodeTransportEnvelope(body []byte) (EncodedEnvelope, error) {
 	if err := decoder.Decode(&e); err != nil {
 		return EncodedEnvelope{}, err
 	}
-	if !regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`).MatchString(e.RecordType) || e.RecordSchemaVersion < 1 {
+	if !transportRecordTypePattern.MatchString(e.RecordType) || e.RecordSchemaVersion < 1 {
 		return EncodedEnvelope{}, fmt.Errorf("invalid transport record type/schema")
 	}
 	if err := validateEnvelopeStructure(e, e.LineageID, "llewm-portable-record", PortableFormatVersion, false); err != nil {

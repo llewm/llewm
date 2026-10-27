@@ -26,6 +26,8 @@ const MaxObjectBytes = portable.MaxPayloadBytes + portable.MaxIndexBytes + (64 <
 const MaxScanEntries = portable.MaxRecordCount * 5
 
 var hex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var lineagePattern = regexp.MustCompile(`^lineage:[0-9a-f]{32}$`)
+var recordTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 func Hash(value string) string {
 	sum := sha256.Sum256([]byte(value))
@@ -188,7 +190,7 @@ type ScanResult struct {
 // No mtime or shared cursor is used. The caller decides whether a scan is usable.
 func Scan(ctx context.Context, root *os.Root, lineage string) (ScanResult, error) {
 	var result ScanResult
-	if !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(lineage) {
+	if !lineagePattern.MatchString(lineage) {
 		return result, fmt.Errorf("invalid scan lineage")
 	}
 	base := portable.MemoryLineageDir(lineage)
@@ -231,7 +233,7 @@ func Scan(ctx context.Context, root *os.Root, lineage string) (ScanResult, error
 				}
 				child := filepath.Join(path, name)
 				if depth < 2 {
-					valid := regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`).MatchString(name)
+					valid := recordTypePattern.MatchString(name)
 					if depth == 1 {
 						valid = hex64.MatchString(name)
 					}
@@ -282,7 +284,7 @@ type Archive struct {
 
 func OpenArchive(directory, lineage string) (Archive, error) {
 	// Only a local archive is created automatically. Endpoint roots never are.
-	if !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(lineage) {
+	if !lineagePattern.MatchString(lineage) {
 		return Archive{}, fmt.Errorf("invalid archive lineage")
 	}
 	if err := os.MkdirAll(directory, 0700); err != nil {
