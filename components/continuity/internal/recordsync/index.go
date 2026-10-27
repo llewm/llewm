@@ -3,14 +3,20 @@ package recordsync
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
 
 // IndexVersion identifies the derived inventory schema and interpretation.
-// Change it whenever record or reference indexing semantics change.
+// Change it whenever block validation, semantic validation, or record and
+// reference indexing semantics change.
 const IndexVersion = 1
+
+// ErrIndexRebuild means the derived inventory cannot be trusted and must be
+// reconstructed from validated transport blocks.
+var ErrIndexRebuild = errors.New("history index rebuild required")
 
 // Index is a disposable inventory of validated block contents. It does not
 // record whether any envelope was semantically imported.
@@ -40,7 +46,7 @@ func (s Index) AddBlock(ctx context.Context, block Block) error {
 		return err
 	}
 	if stale != 0 {
-		return fmt.Errorf("history index version changed; rebuild required")
+		return fmt.Errorf("%w: version changed", ErrIndexRebuild)
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, verified.Hash, IndexVersion)
 	if err != nil {
@@ -75,7 +81,7 @@ func (s Index) Clear(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"history_index_refs", "history_index_records", "history_index_blocks"} {
+	for _, table := range []string{"history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
@@ -100,7 +106,7 @@ func (s Index) lookup(ctx context.Context, query string, args ...any) ([]portabl
 		return nil, err
 	}
 	if stale != 0 {
-		return nil, fmt.Errorf("history index version changed; rebuild required")
+		return nil, fmt.Errorf("%w: version changed", ErrIndexRebuild)
 	}
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -115,7 +121,7 @@ func (s Index) lookup(ctx context.Context, query string, args ...any) ([]portabl
 		}
 		object, err := portable.DecodeTransportEnvelope([]byte(body))
 		if err != nil || object.Envelope.LineageID != s.Lineage {
-			return nil, fmt.Errorf("history index entry invalid; rebuild required")
+			return nil, fmt.Errorf("%w: invalid entry", ErrIndexRebuild)
 		}
 		result = append(result, object)
 	}

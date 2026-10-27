@@ -263,7 +263,10 @@ func newestHead(heads []fork.ObservedHead) int {
 }
 
 // supersessionForkRefs names the project's open supersession forks.
-func supersessionForkRefs(ctx context.Context, db *sql.DB, projectID string) (map[string]bool, error) {
+func supersessionForkRefs(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, projectID string) (map[string]bool, error) {
 	forks, err := fork.SupersessionForks(ctx, db, projectID, "")
 	if err != nil {
 		return nil, err

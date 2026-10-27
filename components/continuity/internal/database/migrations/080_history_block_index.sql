@@ -28,3 +28,12 @@ CREATE TABLE history_index_refs (
     FOREIGN KEY(project_id, block_hash, envelope_hash) REFERENCES history_index_records(project_id, block_hash, envelope_hash) ON DELETE CASCADE
 ) STRICT;
 CREATE INDEX history_index_dependents ON history_index_refs(project_id, ref_kind, ref_id);
+
+-- Proof that the exact set passed semantic validation at this index version.
+-- It is not an import receipt and must be rechecked against local records.
+CREATE TABLE history_index_valid_sets (
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    set_hash TEXT NOT NULL,
+    index_version INTEGER NOT NULL,
+    PRIMARY KEY(project_id, set_hash)
+) STRICT;

@@ -3,6 +3,7 @@ package memsync
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/procedures"
+	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
@@ -109,6 +111,63 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	}
 	fresh := newMachine(t, "fresh", remote)
 	fresh.sync(t, OutcomeSynced)
+	// Replay the recovered history into two empty projects and compare the
+	// block-backed importer with the current full scan.
+	listing, err := repo.run(ctx, "ls-files", "--", portable.MemoryLineageDir(testLineage))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootHandle, err := recordsync.OpenRoot(a.syncer.Clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var objects []portable.EncodedEnvelope
+	var blocks []recordsync.Block
+	for _, path := range strings.Fields(listing) {
+		object, err := recordsync.ReadObject(rootHandle, filepath.FromSlash(path), testLineage)
+		if err != nil {
+			rootHandle.Close()
+			t.Fatal(err)
+		}
+		block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{object})
+		if err != nil {
+			rootHandle.Close()
+			t.Fatal(err)
+		}
+		objects = append(objects, object)
+		blocks = append(blocks, block)
+	}
+	rootHandle.Close()
+	reference := localHistoryMachine(t, "recovery-reference")
+	indexed := localHistoryMachine(t, "recovery-indexed")
+	want, wantErr := (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
+	got, gotErr := (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, blocks)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("recovery import differs: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
+	}
+	wantExport, err := portable.EncodeMemoryExport(ctx, reference.db, reference.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotExport, err := portable.EncodeMemoryExport(ctx, indexed.db, indexed.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRecords, gotRecords := map[string][]byte{}, map[string][]byte{}
+	for _, object := range wantExport.Envelopes {
+		wantRecords[object.Envelope.EnvelopeSHA256] = object.Bytes
+	}
+	for _, object := range gotExport.Envelopes {
+		gotRecords[object.Envelope.EnvelopeSHA256] = object.Bytes
+	}
+	if len(wantRecords) != len(gotRecords) {
+		t.Fatalf("recovery record counts differ: %d %d", len(wantRecords), len(gotRecords))
+	}
+	for hash, body := range wantRecords {
+		if !bytes.Equal(body, gotRecords[hash]) {
+			t.Fatalf("recovery record %s differs", hash)
+		}
+	}
 	for _, m := range []machine{a, b, fresh} {
 		procedure, err := (procedures.Service{DB: m.db}).Get(ctx, m.project, "exact", 1)
 		if err != nil || procedure.Steps[0].ArgvTemplate[1] != text {
