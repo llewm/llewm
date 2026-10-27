@@ -58,7 +58,11 @@ func folderCycle(t *testing.T, m machine, archive recordsync.Archive, endpoint f
 	if err := archive.CaptureLocal(local.Envelopes); err != nil {
 		t.Fatal(err)
 	}
-	result, err := (foldersync.Syncer{DB: m.db, ProjectID: m.project, Archive: archive, Endpoint: endpoint}).Sync(ctx)
+	syncer := foldersync.Syncer{DB: m.db, ProjectID: m.project, Archive: archive, Endpoint: endpoint}
+	if err := syncer.Convert(ctx); err != nil {
+		t.Fatal(err)
+	}
+	result, err := syncer.Sync(ctx)
 	if err != nil {
 		t.Fatalf("folder cycle: %+v %v", result, err)
 	}
@@ -182,11 +186,32 @@ func TestHybridThreeMachinesConvergeWithExplicitDestinationRelays(t *testing.T) 
 	}
 	// Removing a shared object never deletes local history; an intact archive
 	// restores it without changing the original record bytes.
-	removed := filepath.Join(shared, portable.MemoryRecordPath(expected[0].Envelope))
+	root, err := recordsync.OpenRoot(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, err := recordsync.ScanBlocks(ctx, root, testLineage)
+	root.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blockHash string
+	for _, block := range scan.Blocks {
+		for _, object := range block.Objects {
+			if object.Envelope.EnvelopeSHA256 == expected[0].Envelope.EnvelopeSHA256 {
+				blockHash = block.Hash
+			}
+		}
+	}
+	if blockHash == "" {
+		t.Fatal("expected observation not found in shared blocks")
+	}
+	dir, _ := recordsync.BlockDirectory(testLineage)
+	removed := filepath.Join(shared, dir, blockHash+".block")
 	if err := os.Remove(removed); err != nil {
 		t.Fatal(err)
 	}
-	if result := folderCycle(t, a, aa, endpoint); result.PublishedRecords != 1 {
+	if result := folderCycle(t, a, aa, endpoint); result.PublishedRecords < 1 {
 		t.Fatalf("retained record was not republished: %+v", result)
 	}
 }
@@ -294,6 +319,10 @@ func TestHybridRetainsAndRelaysHistoryBeforeMissingDependencyArrives(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	endpoint := foldersync.Endpoint{Name: "partial", Directory: shared, StoreID: marker.StoreID, LineageID: testLineage}
+	if err := (foldersync.Syncer{DB: bridge.db, ProjectID: bridge.project, Archive: ba, Endpoint: endpoint}).Convert(ctx); err != nil {
+		t.Fatal(err)
+	}
 	root, err := recordsync.OpenRoot(shared)
 	if err != nil {
 		t.Fatal(err)
@@ -307,10 +336,13 @@ func TestHybridRetainsAndRelaysHistoryBeforeMissingDependencyArrives(t *testing.
 	if len(action.Bytes) == 0 {
 		t.Fatal("missing action fixture")
 	}
-	if _, err := recordsync.WriteFile(root, portable.MemoryRecordPath(action.Envelope), portable.MemoryFileBytes(action), false); err != nil {
+	actionBlock, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{action})
+	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := foldersync.Endpoint{Name: "partial", Directory: shared, StoreID: marker.StoreID, LineageID: testLineage}
+	if _, err := recordsync.PublishBlock(root, testLineage, actionBlock); err != nil {
+		t.Fatal(err)
+	}
 	if result, err := (foldersync.Syncer{DB: bridge.db, ProjectID: bridge.project, Archive: ba, Endpoint: endpoint}).Sync(ctx); err == nil || result.Outcome != "pending" {
 		t.Fatal("dependency was not pending")
 	}
@@ -325,7 +357,11 @@ func TestHybridRetainsAndRelaysHistoryBeforeMissingDependencyArrives(t *testing.
 		t.Fatal("receiver lost unapplied opaque transport observation")
 	}
 	for _, e := range exported.Envelopes {
-		if _, err := recordsync.WriteFile(root, portable.MemoryRecordPath(e.Envelope), portable.MemoryFileBytes(e), false); err != nil {
+		block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{e})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
 			t.Fatal(err)
 		}
 	}

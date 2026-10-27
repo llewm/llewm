@@ -143,6 +143,16 @@ Use `--enable=false` to stop future forwarding to one destination.
 
 ## Sync and inspect results
 
+Before the first format-4 sync of an existing route, stop all older writers,
+verify backups, and explicitly convert each project/destination pair. A folder
+conversion prepares an immutable manifest; a Git conversion fetches and pushes
+the converted history. For example:
+
+```sh
+llewm portfolio convert a private --writers-stopped
+llewm portfolio convert a alpha --writers-stopped
+```
+
 ```sh
 llewm portfolio sync a --output json
 llewm portfolio sync --all --output json

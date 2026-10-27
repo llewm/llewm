@@ -18,17 +18,17 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 		t.Fatal(err)
 	}
 	source, target := receiver(t, directory, marker.StoreID), receiver(t, directory, marker.StoreID)
-	if err := source.convertV3(ctx); err != nil {
+	if err := source.Convert(ctx); err != nil {
 		t.Fatal(err)
 	}
 	objects := exportCheckpoint(t, source)
 	if err := source.Archive.CaptureLocal(objects); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := source.syncBlocks(ctx); err != nil || result.PublishedRecords != len(objects) {
+	if result, err := source.Sync(ctx); err != nil || result.PublishedRecords != len(objects) {
 		t.Fatalf("source publication: %+v %v", result, err)
 	}
-	if result, err := target.syncBlocks(ctx); err != nil || result.ImportedRecords != len(objects) {
+	if result, err := target.Sync(ctx); err != nil || result.ImportedRecords != len(objects) {
 		t.Fatalf("target import: %+v %v", result, err)
 	}
 	export, err := portable.EncodeMemoryExport(ctx, target.DB, target.ProjectID)
@@ -42,7 +42,7 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 	if err := os.WriteFile(filepath.Join(directory, base, recordsync.Hash("partial")+".block"), []byte("partial"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := target.syncBlocks(ctx); err == nil || result.Outcome != "pending" || result.PendingFiles != 1 {
+	if result, err := target.Sync(ctx); err == nil || result.Outcome != "pending" || result.PendingFiles != 1 {
 		t.Fatalf("incomplete inventory accepted: %+v %v", result, err)
 	}
 }
@@ -56,8 +56,8 @@ func TestFolderConversionWaitsForAllReplicatedBlocks(t *testing.T) {
 	}
 	source, target := receiver(t, directory, marker.StoreID), receiver(t, directory, marker.StoreID)
 	objects := exportCheckpoint(t, source)
-	publish(t, directory, objects)
-	if err := target.convertV3(ctx); err != nil {
+	publishV3(t, directory, objects)
+	if err := target.Convert(ctx); err != nil {
 		t.Fatal(err)
 	}
 	for _, object := range objects {
@@ -83,13 +83,13 @@ func TestFolderConversionWaitsForAllReplicatedBlocks(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := target.syncBlocks(ctx); err == nil || result.Outcome != "pending" {
+	if result, err := target.Sync(ctx); err == nil || result.Outcome != "pending" {
 		t.Fatalf("incomplete conversion accepted: %+v %v", result, err)
 	}
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := target.syncBlocks(ctx); err != nil || result.ImportedRecords != len(objects) {
+	if result, err := target.Sync(ctx); err != nil || result.ImportedRecords != len(objects) {
 		t.Fatalf("complete conversion not imported: %+v %v", result, err)
 	}
 }

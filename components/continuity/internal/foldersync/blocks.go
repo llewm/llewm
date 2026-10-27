@@ -10,10 +10,9 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
-// syncBlocks performs one v4 folder cycle. The caller must capture local
-// records into Archive before invoking it, and perform explicit v3 conversion
-// before switching a live endpoint to this path.
-func (s Syncer) syncBlocks(ctx context.Context) (result Result, err error) {
+// Sync performs one v4 folder cycle. The caller captures local records into
+// Archive first and explicitly converts each lineage before its first sync.
+func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 	result = Result{Endpoint: s.Endpoint.Name, Outcome: "error", At: time.Now().UTC(), PeerReceipt: "unknown"}
 	defer func() {
 		if err != nil {

@@ -90,6 +90,79 @@ func verify(ctx context.Context, p Project) (config.Config, error) {
 	return config.Load(p.Root)
 }
 
+// ConvertRoute explicitly converts one pinned project/destination route.
+// The caller must stop all older writers before invoking this operation.
+func ConvertRoute(ctx context.Context, c Catalog, projectName, destinationName string) error {
+	var selected *Project
+	for i := range c.Projects {
+		if c.Projects[i].Name == projectName {
+			selected = &c.Projects[i]
+			break
+		}
+	}
+	if selected == nil {
+		return fmt.Errorf("portfolio project not found")
+	}
+	var route *Route
+	for i := range selected.Routes {
+		if selected.Routes[i].Destination == destinationName {
+			route = &selected.Routes[i]
+			break
+		}
+	}
+	destination, ok := c.Destination(destinationName)
+	if route == nil || !ok {
+		return fmt.Errorf("portfolio route not found")
+	}
+	cfg, err := verify(ctx, *selected)
+	if err != nil {
+		return err
+	}
+	if err := ValidateStorage(c, destination, cfg, *selected); err != nil {
+		return err
+	}
+	a, err := app.Open(ctx, selected.Root)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	identity, err := a.Portable.Get(ctx, a.ProjectID)
+	if err != nil || identity == nil || identity.LineageID != selected.Lineage || a.ProjectID != selected.ProjectID {
+		return fmt.Errorf("project binding changed before conversion")
+	}
+	archive, err := recordsync.OpenArchive(filepath.Join(config.StateDir(selected.Root), "history"), selected.Lineage)
+	if err != nil {
+		return err
+	}
+	if destination.Kind == "folder" {
+		endpoint := foldersync.Endpoint{Name: destination.Name, Directory: destination.Directory, StoreID: destination.StoreID, LineageID: selected.Lineage, Relay: route.Relay}
+		return (foldersync.Syncer{DB: a.DB, ProjectID: a.ProjectID, Archive: archive, Endpoint: endpoint}).Convert(ctx)
+	}
+	if destination.Kind != "git" {
+		return fmt.Errorf("unsupported portfolio destination")
+	}
+	clone, err := destination.MemoryClone()
+	if err != nil {
+		return err
+	}
+	access := memsync.Access{NoPrompt: true, SSHKey: destination.SSHKey}
+	setupCtx, cancel := context.WithTimeout(ctx, memsync.NetworkTimeout)
+	err = memsync.Init(setupCtx, destination.Remote, clone, access, memsync.Setup{})
+	cancel()
+	if err != nil {
+		return err
+	}
+	syncer := memsync.Syncer{DB: a.DB, ProjectID: a.ProjectID, Remote: destination.Remote, Clone: clone, SSHKey: destination.SSHKey, NoPrompt: true, Archive: &archive, Relay: route.Relay}
+	result, err := syncer.Convert(ctx)
+	if err != nil {
+		return err
+	}
+	if result.Outcome != memsync.OutcomeSynced || result.UnpushedCommits != 0 {
+		return fmt.Errorf("portfolio conversion did not sync: %s", result.Detail)
+	}
+	return nil
+}
+
 // Run previews or synchronizes selected routes. Selection is explicit even from
 // an empty folder. Each destination has its own transport receipt;
 // records reach it only through the selected project's lineage export/archive.

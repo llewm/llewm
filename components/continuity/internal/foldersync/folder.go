@@ -3,7 +3,6 @@
 package foldersync
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,9 +12,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
-	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
 const MarkerFile = ".llewm-history.json"
@@ -119,103 +116,6 @@ type Syncer struct {
 	ProjectID string
 	Archive   recordsync.Archive
 	Endpoint  Endpoint
-}
-
-func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
-	result = Result{Endpoint: s.Endpoint.Name, Outcome: "error", At: time.Now().UTC(), PeerReceipt: "unknown"}
-	defer func() {
-		if err != nil {
-			result.Detail = redact.String(err.Error())
-		}
-		if saveErr := s.Archive.SaveStatus(s.Endpoint.ID(), result); err == nil && saveErr != nil {
-			err = saveErr
-		}
-	}()
-	root, err := recordsync.OpenRoot(s.Endpoint.Directory)
-	if err != nil {
-		result.Outcome = "unavailable"
-		return result, err
-	}
-	defer root.Close()
-	marker, err := readMarker(root)
-	if err != nil {
-		result.Outcome = "unavailable"
-		return result, err
-	}
-	if marker.StoreID != s.Endpoint.StoreID || s.Endpoint.LineageID != s.Archive.Lineage || !regexp.MustCompile(`^lineage:[0-9a-f]{32}$`).MatchString(s.Endpoint.LineageID) {
-		return result, fmt.Errorf("folder identity/lineage differs from explicit configuration")
-	}
-	identity, err := (portable.Service{DB: s.DB}).Get(ctx, s.ProjectID)
-	if err != nil {
-		return result, err
-	}
-	if identity == nil || identity.LineageID != s.Endpoint.LineageID {
-		return result, fmt.Errorf("folder route differs from selected project's lineage")
-	}
-	// Read first, retaining every structurally verified envelope before semantic
-	// import. A corrupt peer file never replaces a locally verified archive copy.
-	scan, err := recordsync.Scan(ctx, root, s.Archive.Lineage)
-	if err != nil {
-		return result, err
-	}
-	result.PendingFiles, result.InvalidFiles = scan.Pending, scan.Invalid
-	for _, e := range scan.Objects {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		added, err := s.Archive.Put(e, s.Endpoint.ID())
-		if err != nil {
-			return result, err
-		}
-		if added {
-			result.ObservedRecords++
-		}
-	}
-	// Publish retained local/same-endpoint history, or all authorized relay
-	// objects. Deletion by the external tool never becomes semantic deletion.
-	outgoing, err := s.Archive.Objects(ctx, s.Endpoint.ID(), s.Endpoint.Relay)
-	if err != nil {
-		return result, err
-	}
-	for _, e := range outgoing {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		// Recheck the marker between publication steps. Never recreate a missing
-		// folder/marker or silently accept a replacement mount at the same pathname.
-		live, liveErr := Inspect(s.Endpoint.Directory)
-		if liveErr != nil || live != marker {
-			return result, fmt.Errorf("configured folder path became unavailable or changed")
-		}
-		current, err := readMarker(root)
-		if err != nil || current != marker {
-			return result, fmt.Errorf("folder marker became unavailable or changed")
-		}
-		added, err := recordsync.WriteFile(root, portable.MemoryRecordPath(e.Envelope), portable.MemoryFileBytes(e), false)
-		if err != nil {
-			return result, err
-		}
-		if added {
-			result.PublishedRecords++
-		}
-	}
-	// Import from the durable archive, including records that arrived before a
-	// missing dependency or before this device supported their schema.
-	all, err := s.Archive.Objects(ctx, "", true)
-	if err != nil {
-		return result, err
-	}
-	result.ImportResult, err = (recordsync.Importer{DB: s.DB, ProjectID: s.ProjectID}).Import(ctx, all)
-	if err != nil {
-		result.Outcome = "pending"
-		return result, err
-	}
-	result.Outcome = "published_locally"
-	result.Detail = "validated locally; external delivery and peer receipt are unconfirmed"
-	if result.PendingFiles+result.InvalidFiles+result.DeferredRecords+result.Collisions > 0 {
-		result.Outcome = "pending"
-	}
-	return result, nil
 }
 
 // Separate refuses overlap with any protected local tree (database/state,

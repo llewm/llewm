@@ -389,6 +389,11 @@ func TestMixedPortfolioContainerGroupsRecoveryAndRelay(t *testing.T) {
 			t.Fatal("preview/status created archive")
 		}
 	}
+	for _, pair := range [][2]string{{"a", "private"}, {"b", "private"}, {"b", "beta"}} {
+		if err := ConvertRoute(ctx, c, pair[0], pair[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	run(t, c)
 	pa, pb := source(t, "alpha-peer", a.Lineage), source(t, "beta-peer", b.Lineage)
 	ca := filepath.Join(t.TempDir(), "clone")
@@ -470,6 +475,9 @@ func TestPortfolioFolderFailuresRemainIndependentAndRetained(t *testing.T) {
 	p.Routes = []Route{{"bad", false}, {"good", false}}
 	c := Catalog{Version: 1, Destinations: []Destination{bad, good}, Projects: []Project{p}}
 	decide(t, p, "survives-folder-failure")
+	if err := ConvertRoute(context.Background(), c, "p", "good"); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Rename(bad.Directory, bad.Directory+"-offline"); err != nil {
 		t.Fatal(err)
 	}

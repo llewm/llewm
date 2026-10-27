@@ -265,6 +265,22 @@ func portfolioCommand() *cobra.Command {
 	sync.Flags().BoolVar(&all, "all", false, "explicitly select every pinned project")
 	sync.Flags().BoolVar(&dryRun, "dry-run", false, "validate local project pins and preview routes; no archive, clone, network or writable database")
 	sync.Flags().StringVar(&output, "output", "text", "text or json")
+	var writersStopped bool
+	convert := &cobra.Command{Use: "convert PROJECT DESTINATION", Short: "Convert one pinned route to history blocks", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		if !writersStopped {
+			return fmt.Errorf("conversion requires --writers-stopped after stopping all old writers")
+		}
+		_, catalog, err := load()
+		if err != nil {
+			return err
+		}
+		if err := portfolio.ConvertRoute(cmd.Context(), catalog, args[0], args[1]); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Route conversion prepared; verify destination receipts and peer recovery.")
+		return err
+	}}
+	convert.Flags().BoolVar(&writersStopped, "writers-stopped", false, "confirm all older sync writers are stopped")
 	var statusAll bool
 	status := &cobra.Command{Use: "status [PROJECT]", Short: "Read per-destination sync attempts without contacting a remote", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		_, catalog, err := load()
@@ -282,6 +298,6 @@ func portfolioCommand() *cobra.Command {
 		return readErr
 	}}
 	status.Flags().BoolVar(&statusAll, "all", false, "explicitly select every pinned project")
-	parent.AddCommand(show, destinations, projects, relay, sync, status)
+	parent.AddCommand(show, destinations, projects, relay, sync, convert, status)
 	return parent
 }

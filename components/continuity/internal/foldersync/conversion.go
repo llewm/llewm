@@ -32,11 +32,11 @@ func manifestPath(lineage string) (string, error) {
 	return filepath.Join(filepath.Dir(dir), "conversion.json"), nil
 }
 
-// convertV3 prepares a folder lineage while old writers are stopped. V3 files
+// Convert prepares a folder lineage while old writers are stopped. V3 files
 // are retained as a dormant recovery copy: an external replicator may deliver
 // files and deletions in arbitrary order. The caller must explicitly coordinate
 // all old writers and verify backups before any live conversion.
-func (s Syncer) convertV3(ctx context.Context) error {
+func (s Syncer) Convert(ctx context.Context) error {
 	root, err := recordsync.OpenRoot(s.Endpoint.Directory)
 	if err != nil {
 		return err
@@ -55,7 +55,11 @@ func (s Syncer) convertV3(ctx context.Context) error {
 		return err
 	}
 	if _, err := root.Lstat(path); err == nil {
-		return fmt.Errorf("folder lineage already has a conversion manifest")
+		scan, err := recordsync.ScanBlocks(ctx, root, s.Endpoint.LineageID)
+		if err != nil || scan.Pending+scan.Invalid != 0 {
+			return fmt.Errorf("existing folder conversion inventory is incomplete or invalid")
+		}
+		return verifyConversion(root, marker, s.Endpoint.LineageID, scan.Blocks)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

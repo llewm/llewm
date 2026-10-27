@@ -27,6 +27,7 @@ llewm sync status
 llewm sync folder add personal \
   --directory /private/synced/llewm-history \
   --create --confirm-lineage LINEAGE
+llewm sync folder convert personal --writers-stopped
 llewm sync --output json
 ```
 
@@ -42,8 +43,11 @@ each project with its own `--confirm-lineage` and the same `--store-id`.
 Each operation scans and publishes only its selected lineage. All readers of the
 container can nevertheless read every lineage in it, so use separate containers
 and provider access controls for separate audiences. Include the marker and the complete
-`v3/` subtree in external replication; do not filter out its hidden marker.
-Setup does not itself import or publish record objects; `sync` and subsequent
+`v4/` subtree in external replication; do not filter out its hidden marker.
+After stopping every old writer and verifying backups, the explicit conversion
+prepares the selected lineage and its immutable conversion manifest. Existing
+v3 files remain as a recovery copy; the v4 sync path does not import new v3
+files after conversion. `sync` and subsequent
 automatic triggers perform those operations.
 
 On another machine, first let the external application deliver the marker, then:
@@ -142,9 +146,11 @@ lease fencing still requires the separately configured Git coordination feature.
 
 ## Publication, ingestion, and status
 
-The same content-addressed current-format objects used by Git are stored under
-`v3/<lineage>/records/<type>/<identity-hash>/<envelope-hash>.json`. No provider
-mtime, mutable shared manifest, global cursor, distributed lock, or arrival order
+The same content-addressed blocks used by Git are stored under
+`v4/<lineage>/blocks/<block-hash>.block`. An immutable conversion manifest names
+the blocks required to complete the v3 conversion. A receiver waits until every
+named block is present and valid. No provider mtime, mutable shared manifest,
+global cursor, distributed lock, or arrival order
 is authoritative. Local publication stages/syncs bytes and uses exclusive
 no-replace hard-link publication; filesystems that cannot provide the operation
 report failure rather than falling back to overwrite. A provider's replication
@@ -197,6 +203,8 @@ when those observations must survive disk loss.
   Filesystem deletion is never semantic deletion. If every durable copy is lost,
   the transport cannot recover the data. Deliberate history erasure/retention
   changes require a separate reviewed workflow.
+- A missing block named by the conversion manifest leaves sync pending; restore
+  that exact block from the provider or a verified backup before continuing.
 - Corrupt existing object: preserve the valid local copy and report the problem;
   never silently overwrite the provider's file or choose a conflict-copy winner.
 - Directory visibility, offline hydration, provider versioning, sharing settings

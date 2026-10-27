@@ -25,6 +25,10 @@ func TestSharedFolderCLIJoinsExistingHistoryWithoutGit(t *testing.T) {
 	if endpoint.StoreID == "" || endpoint.Relay {
 		t.Fatalf("unexpected folder config: %+v", endpoint)
 	}
+	if err, _ := runCLIError("sync", "folder", "convert", "personal"); err == nil || !strings.Contains(err.Error(), "--writers-stopped") {
+		t.Fatalf("conversion did not require writer confirmation: %v", err)
+	}
+	runCLI(t, "", "sync", "folder", "convert", "personal", "--writers-stopped")
 	var result historyResult
 	decodeCLI(t, runCLI(t, "", "sync", "--output", "json"), &result)
 	if result.Git != nil || len(result.Folders) != 1 || result.Folders[0].PeerReceipt != "unknown" || result.Folders[0].PublishedRecords == 0 {

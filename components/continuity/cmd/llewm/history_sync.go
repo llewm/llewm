@@ -218,7 +218,38 @@ func syncFolderCommand() *cobra.Command {
 			return err
 		})
 	}}
-	parent.AddCommand(add, inspect, remove)
+	var stopped bool
+	convert := &cobra.Command{Use: "convert NAME", Short: "Convert a folder lineage to history blocks", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if !stopped {
+			return fmt.Errorf("folder conversion requires --writers-stopped after stopping all old writers")
+		}
+		return withApp(cmd, func(application *app.App) error {
+			for _, endpoint := range application.Config.Sync.Folders {
+				if endpoint.Name != args[0] {
+					continue
+				}
+				clone, err := application.Config.Sync.MemoryClone()
+				if err != nil {
+					return err
+				}
+				if err := foldersync.Separate(endpoint.Directory, config.StateDir(application.Root), application.Config.Storage.Database, application.Config.Backups.Dir, filepath.Join(application.Root, ".git"), clone); err != nil {
+					return err
+				}
+				archive, err := projectArchive(application)
+				if err != nil {
+					return err
+				}
+				if err := (foldersync.Syncer{DB: application.DB, ProjectID: application.ProjectID, Archive: archive, Endpoint: endpoint}).Convert(cmd.Context()); err != nil {
+					return err
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), "Folder conversion prepared; external delivery and peer receipt remain unconfirmed.")
+				return err
+			}
+			return fmt.Errorf("folder endpoint not found")
+		})
+	}}
+	convert.Flags().BoolVar(&stopped, "writers-stopped", false, "confirm all older sync writers are stopped")
+	parent.AddCommand(add, inspect, remove, convert)
 	return parent
 }
 

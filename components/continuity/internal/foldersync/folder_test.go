@@ -63,7 +63,25 @@ func publish(t *testing.T, directory string, objects []portable.EncodedEnvelope)
 	}
 	defer root.Close()
 	for _, e := range objects {
-		if _, err := recordsync.WriteFile(root, portable.MemoryRecordPath(e.Envelope), portable.MemoryFileBytes(e), false); err != nil {
+		block, err := recordsync.EncodeBlock(e.Envelope.LineageID, []portable.EncodedEnvelope{e})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := recordsync.PublishBlock(root, e.Envelope.LineageID, block); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func publishV3(t *testing.T, directory string, objects []portable.EncodedEnvelope) {
+	t.Helper()
+	root, err := recordsync.OpenRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	for _, object := range objects {
+		if _, err := recordsync.WriteFile(root, portable.MemoryRecordPath(object.Envelope), portable.MemoryFileBytes(object), false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,6 +93,9 @@ func TestOutOfOrderDependenciesAreRetainedAndRetriedTransactionally(t *testing.T
 		t.Fatal(err)
 	}
 	source, target := receiver(t, t.TempDir(), marker.StoreID), receiver(t, directory, marker.StoreID)
+	if err := target.Convert(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	all := exportCheckpoint(t, source)
 	var before, after []portable.EncodedEnvelope
 	for _, e := range all {
@@ -120,6 +141,9 @@ func TestUnavailableOrChangedFolderNeverReinitializesOrDeletesHistory(t *testing
 		t.Fatal(err)
 	}
 	target := receiver(t, directory, marker.StoreID)
+	if err := target.Convert(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	objects := exportCheckpoint(t, target)
 	if err := target.Archive.CaptureLocal(objects); err != nil {
 		t.Fatal(err)
@@ -151,7 +175,7 @@ func TestUnavailableOrChangedFolderNeverReinitializesOrDeletesHistory(t *testing
 	if _, err := target.Sync(context.Background()); err == nil {
 		t.Fatal("replacement store silently adopted")
 	}
-	if _, err := os.Stat(filepath.Join(directory, "v3")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(directory, "v4")); !os.IsNotExist(err) {
 		t.Fatal("published into replacement store")
 	}
 	retained, err := target.Archive.Objects(context.Background(), "", true)
@@ -166,26 +190,34 @@ func TestPartialConflictAndCorruptFilesCannotBecomeRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	source, target := receiver(t, t.TempDir(), marker.StoreID), receiver(t, directory, marker.StoreID)
+	if err := target.Convert(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	objects := exportCheckpoint(t, source)
 	e := objects[0]
-	path := filepath.Join(directory, portable.MemoryRecordPath(e.Envelope))
+	block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{e})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := recordsync.BlockDirectory(testLineage)
+	path := filepath.Join(directory, dir, block.Hash+".block")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, e.Bytes[:len(e.Bytes)/2], 0600); err != nil {
+	if err := os.WriteFile(path, block.Bytes[:len(block.Bytes)/2], 0600); err != nil {
 		t.Fatal(err)
 	}
-	conflict := strings.TrimSuffix(path, ".json") + ".sync-conflict-example.json"
-	if err := os.WriteFile(conflict, portable.MemoryFileBytes(e), 0600); err != nil {
+	conflict := strings.TrimSuffix(path, ".block") + ".sync-conflict-example.block"
+	if err := os.WriteFile(conflict, block.Bytes, 0600); err != nil {
 		t.Fatal(err)
 	}
 	result, err := target.Sync(context.Background())
-	if err != nil || result.PendingFiles != 1 || result.InvalidFiles != 1 || result.ImportedRecords != 0 || result.Outcome != "pending" {
+	if err == nil || result.PendingFiles != 1 || result.InvalidFiles != 1 || result.ImportedRecords != 0 || result.Outcome != "pending" {
 		t.Fatalf("partial/conflict files accepted: %+v %v", result, err)
 	}
 	// The provider finishes the canonical file later; the malformed conflict copy
 	// remains visible and never substitutes for the canonical path.
-	if err := os.WriteFile(path, portable.MemoryFileBytes(e), 0600); err != nil {
+	if err := os.WriteFile(path, block.Bytes, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(conflict); err != nil {
@@ -251,6 +283,9 @@ func TestContainerIsolatesConcurrentProjectHistories(t *testing.T) {
 	var exports [][]portable.EncodedEnvelope
 	for _, lineage := range lineages {
 		source := receiverLineage(t, directory, marker.StoreID, lineage)
+		if err := source.Convert(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 		objects := exportCheckpoint(t, source)
 		if err := source.Archive.CaptureLocal(objects); err != nil {
 			t.Fatal(err)

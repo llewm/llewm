@@ -113,9 +113,12 @@ func TestPortfolioFolderCLIFromOutsideWorkspace(t *testing.T) {
 	if len(preview) != 2 || preview[0].Destinations[0].Kind != "folder" || preview[1].Destinations[0].StoreID != marker.StoreID {
 		t.Fatalf("wrong folder pins: %+v", preview)
 	}
-	if _, err := os.Stat(filepath.Join(directory, "v3")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(directory, "v4")); !os.IsNotExist(err) {
 		t.Fatal("preview published objects")
 	}
+	requireCLIError(t, "--writers-stopped", "portfolio", "convert", "a", "private")
+	runCLI(t, "", "portfolio", "convert", "a", "private", "--writers-stopped")
+	runCLI(t, "", "portfolio", "convert", "b", "private", "--writers-stopped")
 	runCLI(t, "", "portfolio", "sync", "--all", "--output", "json")
 	decodeCLI(t, runCLI(t, "", "portfolio", "status", "--all"), &preview)
 	if preview[0].Destinations[0].FolderStatus == nil || preview[1].Destinations[0].Outcome != "published_locally" {
