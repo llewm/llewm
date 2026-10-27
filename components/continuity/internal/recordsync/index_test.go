@@ -179,11 +179,44 @@ func TestIndexedReadRejectsDamagedInventory(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='wrong' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.ReadBlock(ctx, root, path); !errors.Is(err, ErrIndexRebuild) {
-		t.Fatalf("damaged inventory accepted: %v", err)
+	if repaired, err := index.ReadBlock(ctx, root, path); err != nil || repaired.Hash != block.Hash {
+		t.Fatalf("damaged inventory was not repaired: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,0)`, project, Hash("unavailable")); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := index.ScanBlocks(ctx, root); !errors.Is(err, ErrIndexRebuild) {
-		t.Fatalf("scan hid damaged inventory: %v", err)
+		t.Fatalf("scan hid an unavailable stale block: %v", err)
+	}
+}
+
+func TestRepairBlockPreservesOtherEndpointMembership(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "repair-block")
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{fixture(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {block}, "git:b": {block}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='wrong' WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	bad := block
+	bad.Hash = Hash("wrong")
+	if err := index.RepairBlock(ctx, bad); err == nil {
+		t.Fatal("invalid repair block accepted")
+	}
+	if err := index.RepairBlock(ctx, block); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.blockObjects(ctx, []Block{block}); err != nil {
+		t.Fatalf("repaired block invalid: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, project, block.Hash).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("lost endpoint membership: %d %v", count, err)
 	}
 }
 

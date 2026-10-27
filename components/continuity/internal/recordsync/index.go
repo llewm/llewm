@@ -70,6 +70,10 @@ func (s Index) addBlockWithin(ctx context.Context, tx *sql.Tx, verified Block) e
 	if inserted == 0 {
 		return nil
 	}
+	return s.insertBlockObjects(ctx, tx, verified)
+}
+
+func (s Index) insertBlockObjects(ctx context.Context, tx *sql.Tx, verified Block) error {
 	for _, object := range verified.Objects {
 		e := object.Envelope
 		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_records(project_id,block_hash,envelope_hash,record_type,record_id,record_revision,envelope_json) VALUES(?,?,?,?,?,?,?)`, s.ProjectID, verified.Hash, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, string(object.Bytes)); err != nil {
@@ -82,6 +86,37 @@ func (s Index) addBlockWithin(ctx context.Context, tx *sql.Tx, verified Block) e
 		}
 	}
 	return nil
+}
+
+// RepairBlock reconstructs one damaged inventory entry from exact validated
+// block bytes without discarding any endpoint publication memberships. All
+// cached semantic-set proofs are invalidated in the same transaction.
+func (s Index) RepairBlock(ctx context.Context, block Block) error {
+	verified, err := DecodeBlock(s.Lineage, block.Hash, block.Bytes)
+	if err != nil || block.Hash == "" {
+		return fmt.Errorf("invalid block for index repair")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_refs WHERE project_id=? AND block_hash=?`, s.ProjectID, verified.Hash); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_records WHERE project_id=? AND block_hash=?`, s.ProjectID, verified.Hash); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,?) ON CONFLICT(project_id,block_hash) DO UPDATE SET index_version=excluded.index_version`, s.ProjectID, verified.Hash, IndexVersion); err != nil {
+		return err
+	}
+	if err := s.insertBlockObjects(ctx, tx, verified); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_valid_sets WHERE project_id=?`, s.ProjectID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Clear discards the derived inventory so it can be rebuilt from verified

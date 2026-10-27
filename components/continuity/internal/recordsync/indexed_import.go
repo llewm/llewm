@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,8 +17,9 @@ import (
 )
 
 // ReadBlock uses the disposable inventory only when it reconstructs the exact
-// hash-bound bytes. A cache miss is fully decoded by AddBlock; a damaged cache
-// returns ErrIndexRebuild rather than trusting its contents.
+// hash-bound bytes. A cache miss is fully decoded by AddBlock; a damaged entry
+// is rebuilt from the verified block without discarding endpoint membership.
+// Unavailable stale entries still return ErrIndexRebuild.
 func (s Index) ReadBlock(ctx context.Context, root *os.Root, path string) (Block, error) {
 	name := filepath.Base(path)
 	hash := strings.TrimSuffix(name, ".block")
@@ -34,6 +36,12 @@ func (s Index) ReadBlock(ctx context.Context, root *os.Root, path string) (Block
 		return Block{}, err
 	}
 	objects, err := s.blockObjects(ctx, []Block{block})
+	if errors.Is(err, ErrIndexRebuild) {
+		if repairErr := s.RepairBlock(ctx, block); repairErr != nil {
+			return Block{}, repairErr
+		}
+		objects, err = s.blockObjects(ctx, []Block{block})
+	}
 	if err != nil {
 		return Block{}, err
 	}
