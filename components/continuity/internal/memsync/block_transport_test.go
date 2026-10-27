@@ -310,3 +310,44 @@ func TestBlockCycleConvertsRemoteV3AndPreservesFork(t *testing.T) {
 		t.Fatalf("fresh peer lost competing observations: %+v", forks)
 	}
 }
+
+func TestBlockCycleConvertsStalePeerAfterRemoteConversion(t *testing.T) {
+	ctx := context.Background()
+	remote := bareRemote(t)
+	a, b := newMachine(t, "old-peer", remote), newMachine(t, "converter", remote)
+	a.decide(t, "old", "Old observation")
+	export, err := portable.EncodeMemoryExport(ctx, a.db, a.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeNew(a.syncer.Clone, export.Envelopes); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := a.syncer.repository(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := commit(ctx, repo, portable.MemoryLineageDir(testLineage), len(export.Envelopes), "fixture: v3 history"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.run(ctx, "push", "origin", "HEAD:refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
+	ba := archiveMachine(t, &b)
+	b.syncer.Archive = &ba
+	if result, err := b.syncer.cycleBlocks(ctx, plan{push: true, convert: true}); err != nil || result.Outcome != OutcomeSynced {
+		t.Fatalf("first conversion: %+v %v", result, err)
+	}
+	aa := archiveMachine(t, &a)
+	a.syncer.Archive = &aa
+	a.decide(t, "peer", "Peer observation")
+	if result, err := a.syncer.cycleBlocks(ctx, plan{push: true, convert: true}); err != nil || result.Outcome != OutcomeSynced || result.UnpushedCommits != 0 {
+		t.Fatalf("stale peer conversion: %+v %v", result, err)
+	}
+	if result, err := b.syncer.cycleBlocks(ctx, plan{push: true}); err != nil || result.Outcome != OutcomeSynced {
+		t.Fatalf("verify peer: %+v %v", result, err)
+	}
+	if got := b.decisions(t); got != "old,peer" {
+		t.Fatalf("lost observations: %q", got)
+	}
+}
