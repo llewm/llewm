@@ -98,6 +98,66 @@ func (s Index) Clear(ctx context.Context) error {
 	return tx.Commit()
 }
 
+// Rebuild replaces the derived inventory and endpoint membership atomically.
+// The caller must supply complete, verified inventories for every endpoint
+// whose publication membership must survive. An unavailable or incomplete
+// endpoint must stop the coordinator before it calls Rebuild.
+func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) error {
+	verified := make(map[string]Block)
+	count, size, memberships := 0, 0, 0
+	for endpoint, blocks := range inventories {
+		if endpoint == "" {
+			return fmt.Errorf("rebuild endpoint is required")
+		}
+		seen := make(map[string]bool)
+		for _, block := range blocks {
+			memberships++
+			if memberships > portable.MaxRecordCount {
+				return fmt.Errorf("rebuild memberships exceed bounds")
+			}
+			if seen[block.Hash] {
+				return fmt.Errorf("duplicate endpoint block")
+			}
+			seen[block.Hash] = true
+			value, err := DecodeBlock(s.Lineage, block.Hash, block.Bytes)
+			if err != nil || block.Hash == "" {
+				return fmt.Errorf("invalid rebuild block")
+			}
+			if _, ok := verified[value.Hash]; !ok {
+				count += len(value.Objects)
+				size += len(value.Bytes) - len(blockHeader)
+				if count > portable.MaxRecordCount || size > portable.MaxRecordsBytes {
+					return fmt.Errorf("rebuild inventory exceeds bounds")
+				}
+				verified[value.Hash] = value
+			}
+		}
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
+			return err
+		}
+	}
+	for _, block := range verified {
+		if err := s.addBlockWithin(ctx, tx, block); err != nil {
+			return err
+		}
+	}
+	for endpoint, blocks := range inventories {
+		for _, block := range blocks {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?)`, s.ProjectID, Hash(endpoint), block.Hash); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
 // Versions returns all indexed envelopes for one record revision, including
 // competing versions. A block or transport is not treated as the identity.
 func (s Index) Versions(ctx context.Context, kind, id string, revision int) ([]portable.EncodedEnvelope, error) {

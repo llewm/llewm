@@ -150,3 +150,47 @@ func TestImportRebuildRequestPreservesPublicationMembership(t *testing.T) {
 		t.Fatalf("publication membership changed: %d %v", count, err)
 	}
 }
+
+func TestRebuildRestoresEndpointMembershipAtomically(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "rebuild-endpoints")
+	object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "record", RecordRevision: 1, RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{object})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	inventories := map[string][]Block{"folder:a": {block}, "git:b": {block}}
+	if err := index.Rebuild(ctx, inventories); err != nil {
+		t.Fatal(err)
+	}
+	check := func() {
+		t.Helper()
+		var blocks, members int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=?`, project).Scan(&blocks); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=?`, project).Scan(&members); err != nil {
+			t.Fatal(err)
+		}
+		if blocks != 1 || members != 2 {
+			t.Fatalf("inventory changed: %d blocks, %d memberships", blocks, members)
+		}
+	}
+	check()
+	bad := block
+	bad.Hash = Hash("wrong")
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {bad}}); err == nil {
+		t.Fatal("accepted invalid block")
+	}
+	check()
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_rebuild BEFORE INSERT ON history_index_publications BEGIN SELECT RAISE(ABORT,'injected failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Rebuild(ctx, inventories); err == nil {
+		t.Fatal("ignored injected failure")
+	}
+	check()
+}
