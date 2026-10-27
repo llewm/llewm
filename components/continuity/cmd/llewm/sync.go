@@ -9,8 +9,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -23,9 +25,48 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
+// withCPUProfile records only this process, ending at the earlier of the
+// operation's completion or the requested limit. The sync itself continues.
+func withCPUProfile(path string, duration time.Duration, run func() error) (result error) {
+	if path == "" {
+		return run()
+	}
+	if duration <= 0 || duration > 5*time.Minute {
+		return errors.New("profile duration must be greater than zero and at most 5m")
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create CPU profile: %w", err)
+	}
+	if err := pprof.StartCPUProfile(file); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return fmt.Errorf("start CPU profile: %w", err)
+	}
+	var once sync.Once
+	var closeErr error
+	stop := func() {
+		once.Do(func() {
+			pprof.StopCPUProfile()
+			closeErr = file.Close()
+		})
+	}
+	timer := time.AfterFunc(duration, stop)
+	defer func() {
+		timer.Stop()
+		stop()
+		if closeErr != nil {
+			result = errors.Join(result, fmt.Errorf("close CPU profile: %w", closeErr))
+		}
+	}()
+	return run()
+}
+
 func syncCommand() *cobra.Command {
 	var output string
 	var allowPrompt bool
+	var cpuProfile string
+	var profileDuration time.Duration
 	parent := &cobra.Command{
 		Use: "sync",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -50,32 +91,36 @@ func syncCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withApp(cmd, func(application *app.App) error {
-				result, err := runHistorySync(cmd.Context(), application, false, allowPrompt)
-				if format == "json" {
-					// Preserve the Git result shape for a single Git endpoint; hybrid/folder
-					// configurations report each destination independently.
-					if len(application.Config.Sync.Folders) == 0 && result.Git != nil {
-						if e := writeJSON(cmd.OutOrStdout(), result.Git); e != nil {
+			return withCPUProfile(cpuProfile, profileDuration, func() error {
+				return withApp(cmd, func(application *app.App) error {
+					result, err := runHistorySync(cmd.Context(), application, false, allowPrompt)
+					if format == "json" {
+						// Preserve the Git result shape for a single Git endpoint; hybrid/folder
+						// configurations report each destination independently.
+						if len(application.Config.Sync.Folders) == 0 && result.Git != nil {
+							if e := writeJSON(cmd.OutOrStdout(), result.Git); e != nil {
+								return e
+							}
+						} else if e := writeJSON(cmd.OutOrStdout(), result); e != nil {
 							return e
 						}
-					} else if e := writeJSON(cmd.OutOrStdout(), result); e != nil {
-						return e
+					} else {
+						if result.Git != nil {
+							fmt.Fprintf(cmd.OutOrStdout(), "Sync %s: exported %d, imported %d, unpushed commits %d\n%s\n", result.Git.Outcome, result.Git.ExportedRecords, result.Git.ImportedRecords, result.Git.UnpushedCommits, result.Git.Detail)
+						}
+						for _, folder := range result.Folders {
+							fmt.Fprintf(cmd.OutOrStdout(), "Folder %s: %s; published locally %d, imported %d; peer receipt %s\n", folder.Endpoint, folder.Outcome, folder.PublishedRecords, folder.ImportedRecords, folder.PeerReceipt)
+						}
 					}
-				} else {
-					if result.Git != nil {
-						fmt.Fprintf(cmd.OutOrStdout(), "Sync %s: exported %d, imported %d, unpushed commits %d\n%s\n", result.Git.Outcome, result.Git.ExportedRecords, result.Git.ImportedRecords, result.Git.UnpushedCommits, result.Git.Detail)
-					}
-					for _, folder := range result.Folders {
-						fmt.Fprintf(cmd.OutOrStdout(), "Folder %s: %s; published locally %d, imported %d; peer receipt %s\n", folder.Endpoint, folder.Outcome, folder.PublishedRecords, folder.ImportedRecords, folder.PeerReceipt)
-					}
-				}
-				return err
+					return err
+				})
 			})
 		},
 	}
 	parent.Flags().BoolVar(&allowPrompt, "prompt", false, "allow configured askpass for this explicit sync; default retains pending records without prompting")
 	parent.Flags().StringVar(&output, "output", "text", "text or json")
+	parent.Flags().StringVar(&cpuProfile, "cpu-profile", "", "write an opt-in CPU profile to a new private local file")
+	parent.Flags().DurationVar(&profileDuration, "profile-duration", 30*time.Second, "maximum CPU profile duration (up to 5m)")
 
 	var convertOutput string
 	convert := &cobra.Command{

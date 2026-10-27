@@ -9,12 +9,37 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
 )
+
+func TestCPUProfileBoundsAndFileSafety(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cpu.pprof")
+	called := false
+	if err := withCPUProfile(path, 0, func() error { called = true; return nil }); err == nil || called {
+		t.Fatalf("invalid duration: called=%v err=%v", called, err)
+	}
+	if err := withCPUProfile(path, 20*time.Millisecond, func() error {
+		time.Sleep(300 * time.Millisecond)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm()&0o077 != 0 || info.Size() == 0 {
+		t.Fatalf("profile file: info=%v err=%v", info, err)
+	}
+	if out, err := exec.Command("go", "tool", "pprof", "-top", path).CombinedOutput(); err != nil {
+		t.Fatalf("read profile: %v %s", err, out)
+	}
+	if err := withCPUProfile(path, time.Second, func() error { return nil }); err == nil {
+		t.Fatal("existing profile was overwritten")
+	}
+}
 
 func TestMemoryCredentialHelperSupportsAskpassDisabledSync(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -92,8 +117,12 @@ func TestSyncCommandsAcrossTwoCheckouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCLI(t, "", "decision", "record", "--file", decisionFile)
-	if out := runCLI(t, "", "sync"); !strings.Contains(out, "Sync synced: exported") {
+	profile := filepath.Join(t.TempDir(), "sync.pprof")
+	if out := runCLI(t, "", "sync", "--cpu-profile", profile); !strings.Contains(out, "Sync synced: exported") {
 		t.Fatalf("machine A sync: %s", out)
+	}
+	if info, err := os.Stat(profile); err != nil || info.Size() == 0 {
+		t.Fatalf("sync profile: info=%v err=%v", info, err)
 	}
 	if status := runCLI(t, "", "sync", "status"); !strings.Contains(status, "Sync: last synced just now") {
 		t.Fatalf("machine A status: %s", status)

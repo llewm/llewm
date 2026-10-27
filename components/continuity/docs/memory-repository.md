@@ -233,6 +233,21 @@ Use the authentication options below when the existing Git setup cannot access t
 remote without prompting. Automatic sync begins once configured; set
 `manual = true` under `[sync]` for manual operation.
 
+To investigate CPU use during an explicit sync, capture a local profile:
+
+```sh
+llewm sync --cpu-profile ./sync.cpu.pprof --profile-duration 30s
+go tool pprof -top ./sync.cpu.pprof
+```
+
+Profiling is off by default. The profile covers the Llewm process, not child
+Git processes, and stops when sync finishes or the duration expires, whichever
+comes first. The default limit is 30 seconds; the maximum is five minutes.
+The output must not already exist and is created with private permissions.
+Profiles can reveal function names and file paths; keep them local or review
+them before sharing, and delete them when finished. Automatic background syncs
+are not profiled by this flag.
+
 ## Authentication
 
 Syncs run from session hooks and after checkpoints, where nobody can answer a
