@@ -76,6 +76,31 @@ func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]
 	return blocks, nil
 }
 
+// trackedBlockObservations resolves exact envelope hashes from tracked blocks;
+// neither untracked blocks nor records from a different lineage qualify.
+func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage string, hashes ...string) (map[string][]byte, error) {
+	blocks, err := s.trackedBlocks(ctx, repo, lineage)
+	if err != nil {
+		return nil, err
+	}
+	requested := make(map[string]bool, len(hashes))
+	for _, hash := range hashes {
+		requested[hash] = true
+	}
+	bodies := make(map[string][]byte, len(requested))
+	for _, block := range blocks {
+		for _, object := range block.Objects {
+			if requested[object.Envelope.EnvelopeSHA256] {
+				bodies[object.Envelope.EnvelopeSHA256] = append([]byte(nil), object.Bytes...)
+			}
+		}
+	}
+	if len(bodies) != len(requested) {
+		return nil, fmt.Errorf("all requested observations must already be tracked in this lineage")
+	}
+	return bodies, nil
+}
+
 func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]string, int, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return nil, 0, fmt.Errorf("matching history archive is required for block publication")

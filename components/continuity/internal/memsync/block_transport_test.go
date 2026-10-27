@@ -1,6 +1,7 @@
 package memsync
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -38,6 +39,9 @@ func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
 	if got, err := m.syncer.trackedBlocks(ctx, repo, testLineage); err != nil || len(got) != 0 {
 		t.Fatalf("untracked block included: %d %v", len(got), err)
 	}
+	if _, err := m.syncer.trackedBlockObservations(ctx, repo, testLineage, export.Envelopes[0].Envelope.EnvelopeSHA256); err == nil {
+		t.Fatal("untracked observation accepted")
+	}
 	directory, err := recordsync.BlockDirectory(testLineage)
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +51,10 @@ func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
 	}
 	if got, err := m.syncer.trackedBlocks(ctx, repo, testLineage); err != nil || len(got) != 1 || got[0].Hash != block.Hash {
 		t.Fatalf("tracked block missing: %d %v", len(got), err)
+	}
+	hash := export.Envelopes[0].Envelope.EnvelopeSHA256
+	if got, err := m.syncer.trackedBlockObservations(ctx, repo, testLineage, hash); err != nil || !bytes.Equal(got[hash], export.Envelopes[0].Bytes) {
+		t.Fatalf("tracked observation mismatch: %v", err)
 	}
 	path := filepath.Join(m.syncer.Clone, directory, block.Hash+".block")
 	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {

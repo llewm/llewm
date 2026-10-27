@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
@@ -35,7 +36,18 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if err != nil {
 		return result, fmt.Errorf("export memory records: %w", err)
 	}
-	if s.Archive == nil || s.Archive.Lineage != export.Identity.LineageID {
+	if s.Archive == nil {
+		var projectRoot string
+		if err := s.DB.QueryRowContext(local, `SELECT root FROM projects WHERE id=?`, s.ProjectID).Scan(&projectRoot); err != nil {
+			return result, err
+		}
+		archive, err := recordsync.OpenArchive(filepath.Join(config.StateDir(projectRoot), "history"), export.Identity.LineageID)
+		if err != nil {
+			return result, err
+		}
+		s.Archive = &archive
+	}
+	if s.Archive.Lineage != export.Identity.LineageID {
 		return result, fmt.Errorf("matching history archive is required")
 	}
 	if err := s.Archive.CaptureLocal(export.Envelopes); err != nil {
@@ -55,6 +67,25 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	}
 	branch := head
 	importBlocks := func() error {
+		importCurrent := func() error {
+			imported, err := s.importTrackedBlocks(local, repo, export.Identity.LineageID)
+			result.ImportedRecords += imported.ImportedRecords
+			result.Collisions, result.Forks, result.SupersessionForks, result.DeferredRecords = imported.Collisions, imported.Forks, imported.SupersessionForks, imported.DeferredRecords
+			if err != nil {
+				if errors.Is(err, recordsync.ErrSemanticPending) {
+					result.SemanticPending = redact.String(err.Error())
+					return nil
+				}
+				return err
+			}
+			if result.Collisions == 0 && result.DeferredRecords == 0 && result.SemanticPending == "" {
+				result.ImportedHead, _ = repo.run(local, "rev-parse", "--verify", "--quiet", "HEAD")
+			}
+			return nil
+		}
+		if err := importCurrent(); err != nil {
+			return err
+		}
 		// Convert older format-2 records first; this operation refuses them in
 		// an ordinary sync. Both conversion steps require stopped old writers.
 		if err := retireFormerFormat(local, repo, s.Clone, export.Identity, p.convert, &result); err != nil {
@@ -74,19 +105,9 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 			}
 			result.ExportedRecords += converted
 			result.Converted = true
-		}
-		imported, err := s.importTrackedBlocks(local, repo, export.Identity.LineageID)
-		result.ImportedRecords += imported.ImportedRecords
-		result.Collisions, result.Forks, result.SupersessionForks, result.DeferredRecords = imported.Collisions, imported.Forks, imported.SupersessionForks, imported.DeferredRecords
-		if err != nil {
-			if errors.Is(err, recordsync.ErrSemanticPending) {
-				result.SemanticPending = redact.String(err.Error())
-				return nil
+			if converted != 0 {
+				return importCurrent()
 			}
-			return err
-		}
-		if result.Collisions == 0 && result.DeferredRecords == 0 && result.SemanticPending == "" {
-			result.ImportedHead, _ = repo.run(local, "rev-parse", "--verify", "--quiet", "HEAD")
 		}
 		return nil
 	}
