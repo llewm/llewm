@@ -13,6 +13,7 @@ const (
 	RuleExplicit = "explicit"
 	RulePresence = "presence"
 	RuleSession  = "session"
+	RuleRestart  = "restart"
 	RuleBranch   = "branch"
 	RuleNewest   = "newest"
 	// RuleAmbiguous chooses nothing: several tasks are in progress and no
@@ -51,8 +52,10 @@ type OtherTask struct {
 // ChooseContext is what Choose knows about the session beyond tips and presence.
 type ChooseContext struct {
 	// SessionTask is the task this session last checkpointed, if any.
-	SessionTask string
-	Now         time.Time
+	SessionTask     string
+	RestartInstance string
+	RestartClient   string
+	Now             time.Time
 	// Closed reports whether a task's lineage is closed; nil means none are.
 	Closed func(taskID string) bool
 	// PresentByOthers names an unexpired observation from another session.
@@ -62,7 +65,7 @@ type ChooseContext struct {
 
 // Choose picks a task when nothing was selected explicitly: the first live-presence
 // task (in the caller's order) that has a checkpoint; else the task this
-// session last checkpointed; else the newest task whose latest checkpoint was
+// session last checkpointed; else an unambiguous local restart handoff; else the newest task whose latest checkpoint was
 // written on a current branch; else the project-wide newest checkpoint. The
 // branch and newest rules prefer unfinished tasks over completed ones. When
 // the branch or newest rule would have to pick among several in-progress tasks
@@ -89,6 +92,22 @@ func Choose(tips []checkpoint.TaskTip, present []string, current []checkpoint.Co
 	}
 	if tip, ok := tipByTask[context.SessionTask]; context.SessionTask != "" && ok && unfinished(tip) {
 		return Choice{Selection: checkpoint.Selection{TaskID: context.SessionTask}, Rule: RuleSession, Detail: "task:" + context.SessionTask + " was last checkpointed by this session"}
+	}
+	var restart []checkpoint.TaskTip
+	if context.RestartInstance != "" && context.RestartClient != "" {
+		for _, tip := range tips {
+			if tip.Status == "in_progress" && unfinished(tip) && tip.RestartResume != nil && tip.RestartResume.InstanceID == context.RestartInstance && tip.RestartResume.Client == context.RestartClient {
+				restart = append(restart, tip)
+			}
+		}
+	}
+	if len(restart) == 1 {
+		return Choice{Selection: checkpoint.Selection{TaskID: restart[0].TaskID}, Rule: RuleRestart, Detail: "task:" + restart[0].TaskID + " has a restart handoff for this client and instance"}
+	}
+	if len(restart) > 1 {
+		choice := Choice{Rule: RuleAmbiguous, Detail: fmt.Sprintf("%d tasks have restart handoffs for this client and instance", len(restart))}
+		choice.Others, choice.OthersOmitted = OtherActive(restart, "", nil)
+		return choice
 	}
 	contending := func(match func(checkpoint.TaskTip) bool) []checkpoint.TaskTip {
 		var found []checkpoint.TaskTip
@@ -220,6 +239,8 @@ func ChoiceLine(choice Choice) string {
 		fmt.Fprintf(&out, "Chosen by presence: %s.", choice.Detail)
 	case RuleSession:
 		fmt.Fprintf(&out, "Chosen by session: %s.", choice.Detail)
+	case RuleRestart:
+		fmt.Fprintf(&out, "Chosen by restart handoff: %s.", choice.Detail)
 	case RuleBranch:
 		fmt.Fprintf(&out, "Chosen by branch: %s.", choice.Detail)
 	case RuleAmbiguous:
@@ -227,7 +248,7 @@ func ChoiceLine(choice Choice) string {
 	default:
 		fmt.Fprintf(&out, "Chosen as the project's newest checkpoint (%s).", choice.Detail)
 	}
-	out.WriteString(" Order: explicit, presence, session, current branch, newest.")
+	out.WriteString(" Order: explicit, presence, session, restart handoff, current branch, newest.")
 	if choice.RecentPresence != "" {
 		fmt.Fprintf(&out, " Recent presence observation: %s. This expiring record does not prove a current writer; check Git state and confirm concurrency before creating a worktree.", choice.RecentPresence)
 	}

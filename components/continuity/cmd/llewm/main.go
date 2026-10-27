@@ -1604,7 +1604,7 @@ func checkpointCommand() *cobra.Command {
 	var task, taskID, predecessorCheckpointID, reviewsTaskID, requestKey, status, summary, next, session, createOutput string
 	var attemptsJSON, actionUpdatesJSON string
 	var completed, changes, verified, evidenceRefs, carryForwardActionIDs []string
-	var dryRun bool
+	var dryRun, resumeAfterRestart bool
 	var claim func() lease.Claim
 	create := &cobra.Command{
 		Use:   "create",
@@ -1638,6 +1638,11 @@ func checkpointCommand() *cobra.Command {
 			}
 			reconciliation := checkpoint.ActionReconciliation{Updates: actionUpdates, CarryForwardActionIDs: carryForwardActionIDs}
 			return withApp(cmd, func(application *app.App) error {
+				if resumeAfterRestart {
+					if err := application.MarkRestartResume(cmd.Context(), &value); err != nil {
+						return err
+					}
+				}
 				if dryRun {
 					result, err := application.Bootstrap.PreflightWithReconciliation(cmd.Context(), application.ProjectID, application.Root, application.Config.Project.Name, value, reconciliation)
 					if err != nil {
@@ -1700,6 +1705,7 @@ func checkpointCommand() *cobra.Command {
 	create.Flags().StringVar(&summary, "summary", "", "current-state summary")
 	create.Flags().StringVar(&next, "next", "", "recommended next action")
 	create.Flags().StringVar(&session, "session", "", "client session identifier")
+	create.Flags().BoolVar(&resumeAfterRestart, "resume-after-restart", false, "resume this task after restarting this client on this instance")
 	create.Flags().StringVar(&reviewsTaskID, "reviews-task-id", "", "another task this work reviews or repairs; shown in both tasks' bootstraps")
 	create.Flags().StringArrayVar(&completed, "completed", nil, "completed work item; may be repeated")
 	create.Flags().StringArrayVar(&changes, "change", nil, "changed file or artifact; may be repeated")

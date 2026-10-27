@@ -55,6 +55,10 @@ is missing, ask for it instead of inventing a task.
 - `session_id`: the ID from the bootstrap's "This session" line, or another
   real client session ID; otherwise omit. It lets a resumed or compacted session
   keep its own task when several tasks are in progress.
+- `resume_after_restart`: set to true only when this handoff requires restarting
+  this client to finish the task. Supply the observed `session_id`; Continuity
+  scopes the marker to this client and local instance. A later checkpoint clears
+  it unless explicitly marked again. Do not mark ordinary handoffs.
 - `predecessor_checkpoint_id`: required once the task has checkpoints: the exact
   current tip you continued (the bootstrap's checkpoint ID for that task). Omit it
   only for a new task. A save that names a stale tip is refused because another

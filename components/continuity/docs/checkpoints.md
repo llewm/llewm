@@ -252,6 +252,17 @@ only to expose a suspicious mismatch for human or agent review.
 
 ## Explicit checkpoint selection
 
+An in-progress restart handoff may explicitly set `resume_after_restart` in MCP
+or `--resume-after-restart` in the CLI, with an observed client session. The
+checkpoint records the local instance and client; a fresh session of that client
+on that instance selects the task when exactly one current task tip matches.
+The marker is device-local and is omitted from portable checkpoint export; a
+checkpoint imported on another device cannot claim the originating handoff.
+Explicit selection, current-session presence and session affinity take precedence.
+Multiple matching markers require user selection. A later task checkpoint without
+the marker, task completion, or a closed task makes the old marker ineligible.
+Markers do not establish client restart, task completion, or authority to act.
+
 `status`, `bootstrap`, and `next` accept one optional selector: `--checkpoint-id`,
 `--task-id`, or `--session`. MCP `continuity_bootstrap` and `continuity_work`
 accept the corresponding `checkpoint_id`, `task_id`, or `session_id`. Exact

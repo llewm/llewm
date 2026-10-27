@@ -102,6 +102,17 @@ func (a *App) SaveCheckpoint(ctx context.Context, candidate checkpoint.Checkpoin
 	return a.SaveCheckpointWithReconciliation(ctx, candidate, checkpoint.ActionReconciliation{})
 }
 
+// MarkRestartResume binds an explicit restart handoff to the current local
+// instance and observed client. Never infer it from next-action prose.
+func (a *App) MarkRestartResume(ctx context.Context, candidate *checkpoint.Checkpoint) error {
+	instance, client := restartScope(ctx, a.DB, a.ProjectID, candidate.SessionID)
+	if instance == "" || client == "" {
+		return fmt.Errorf("restart handoff requires a locally observed client session and project instance")
+	}
+	candidate.RestartResume = &checkpoint.RestartResume{InstanceID: instance, Client: client}
+	return nil
+}
+
 // StageCheckpointRecovery persists only the validated structured checkpoint
 // fields needed to retry a writer-incompatible save after restart.
 func (a *App) StageCheckpointRecovery(candidate checkpoint.Checkpoint, reconciliation checkpoint.ActionReconciliation) (checkpoint.RecoveryEnvelope, error) {

@@ -10,11 +10,12 @@ import (
 // TaskTip is the newest checkpoint of one task, with the branches it was
 // written on when they were recorded.
 type TaskTip struct {
-	TaskID       string       `json:"task_id"`
-	CheckpointID string       `json:"checkpoint_id"`
-	Status       string       `json:"status"`
-	CreatedAt    time.Time    `json:"created_at"`
-	Branches     []CodeBranch `json:"branches,omitempty"`
+	TaskID        string         `json:"task_id"`
+	CheckpointID  string         `json:"checkpoint_id"`
+	Status        string         `json:"status"`
+	CreatedAt     time.Time      `json:"created_at"`
+	Branches      []CodeBranch   `json:"branches,omitempty"`
+	RestartResume *RestartResume `json:"restart_resume,omitempty"`
 }
 
 // OnBranch reports whether the tip was written with member on branch.
@@ -30,8 +31,8 @@ func (t TaskTip) OnBranch(member, branch string) bool {
 // TaskTips returns each task's newest checkpoint, newest first, the same order
 // and tie-break as LatestSelected. Checkpoints without a task are left out.
 func TaskTips(ctx context.Context, db queryer, projectID string) ([]TaskTip, error) {
-	rows, err := db.QueryContext(ctx, `SELECT task_id, id, status, created_at, branches_json FROM (
-			SELECT c.task_id, c.id, c.status, c.created_at, COALESCE(b.branches_json, '') AS branches_json,
+	rows, err := db.QueryContext(ctx, `SELECT task_id, id, status, created_at, branches_json, payload_json FROM (
+			SELECT c.task_id, c.id, c.status, c.created_at, c.payload_json, COALESCE(b.branches_json, '') AS branches_json,
 				ROW_NUMBER() OVER (PARTITION BY c.task_id ORDER BY c.created_at DESC, c.id DESC) AS rank
 			FROM checkpoints c LEFT JOIN checkpoint_branches b ON b.project_id = c.project_id AND b.checkpoint_id = c.id
 			WHERE c.project_id = ? AND c.task_id IS NOT NULL AND c.task_id <> '')
@@ -43,10 +44,15 @@ func TaskTips(ctx context.Context, db queryer, projectID string) ([]TaskTip, err
 	var tips []TaskTip
 	for rows.Next() {
 		var tip TaskTip
-		var created, branches string
-		if err := rows.Scan(&tip.TaskID, &tip.CheckpointID, &tip.Status, &created, &branches); err != nil {
+		var created, branches, payload string
+		if err := rows.Scan(&tip.TaskID, &tip.CheckpointID, &tip.Status, &created, &branches, &payload); err != nil {
 			return nil, err
 		}
+		var saved Checkpoint
+		if err := json.Unmarshal([]byte(payload), &saved); err != nil {
+			return nil, fmt.Errorf("decode checkpoint %s: %w", tip.CheckpointID, err)
+		}
+		tip.RestartResume = saved.RestartResume
 		if tip.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
 			return nil, fmt.Errorf("decode checkpoint time %s: %w", tip.CheckpointID, err)
 		}

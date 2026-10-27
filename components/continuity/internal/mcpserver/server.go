@@ -72,10 +72,11 @@ type BootstrapOutput struct {
 
 type CheckpointInput struct {
 	SessionID               string                    `json:"session_id,omitempty" jsonschema:"bootstrap's This session ID"`
+	ResumeAfterRestart      bool                      `json:"resume_after_restart,omitempty" jsonschema:"resume after client restart"`
 	TaskID                  string                    `json:"task_id" jsonschema:"new ID starts a task"`
-	PredecessorCheckpointID string                    `json:"predecessor_checkpoint_id,omitempty" jsonschema:"task's current tip; required after its first checkpoint"`
+	PredecessorCheckpointID string                    `json:"predecessor_checkpoint_id,omitempty" jsonschema:"current task tip"`
 	ReviewsTaskID           string                    `json:"reviews_task_id,omitempty" jsonschema:"task this work reviews or repairs"`
-	RequestKey              string                    `json:"request_key,omitempty" jsonschema:"idempotent retry key"`
+	RequestKey              string                    `json:"request_key,omitempty" jsonschema:"retry key"`
 	Task                    string                    `json:"task"`
 	Status                  string                    `json:"status,omitempty"`
 	Summary                 string                    `json:"summary"`
@@ -85,10 +86,10 @@ type CheckpointInput struct {
 	Verified                []string                  `json:"verified,omitempty"`
 	Attempts                []checkpoint.Attempt      `json:"attempts,omitempty"`
 	EvidenceRefs            []string                  `json:"evidence_refs,omitempty" jsonschema:"refs such as commit:HASH or decision:ID"`
-	ActionUpdates           []checkpoint.ActionUpdate `json:"action_updates,omitempty" jsonschema:"complete or supersede open predecessor actions"`
-	CarryForwardActionIDs   []string                  `json:"carry_forward_action_ids,omitempty" jsonschema:"open predecessor actions to carry forward"`
+	ActionUpdates           []checkpoint.ActionUpdate `json:"action_updates,omitempty" jsonschema:"reconcile actions"`
+	CarryForwardActionIDs   []string                  `json:"carry_forward_action_ids,omitempty" jsonschema:"unfinished action IDs"`
 	DryRun                  bool                      `json:"dry_run,omitempty" jsonschema:"validate without saving"`
-	LeaseHolder             string                    `json:"lease_holder,omitempty" jsonschema:"holder of your lease on this scope"`
+	LeaseHolder             string                    `json:"lease_holder,omitempty" jsonschema:"lease holder"`
 	LeaseSession            string                    `json:"lease_session,omitempty"`
 	LeaseToken              int64                     `json:"lease_token,omitempty"`
 }
@@ -803,6 +804,11 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 				Status: input.Status, Summary: input.Summary, NextAction: input.NextAction,
 				Completed: input.Completed, Changes: input.Changes, Verified: input.Verified, Attempts: input.Attempts, EvidenceRefs: input.EvidenceRefs,
 				Fence: lease.Fence{Claim: lease.Claim{Holder: input.LeaseHolder, SessionID: input.LeaseSession, Token: input.LeaseToken}},
+			}
+			if input.ResumeAfterRestart {
+				if err := application.MarkRestartResume(ctx, &value); err != nil {
+					return nil, CheckpointOutput{}, err
+				}
 			}
 			reconciliation := checkpoint.ActionReconciliation{Updates: input.ActionUpdates, CarryForwardActionIDs: input.CarryForwardActionIDs}
 			if input.DryRun {

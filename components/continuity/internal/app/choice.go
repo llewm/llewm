@@ -34,7 +34,7 @@ func (a *App) SessionTask(ctx context.Context, sessionID string) (string, error)
 
 // chooseTask picks the bootstrap's task: an explicit selection as given; else
 // the task this session has live presence on, then the task it last checkpointed,
-// then the newest task last checkpointed on a current branch, then the
+// then an unambiguous local restart handoff, then the newest task last checkpointed on a current branch, then the
 // project-wide newest checkpoint, unless several in-progress tasks contend
 // (see bootstrap.Choose). It also lists the other active tasks. It returns nil
 // on failure, which keeps the selection.
@@ -69,13 +69,14 @@ func chooseTask(ctx context.Context, db *sql.DB, repositories project.Repositori
 		if err != nil {
 			return nil
 		}
+		instance, client := restartScope(ctx, db, projectID, sessionID)
 		presentByOthers := map[string]string{}
 		for _, value := range presenceReport.Presence {
 			if value.TaskID != "" && (sessionID == "" || value.SessionID != sessionID) {
 				presentByOthers[value.TaskID] = value.Client + " (session " + value.SessionID + ")"
 			}
 		}
-		choice = bootstrap.Choose(tips, present, current, bootstrap.ChooseContext{SessionTask: sessionTask, Now: now, Closed: closed, PresentByOthers: func(taskID string) string { return presentByOthers[taskID] }})
+		choice = bootstrap.Choose(tips, present, current, bootstrap.ChooseContext{SessionTask: sessionTask, RestartInstance: instance, RestartClient: client, Now: now, Closed: closed, PresentByOthers: func(taskID string) string { return presentByOthers[taskID] }})
 		if choice.Rule == bootstrap.RuleAmbiguous {
 			return &choice
 		}
@@ -94,6 +95,20 @@ func chooseTask(ctx context.Context, db *sql.DB, repositories project.Repositori
 	}
 	choice.Others, choice.OthersOmitted = bootstrap.OtherActive(tips, chosen, closed)
 	return &choice
+}
+
+// restartScope requires a locally observed session and the local instance.
+// Neither a missing session nor an imported checkpoint establishes affinity.
+func restartScope(ctx context.Context, db *sql.DB, projectID, sessionID string) (string, string) {
+	if sessionID == "" {
+		return "", ""
+	}
+	var instance, client string
+	err := db.QueryRowContext(ctx, `SELECT i.instance_id, s.client FROM project_memory_identities i JOIN sessions s ON s.project_id=i.project_id WHERE i.project_id=? AND s.id=?`, projectID, sessionID).Scan(&instance, &client)
+	if err != nil {
+		return "", ""
+	}
+	return instance, client
 }
 
 // taskUnavailableForImplicitSelection keeps explicit historical reads possible

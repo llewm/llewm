@@ -19,11 +19,12 @@ import (
 )
 
 type Checkpoint struct {
-	ID                      string `json:"id"`
-	ProjectID               string `json:"project_id"`
-	SessionID               string `json:"session_id,omitempty"`
-	TaskID                  string `json:"task_id,omitempty"`
-	PredecessorCheckpointID string `json:"predecessor_checkpoint_id,omitempty"`
+	ID                      string         `json:"id"`
+	ProjectID               string         `json:"project_id"`
+	SessionID               string         `json:"session_id,omitempty"`
+	RestartResume           *RestartResume `json:"restart_resume,omitempty"`
+	TaskID                  string         `json:"task_id,omitempty"`
+	PredecessorCheckpointID string         `json:"predecessor_checkpoint_id,omitempty"`
 	// ReviewsTaskID names another task this task reviews or repairs. The link
 	// shows in both tasks' bootstraps; it never changes the other task's chain.
 	ReviewsTaskID string         `json:"reviews_task_id,omitempty"`
@@ -50,6 +51,13 @@ type Checkpoint struct {
 	// Fence is the lease the writer presents for the task's scope; a required
 	// scope refuses the write without it.
 	Fence lease.Fence `json:"-"`
+}
+
+// RestartResume scopes a caller-requested restart handoff to its originating
+// local instance and client. Only the current task tip can be eligible.
+type RestartResume struct {
+	InstanceID string `json:"instance_id"`
+	Client     string `json:"client"`
 }
 
 type Attempt struct {
@@ -390,6 +398,9 @@ func Prepare(input Checkpoint) (Checkpoint, error) {
 	case "in_progress", "completed", "blocked", "paused":
 	default:
 		return Checkpoint{}, fmt.Errorf("checkpoint status must be in_progress, completed, blocked or paused")
+	}
+	if input.RestartResume != nil && (input.Status != "in_progress" || input.SessionID == "" || input.RestartResume.InstanceID == "" || input.RestartResume.Client == "") {
+		return Checkpoint{}, fmt.Errorf("restart resume requires an in-progress checkpoint and an identified session, client and instance")
 	}
 	for _, items := range [][]string{input.Completed, input.Changes, input.Verified, input.EvidenceRefs} {
 		if len(items) > 64 {

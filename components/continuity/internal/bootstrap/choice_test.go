@@ -42,6 +42,43 @@ func TestChooseOrdersPresenceThenBranchThenNewest(t *testing.T) {
 	}
 }
 
+func TestRestartHandoffSelection(t *testing.T) {
+	now := time.Now().UTC()
+	marker := &checkpoint.RestartResume{InstanceID: "device-a", Client: "codex"}
+	tips := []checkpoint.TaskTip{
+		{TaskID: "restart", Status: "in_progress", CreatedAt: now, RestartResume: marker},
+		{TaskID: "other", Status: "in_progress", CreatedAt: now},
+	}
+	ctx := ChooseContext{Now: now, RestartInstance: "device-a", RestartClient: "codex"}
+	if got := Choose(tips, nil, nil, ctx); got.Rule != RuleRestart || got.Selection.TaskID != "restart" {
+		t.Fatalf("restart: %+v", got)
+	}
+	if got := Choose(tips, []string{"other"}, nil, ctx); got.Rule != RulePresence {
+		t.Fatalf("presence precedence: %+v", got)
+	}
+	ctx.RestartInstance = "device-b"
+	if got := Choose(tips, nil, nil, ctx); got.Rule != RuleAmbiguous {
+		t.Fatalf("different device: %+v", got)
+	}
+	ctx.RestartInstance, ctx.RestartClient = "device-a", "claude-code"
+	if got := Choose(tips, nil, nil, ctx); got.Rule != RuleAmbiguous {
+		t.Fatalf("different client: %+v", got)
+	}
+	ctx.RestartClient = "codex"
+	tips[1].RestartResume = marker
+	if got := Choose(tips, nil, nil, ctx); got.Rule != RuleAmbiguous || len(got.Others) != 2 {
+		t.Fatalf("competing handoffs: %+v", got)
+	}
+	tips[0].Status = "completed"
+	if got := Choose(tips, nil, nil, ctx); got.Rule != RuleRestart || got.Selection.TaskID != "other" {
+		t.Fatalf("completed marker: %+v", got)
+	}
+	tips[1].RestartResume = nil
+	if got := Choose(tips, nil, nil, ctx); got.Rule == RuleRestart {
+		t.Fatalf("new tip clears marker: %+v", got)
+	}
+}
+
 func TestChooseAsksInsteadOfTakingAnotherAgentsTask(t *testing.T) {
 	now := time.Now()
 	main := []checkpoint.CodeBranch{{Branch: "main"}}
@@ -130,12 +167,12 @@ func TestOtherActiveAndChoiceLine(t *testing.T) {
 		t.Fatalf("others: %#v omitted %d", others, omitted)
 	}
 	line := ChoiceLine(Choice{Rule: RuleBranch, Detail: "its latest checkpoint was on the current branch `topic`", Others: others, OthersOmitted: omitted})
-	for _, want := range []string{"Chosen by branch:", "Order: explicit, presence, session, current branch, newest.", "`a` (blocked, on `topic`)", "`b` (in_progress, detached HEAD)", "`c` (paused, on `lib@x`)", "and 1 more", "--task-id"} {
+	for _, want := range []string{"Chosen by branch:", "Order: explicit, presence, session, restart handoff, current branch, newest.", "`a` (blocked, on `topic`)", "`b` (in_progress, detached HEAD)", "`c` (paused, on `lib@x`)", "and 1 more", "--task-id"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("line lacks %q: %s", want, line)
 		}
 	}
-	if line := ChoiceLine(Choice{Rule: RuleExplicit}); line != "Chosen by explicit selection. Order: explicit, presence, session, current branch, newest." {
+	if line := ChoiceLine(Choice{Rule: RuleExplicit}); line != "Chosen by explicit selection. Order: explicit, presence, session, restart handoff, current branch, newest." {
 		t.Fatalf("explicit line: %s", line)
 	}
 }
