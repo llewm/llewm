@@ -21,7 +21,7 @@ import (
 // ReadBlock uses the disposable inventory only when it reconstructs the exact
 // hash-bound bytes. A cache miss is fully decoded by AddBlock; a damaged entry
 // is rebuilt from the verified block without discarding endpoint membership.
-// Unavailable stale entries still return ErrIndexRebuild.
+// Other stale blocks do not block this read; global lookups still refuse them.
 func (s Index) ReadBlock(ctx context.Context, root *os.Root, path string) (Block, error) {
 	name := filepath.Base(path)
 	hash := strings.TrimSuffix(name, ".block")
@@ -98,6 +98,9 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 		if err == nil && unchanged {
 			return ImportResult{}, nil
 		}
+		if result, used, err := s.tryNarrativeAdditions(ctx, setHash, objects); used {
+			return result, err
+		}
 	}
 	var mixedHash, beforeState string
 	if !eligible {
@@ -117,7 +120,7 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 	}
 	result, err := (Importer{DB: s.DB, ProjectID: s.ProjectID, Now: s.Now}).Import(ctx, objects)
 	if err == nil && eligible && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
-		_, err = s.DB.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,'') ON CONFLICT(project_id,set_hash) DO UPDATE SET index_version=excluded.index_version,local_state_hash=''`, s.ProjectID, setHash, IndexVersion)
+		err = s.rememberNarrativeSet(ctx, setHash, objects)
 	} else if err == nil && mixedHash != "" && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
 		if beforeState != "" && result.ImportedRecords == 0 {
 			// Proof is written only if the complete local state still matches
@@ -300,13 +303,6 @@ func (s Index) validatedNarrativesPresent(ctx context.Context, setHash string, o
 }
 
 func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.EncodedEnvelope, error) {
-	var stale int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND index_version<>?`, s.ProjectID, IndexVersion).Scan(&stale); err != nil {
-		return nil, err
-	}
-	if stale != 0 {
-		return nil, fmt.Errorf("%w: version changed", ErrIndexRebuild)
-	}
 	var objects []portable.EncodedEnvelope
 	objectHashes := make(map[string]bool)
 	count := 0

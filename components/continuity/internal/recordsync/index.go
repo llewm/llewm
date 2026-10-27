@@ -13,7 +13,7 @@ import (
 // IndexVersion identifies the derived inventory schema and interpretation.
 // Change it whenever block validation, semantic validation, or record and
 // reference indexing semantics change.
-const IndexVersion = 2
+const IndexVersion = 3
 
 // ErrIndexRebuild means the derived inventory cannot be trusted and must be
 // reconstructed from validated transport blocks.
@@ -28,8 +28,8 @@ type Index struct {
 	Now       func() time.Time
 }
 
-// AddBlock atomically indexes a complete block. A prior index version requires
-// a rebuild; silently mixing versions could miss a dependent record.
+// AddBlock atomically indexes a complete block. A prior version of this block
+// requires repair; global dependency lookups still reject any stale entries.
 func (s Index) AddBlock(ctx context.Context, block Block) error {
 	if block.Hash == "" {
 		return fmt.Errorf("indexed block hash is required")
@@ -44,7 +44,7 @@ func (s Index) AddBlock(ctx context.Context, block Block) error {
 	}
 	defer tx.Rollback()
 	var stale int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND index_version<>?`, s.ProjectID, IndexVersion).Scan(&stale); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND block_hash=? AND index_version<>?`, s.ProjectID, block.Hash, IndexVersion).Scan(&stale); err != nil {
 		return err
 	}
 	if stale != 0 {
@@ -68,6 +68,13 @@ func (s Index) addBlockWithin(ctx context.Context, tx *sql.Tx, verified Block) e
 		return err
 	}
 	if inserted == 0 {
+		var version int
+		if err := tx.QueryRowContext(ctx, `SELECT index_version FROM history_index_blocks WHERE project_id=? AND block_hash=?`, s.ProjectID, verified.Hash).Scan(&version); err != nil {
+			return err
+		}
+		if version != IndexVersion {
+			return fmt.Errorf("%w: block version changed", ErrIndexRebuild)
+		}
 		return nil
 	}
 	return s.insertBlockObjects(ctx, tx, verified)
@@ -116,6 +123,9 @@ func (s Index) RepairBlock(ctx context.Context, block Block) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_valid_sets WHERE project_id=?`, s.ProjectID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_narrative_tip WHERE project_id=?`, s.ProjectID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -127,7 +137,7 @@ func (s Index) Clear(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets"} {
+	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
@@ -175,7 +185,7 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets"} {
+	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}

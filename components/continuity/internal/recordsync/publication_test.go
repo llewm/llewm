@@ -227,6 +227,51 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	}
 }
 
+func TestStaleOtherEndpointDoesNotBlockPublication(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "stale-endpoint")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := fixture(t)
+	if _, err := archive.Put(object, "local"); err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	blocks, err := index.PlanPublication(ctx, archive, "folder:a", false)
+	if err != nil || len(blocks) != 1 {
+		t.Fatalf("initial plan: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=? AND block_hash=?`, project, blocks[0].Hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("stale destination accepted: %v", err)
+	}
+	// A different destination containing different authorized records can
+	// progress, while the stale endpoint remains explicitly recoverable.
+	otherArchive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "other", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := otherArchive.Put(other, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.PlanPublication(ctx, otherArchive, "folder:b", false); err != nil {
+		t.Fatalf("unrelated endpoint blocked: %v", err)
+	}
+	if err := index.RepairBlock(ctx, blocks[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); err != nil {
+		t.Fatalf("repaired endpoint still blocked: %v", err)
+	}
+}
+
 // This measures publication discovery only. The current prototype still scans
 // the per-record archive, so it must not be presented as an end-to-end speedup.
 func BenchmarkPublicationDiscovery(b *testing.B) {

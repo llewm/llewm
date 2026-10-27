@@ -35,7 +35,7 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 		return 0, err
 	}
 	var stale int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND index_version<>?`, s.ProjectID, IndexVersion).Scan(&stale); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND block_hash=? AND index_version<>?`, s.ProjectID, block.Hash, IndexVersion).Scan(&stale); err != nil {
 		return 0, err
 	}
 	if stale != 0 {
@@ -93,14 +93,14 @@ func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint st
 	for _, object := range allowed {
 		byHash[object.Envelope.EnvelopeSHA256] = object
 	}
+	endpointHash := Hash(endpoint)
 	var stale int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND index_version<>?`, s.ProjectID, IndexVersion).Scan(&stale); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications p JOIN history_index_blocks b ON b.project_id=p.project_id AND b.block_hash=p.block_hash WHERE p.project_id=? AND p.endpoint_hash=? AND b.index_version<>?`, s.ProjectID, endpointHash, IndexVersion).Scan(&stale); err != nil {
 		return nil, err
 	}
 	if stale != 0 {
 		return nil, fmt.Errorf("%w: version changed", ErrIndexRebuild)
 	}
-	endpointHash := Hash(endpoint)
 	rows, err := tx.QueryContext(ctx, `SELECT p.block_hash,r.envelope_hash,r.envelope_json FROM history_index_publications p LEFT JOIN history_index_records r ON r.project_id=p.project_id AND r.block_hash=p.block_hash WHERE p.project_id=? AND p.endpoint_hash=? ORDER BY p.block_hash,r.envelope_json`, s.ProjectID, endpointHash)
 	if err != nil {
 		return nil, err

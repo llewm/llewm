@@ -185,8 +185,11 @@ func TestIndexedReadRejectsDamagedInventory(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,0)`, project, Hash("unavailable")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.ScanBlocks(ctx, root); !errors.Is(err, ErrIndexRebuild) {
-		t.Fatalf("scan hid an unavailable stale block: %v", err)
+	if _, err := index.ScanBlocks(ctx, root); err != nil {
+		t.Fatalf("unrelated stale block prevented this scan: %v", err)
+	}
+	if _, err := index.Versions(ctx, "decision", "id", 1); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("global lookup hid an unavailable stale block: %v", err)
 	}
 }
 

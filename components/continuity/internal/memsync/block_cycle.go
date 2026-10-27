@@ -50,6 +50,31 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if s.Archive.Lineage != export.Identity.LineageID {
 		return result, fmt.Errorf("matching history archive is required")
 	}
+	// Rebuild receipt membership and provenance from already tracked local
+	// history before classifying operational records as locally originated or
+	// planning publication. This also repairs damaged entries that are present.
+	tracked, err := s.trackedBlocks(local, repo, export.Identity.LineageID)
+	if err != nil {
+		return result, err
+	}
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: export.Identity.LineageID, Now: s.Now}
+	for _, block := range tracked {
+		if _, err := index.ObservePublication(local, *s.Archive, s.Endpoint(), block); err != nil {
+			return result, err
+		}
+	}
+	old, err := s.trackedV3Snapshot(local, repo, export.Identity.LineageID)
+	if err != nil {
+		return result, err
+	}
+	if len(old.Objects) != 0 && !p.convert {
+		return result, fmt.Errorf("format-3 observations require explicit conversion: stop old writers, then run `llewm sync convert --writers-stopped`")
+	}
+	for _, object := range old.Objects {
+		if _, err := s.Archive.Put(object, s.Endpoint()); err != nil {
+			return result, err
+		}
+	}
 	if err := s.Archive.CaptureLocal(export.Envelopes); err != nil {
 		return result, err
 	}

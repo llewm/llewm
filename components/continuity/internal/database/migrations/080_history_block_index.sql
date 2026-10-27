@@ -39,6 +39,19 @@ CREATE TABLE history_index_valid_sets (
     PRIMARY KEY(project_id, set_hash)
 ) STRICT;
 
+-- One bounded reference-free narrative set, used to validate additive
+-- imports without reprocessing the earlier observations.
+CREATE TABLE history_index_narrative_tip (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    set_hash TEXT NOT NULL,
+    index_version INTEGER NOT NULL
+) STRICT;
+CREATE TABLE history_index_narrative_members (
+    project_id TEXT NOT NULL REFERENCES history_index_narrative_tip(project_id) ON DELETE CASCADE,
+    envelope_hash TEXT NOT NULL,
+    PRIMARY KEY(project_id, envelope_hash)
+) STRICT;
+
 -- Local publication intent. Each block is staged in the validated inventory
 -- first; a later sync republishes it if endpoint delivery was interrupted.
 CREATE TABLE history_index_publications (

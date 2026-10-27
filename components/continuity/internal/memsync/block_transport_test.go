@@ -241,6 +241,33 @@ func TestBlockCycleConvergesAcrossGitPeers(t *testing.T) {
 	}
 }
 
+func TestBlockCycleRepairsStaleTrackedInventoryBeforePublication(t *testing.T) {
+	ctx := context.Background()
+	m := newMachine(t, "stale-cycle", bareRemote(t))
+	m.decide(t, "record", "Existing history")
+	if result, err := m.syncer.Sync(ctx); err != nil || result.Outcome != OutcomeSynced {
+		t.Fatalf("initial sync: %+v %v", result, err)
+	}
+	repo, err := m.syncer.repository(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=?`, m.project); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := m.syncer.Sync(ctx); err != nil || result.Outcome != OutcomeSynced || result.ExportedRecords != 0 {
+		t.Fatalf("stale inventory did not recover: %+v %v", result, err)
+	}
+	after, err := repo.run(ctx, "rev-parse", "HEAD")
+	if err != nil || before != after {
+		t.Fatalf("repair republished history: %s %s %v", before, after, err)
+	}
+}
+
 func TestBlockCycleConvertsRemoteV3AndPreservesFork(t *testing.T) {
 	ctx := context.Background()
 	remote := bareRemote(t)
