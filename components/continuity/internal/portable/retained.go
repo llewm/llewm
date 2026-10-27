@@ -3,6 +3,7 @@ package portable
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -15,7 +16,11 @@ func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID str
 		return nil, err
 	}
 	defer rows.Close()
-	retained := map[string]EnvelopeSpec{}
+	type retainedRecord struct {
+		spec EnvelopeSpec
+		hash string
+	}
+	retained := map[string]retainedRecord{}
 	for rows.Next() {
 		var kind, id, body string
 		var revision int
@@ -29,14 +34,21 @@ func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID str
 		if spec.LineageID != lineageID || spec.RecordType != kind || spec.RecordID != id || spec.RecordRevision != revision {
 			return nil, fmt.Errorf("retained portable envelope identity mismatch")
 		}
-		retained[RecordKey(kind, id, revision)] = spec
+		// DecodeMemoryEnvelope has already validated the canonical bytes and
+		// envelope hash. Reuse that hash when checking recovery rather than
+		// encoding the same retained record again.
+		var envelope Envelope
+		if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+			return nil, fmt.Errorf("retained portable envelope: %w", err)
+		}
+		retained[RecordKey(kind, id, revision)] = retainedRecord{spec: spec, hash: envelope.EnvelopeSHA256}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	for i, spec := range specs {
 		if saved, ok := retained[RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)]; ok {
-			specs[i] = saved
+			specs[i] = saved.spec
 		}
 	}
 	recovered, err := RecoveredEnvelopes(ctx, source, projectID)
@@ -44,11 +56,17 @@ func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID str
 		return nil, err
 	}
 	for i, spec := range specs {
-		encoded, err := EncodeEnvelope(spec)
-		if err != nil {
-			return nil, err
+		hash := ""
+		if saved, ok := retained[RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)]; ok {
+			hash = saved.hash
+		} else {
+			encoded, err := EncodeEnvelope(spec)
+			if err != nil {
+				return nil, err
+			}
+			hash = encoded.Envelope.EnvelopeSHA256
 		}
-		if original, ok := recovered[encoded.Envelope.EnvelopeSHA256]; ok {
+		if original, ok := recovered[hash]; ok {
 			specs[i], err = DecodeMemoryEnvelope(original.Bytes)
 			if err != nil {
 				return nil, err
