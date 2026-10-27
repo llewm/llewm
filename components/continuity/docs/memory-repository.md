@@ -154,6 +154,11 @@ restoring the previous automatic-sync setting.
 Format 4 packs the existing canonical envelopes into immutable, bounded blocks.
 Ordinary Git sync refuses older tracked records. Before adopting a format-4 binary:
 
+The format-4 build advances the local writer floor to API 135. Existing older
+client processes must be restarted before they can write to the upgraded store.
+This local fence does not stop a different device's sync process; stop or upgrade
+every writer on the lineage before conversion.
+
 1. Verify a consistent backup of the operational database and preserve the memory
    history. Confirm that every existing writer is stopped and will either upgrade
    or be retired, including disposable test machines.
