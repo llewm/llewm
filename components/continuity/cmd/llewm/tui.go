@@ -96,7 +96,7 @@ var errTerminalQuit = errors.New("quit")
 
 var terminalTopViews = []string{"tracks", "timeline", "decisions", "ideas", "history", "project", "checkpoints", "health", "releases"}
 var terminalViewTitles = map[string]string{"tracks": "Tracks", "timeline": "Timeline", "decisions": "Decisions", "ideas": "Work items", "history": "History", "project": "Project", "checkpoints": "Checkpoints", "health": "Health", "releases": "Releases"}
-var terminalFilters = []string{"open", "current", "active", "next", "blocked", "stale", "all", "everything"}
+var terminalFilters = []string{"open", "current", "active", "next", "blocked", "stale", "all", "everything", "actions"}
 var terminalKinds = []string{"", "checkpoint", "roadmap_revision", "work_item", "task_transition", "activity_event"}
 
 // terminalLevel is one drilled-in screen above a top-level view.
@@ -792,6 +792,9 @@ func (v *terminalView) detail(ctx context.Context) error {
 				state = "Working now"
 			}
 			v.details = append(v.details, fmt.Sprintf("%s: checkpoint %s (%s), %s", state, v.current.CreatedAt.Local().Format("01-02 15:04"), ago(v.now().Sub(v.current.CreatedAt)), v.current.Status), "Next: "+v.current.NextAction)
+		} else if item.LatestCheckpoint != nil {
+			cp := item.LatestCheckpoint
+			v.details = append(v.details, fmt.Sprintf("Checkpoint: %s (%s), %s", cp.CreatedAt.Local().Format("01-02 15:04"), ago(v.now().Sub(cp.CreatedAt)), cp.Status), "Next: "+cp.NextAction)
 		}
 		v.details = append(v.details, "Binding: "+item.BindingState, "Task: "+valueOrUnknown(item.SelectedTaskID), fmt.Sprintf("Unresolved actions: %d  Pending work items: %d", item.UnresolvedActionCount, item.PendingWorkItems))
 		if p, ok := v.progress[trackID(item.Node, "")]; ok && item.Node != nil {

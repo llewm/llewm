@@ -138,7 +138,7 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 	if options.Filter == "" {
 		options.Filter = "all"
 	}
-	if !oneOf(options.Filter, "open", "all", "everything", "current_focus", "active", "resumable", "blocked", "anomalous", "stale") {
+	if !oneOf(options.Filter, "open", "all", "everything", "current_focus", "active", "resumable", "blocked", "anomalous", "stale", "actions") {
 		return TrackInventory{}, fmt.Errorf("track inventory filter must be open, all, everything, current_focus, active, resumable, blocked, anomalous or stale")
 	}
 	if len(options.TaskID) > 200 {
@@ -304,7 +304,7 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 		if options.TaskID != "" && !inventoryHasTask(item, options.TaskID) {
 			continue
 		}
-		if options.Filter != "everything" && options.TaskID == "" && finishedUnboundTask(item, tasks) {
+		if options.Filter != "everything" && options.Filter != "actions" && options.TaskID == "" && finishedUnboundTask(item, tasks) {
 			continue
 		}
 		if options.Filter == "open" && inventoryFinished(item, tasks) {
@@ -627,6 +627,8 @@ func inventoryMatches(item TrackInventoryItem, filter string) bool {
 		return item.Blocked
 	case "anomalous":
 		return len(item.Anomalies) > 0
+	case "actions":
+		return item.UnresolvedActionCount > 0
 	case "stale":
 		actionableAnomaly := len(item.Anomalies) > 0 && (item.CurrentFocus || item.Active || item.Resumable)
 		terminalOpenAction := item.LatestCheckpoint != nil && item.LatestCheckpoint.Status == "completed" && item.UnresolvedActionCount > 0

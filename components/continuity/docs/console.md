@@ -46,6 +46,12 @@ Use `f` to reach `all` for finished tracks or `everything` to also include finis
 tasks without a roadmap node. The current task's visible track remains selected
 and highlighted.
 
+The `actions` filter shows tracks whose selected task has unresolved checkpoint
+actions. The detail pane shows the selected task's checkpoint age, status and next
+action; age is a prompt to review, not evidence that work is complete. For a
+complete cross-task action list, including nonselected tasks on a shared track,
+use `llewm checkpoint actions --all`.
+
 Tracks are ordered before pagination: current work, other active work, blocked
 work, next/resumable work, pending/proposed work, deferred work, then finished
 history. Within each group, explicit priority comes first, then title

@@ -144,13 +144,14 @@ func (service Service) List(ctx context.Context, projectID, view string, limit i
 		"next":    "resumable",
 		"blocked": "blocked",
 		"stale":   "stale",
+		"actions": "actions",
 		"all":     "all",
 		// everything also lists finished tasks that have no roadmap node.
 		"everything": "everything",
 	}
 	filter, ok := filters[view]
 	if !ok {
-		return List{}, fmt.Errorf("work view must be open, current, active, next, blocked, stale, all, or everything")
+		return List{}, fmt.Errorf("work view must be open, current, active, next, blocked, stale, actions, all, or everything")
 	}
 	limit, err := boundedLimit(limit)
 	if err != nil {

@@ -82,6 +82,10 @@ func TestTrackInventoryJoinsBindingsTasksActionsAndAnomalies(t *testing.T) {
 	if !hasString(active.Anomalies, "missing_track_plan") {
 		t.Fatalf("explicitly bound node without a plan: %#v", active.Anomalies)
 	}
+	actions, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: "actions"})
+	if err != nil || actions.Total != 2 || actions.Items[0].SelectedTaskID != "task-a" || actions.Items[1].SelectedTaskID != "orphan-task" {
+		t.Fatalf("actions view: %#v %v", actions, err)
+	}
 	accepted := inventory.Items[1]
 	if accepted.Node == nil || accepted.Node.ID != "node-b" || accepted.BindingState != "missing" || !accepted.Resumable || !hasString(accepted.ResumableReasons, "accepted_roadmap_work_without_task") || hasString(accepted.Anomalies, "missing_task_binding") {
 		t.Fatalf("unexpected accepted item: %#v", accepted)

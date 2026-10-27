@@ -170,7 +170,7 @@ func workCommand() *cobra.Command {
 	var listView string
 	var listLimit int
 	var listOutput string
-	list := &cobra.Command{Use: "list", Short: "List open, current, active, next, blocked, stale, all, or everything (adds finished tasks without a roadmap node) work", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: "list", Short: "List open, current, active, next, blocked, stale, actions, all, or everything work", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return withApp(cmd, func(application *app.App) error {
 			result, err := application.Work.List(cmd.Context(), application.ProjectID, listView, listLimit)
 			if err != nil {
@@ -205,7 +205,7 @@ func workCommand() *cobra.Command {
 			return err
 		})
 	}}
-	list.Flags().StringVar(&listView, "view", "current", "open, current, active, next, blocked, stale, all or everything")
+	list.Flags().StringVar(&listView, "view", "current", "open, current, active, next, blocked, stale, actions, all or everything")
 	list.Flags().IntVar(&listLimit, "limit", workstate.DefaultLimit, "maximum tracks and ready items returned (1-100)")
 	list.Flags().StringVar(&listOutput, "output", "text", "text or json")
 
@@ -294,7 +294,7 @@ func workCommand() *cobra.Command {
 			return nil
 		})
 	}}
-	inventoryCommand.Flags().StringVar(&inventoryOptions.Filter, "filter", "all", "open, all (finished tasks without a roadmap node hidden), everything, current_focus, active, resumable, blocked, anomalous, or stale")
+	inventoryCommand.Flags().StringVar(&inventoryOptions.Filter, "filter", "all", "open, all, everything, current_focus, active, resumable, blocked, anomalous, stale, or actions")
 	inventoryCommand.Flags().StringVar(&inventoryOptions.RoadmapNodeID, "node", "", "exact roadmap node identifier")
 	inventoryCommand.Flags().IntVar(&inventoryOptions.Offset, "offset", 0, "zero-based result offset")
 	inventoryCommand.Flags().IntVar(&inventoryOptions.Limit, "limit", roadmap.DefaultTrackInventoryLimit, "maximum tracks returned")

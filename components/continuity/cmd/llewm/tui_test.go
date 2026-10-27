@@ -631,6 +631,26 @@ func TestTUIOpensOnTheTrackBeingWorkedOn(t *testing.T) {
 	}
 }
 
+func TestTUIShowsSelectedOlderTaskCheckpoint(t *testing.T) {
+	view, source := newFakeTerminal(t)
+	at := time.Date(2026, 9, 20, 9, 0, 0, 0, time.UTC)
+	view.now = func() time.Time { return at.Add(72 * time.Hour) }
+	source.work.Items[0].LatestCheckpoint = &roadmap.TrackCheckpoint{ID: "old", Status: "in_progress", NextAction: "Verify client", CreatedAt: at}
+	source.work.Items[0].UnresolvedActionCount = 1
+	if err := view.load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	view.workIndex = 0
+	view.currentTrack = -1
+	if err := view.detail(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	details := strings.Join(view.details, "\n")
+	if !strings.Contains(details, "3d ago") || !strings.Contains(details, "Next: Verify client") || !strings.Contains(details, "Unresolved actions: 1") {
+		t.Fatalf("details:\n%s", details)
+	}
+}
+
 func TestTUISaysLastWorkedWhenNothingIsInProgress(t *testing.T) {
 	view, source := newFakeTerminal(t)
 	checkpointAt := time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)
@@ -680,7 +700,7 @@ func TestTUIFilterBarVisibleAtMinimumSize(t *testing.T) {
 		}
 	}
 	check("FILTER: open  [f: change]")
-	for _, want := range []string{"current", "active", "next", "blocked", "stale", "all", "everything", "open"} {
+	for _, want := range []string{"current", "active", "next", "blocked", "stale", "all", "everything", "actions", "open"} {
 		if err := press(t, view, 'f'); err != nil {
 			t.Fatal(err)
 		}
