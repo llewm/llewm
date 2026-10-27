@@ -13,7 +13,7 @@ import (
 // IndexVersion identifies the derived inventory schema and interpretation.
 // Change it whenever block validation, semantic validation, or record and
 // reference indexing semantics change.
-const IndexVersion = 1
+const IndexVersion = 2
 
 // ErrIndexRebuild means the derived inventory cannot be trusted and must be
 // reconstructed from validated transport blocks.

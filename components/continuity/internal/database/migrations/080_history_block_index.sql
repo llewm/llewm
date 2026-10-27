@@ -35,6 +35,7 @@ CREATE TABLE history_index_valid_sets (
     project_id TEXT NOT NULL REFERENCES projects(id),
     set_hash TEXT NOT NULL,
     index_version INTEGER NOT NULL,
+    local_state_hash TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(project_id, set_hash)
 ) STRICT;
 

@@ -61,6 +61,11 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 				if err := cycle(); err != nil {
 					b.Fatal(err)
 				}
+				// A second unchanged cycle establishes any conservative semantic
+				// replay proof before measuring the steady state.
+				if err := cycle(); err != nil {
+					b.Fatal(err)
+				}
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					if changed {

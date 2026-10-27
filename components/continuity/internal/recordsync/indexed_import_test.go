@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
 	"github.com/llewm/llewm/components/continuity/internal/database"
@@ -221,6 +222,74 @@ func TestBlockImportMatchesFullScan(t *testing.T) {
 				t.Fatalf("round %d: output %d differs", round, i)
 			}
 		}
+	}
+}
+
+func TestMixedReplayProofInvalidatesOnLocalChange(t *testing.T) {
+	ctx, source, sourceID := indexedTestProject(t, "mixed-source")
+	_, indexed, indexedID := indexedTestProject(t, "mixed-indexed")
+	_, full, fullID := indexedTestProject(t, "mixed-full")
+	appendRecord := func(db *sql.DB, project, id, parent string) {
+		t.Helper()
+		_, err := (worknarrative.Service{DB: db}).Append(ctx, worknarrative.Record{ID: id, ProjectID: project, Title: id, Trigger: "manual", Creator: "test", SupersedesID: parent, Claims: []worknarrative.Claim{{Kind: "outcome", Text: "An observation", Authority: "caller_asserted"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendRecord(source, sourceID, "first", "")
+	appendRecord(source, sourceID, "second", "first")
+	export, err := portable.EncodeMemoryExport(ctx, source, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, export.Envelopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: indexed, ProjectID: indexedID, Lineage: lineage}
+	for i := 0; i < 3; i++ {
+		want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, block.Objects)
+		got, gotErr := index.ImportBlocks(ctx, []Block{block})
+		if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+			t.Fatalf("round %d: full=%+v %v indexed=%+v %v", i, want, wantErr, got, gotErr)
+		}
+	}
+	setHash, ok := mixedReplaySet(block.Objects)
+	if !ok {
+		t.Fatal("mixed dependency fixture was ineligible")
+	}
+	if _, proof, err := index.mixedReplaySnapshot(ctx, setHash, block.Objects, ""); err != nil || !proof {
+		t.Fatalf("stable replay proof missing: %v", err)
+	}
+	appendRecord(indexed, indexedID, "local-change", "")
+	appendRecord(full, fullID, "local-change", "")
+	if _, proof, err := index.mixedReplaySnapshot(ctx, setHash, block.Objects, ""); err != nil || proof {
+		t.Fatalf("local change did not invalidate proof: %v", err)
+	}
+	want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, block.Objects)
+	got, gotErr := index.ImportBlocks(ctx, []Block{block})
+	if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("replay after invalidation: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
+	}
+}
+
+func TestMixedReplayRefusesForksAndRecoveries(t *testing.T) {
+	makeObject := func(kind, id, payload string) portable.EncodedEnvelope {
+		t.Helper()
+		object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: kind, RecordSchemaVersion: 1, RecordID: id, RecordRevision: 1, RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(payload)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return object
+	}
+	first := makeObject("decision", "fork", `{"head":1}`)
+	second := makeObject("decision", "fork", `{"head":2}`)
+	if _, eligible := mixedReplaySet([]portable.EncodedEnvelope{first, second}); eligible {
+		t.Fatal("competing identity accepted for fast replay")
+	}
+	recovery := makeObject("redaction_recovery", "recovery", `{}`)
+	if _, eligible := mixedReplaySet([]portable.EncodedEnvelope{first, recovery}); eligible {
+		t.Fatal("recovery accepted for fast replay")
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -60,11 +62,8 @@ func validateBlockBytes(block Block) error {
 	return nil
 }
 
-// ImportBlocks is the experimental block-backed import path. It deliberately
-// runs the existing semantic importer over the complete supplied block set;
-// the inventory is not yet evidence that an object has been applied. This
-// provides a reference path for differential testing before selective import
-// or transport integration is enabled.
+// ImportBlocks uses a prior semantic proof only when its strict replay guards
+// hold. All other sets use the complete reference semantic importer.
 func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, error) {
 	if len(blocks) > portable.MaxRecordCount {
 		return ImportResult{}, fmt.Errorf("history block count exceeds bounds")
@@ -100,11 +99,132 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 			return ImportResult{}, nil
 		}
 	}
+	var mixedHash, beforeState string
+	if !eligible {
+		if candidate, ok := mixedReplaySet(objects); ok {
+			mixedHash = candidate
+			var seen int
+			if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash=? AND index_version=?`, s.ProjectID, mixedHash, IndexVersion).Scan(&seen); err == nil && seen != 0 {
+				state, proof, snapshotErr := s.mixedReplaySnapshot(ctx, mixedHash, objects, "")
+				if snapshotErr == nil {
+					if proof {
+						return ImportResult{}, nil
+					}
+					beforeState = state
+				}
+			}
+		}
+	}
 	result, err := (Importer{DB: s.DB, ProjectID: s.ProjectID, Now: s.Now}).Import(ctx, objects)
 	if err == nil && eligible && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
-		_, err = s.DB.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version) VALUES(?,?,?) ON CONFLICT(project_id,set_hash) DO UPDATE SET index_version=excluded.index_version`, s.ProjectID, setHash, IndexVersion)
+		_, err = s.DB.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,'') ON CONFLICT(project_id,set_hash) DO UPDATE SET index_version=excluded.index_version,local_state_hash=''`, s.ProjectID, setHash, IndexVersion)
+	} else if err == nil && mixedHash != "" && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
+		if beforeState != "" && result.ImportedRecords == 0 {
+			// Proof is written only if the complete local state still matches
+			// the pre-import snapshot while the writer lock is held.
+			_, _, err = s.mixedReplaySnapshot(ctx, mixedHash, objects, beforeState)
+		} else {
+			// A candidate is not a proof. It avoids an expensive pre-snapshot
+			// for a new set, and requires a later unchanged full replay.
+			_, err = s.DB.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,'') ON CONFLICT(project_id,set_hash) DO NOTHING`, s.ProjectID, mixedHash, IndexVersion)
+		}
 	}
 	return result, err
+}
+
+func mixedReplaySet(objects []portable.EncodedEnvelope) (string, bool) {
+	if len(objects) == 0 || len(objects) > portable.MaxRecordCount {
+		return "", false
+	}
+	identities := make(map[string]bool, len(objects))
+	var hashes []string
+	for _, object := range objects {
+		e := object.Envelope
+		key := portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)
+		if !portable.SupportedEnvelope(e) || portable.RetiredRecordType(e.RecordType) || e.RecordType == "redaction_recovery" || identities[key] {
+			return "", false
+		}
+		identities[key] = true
+		hashes = append(hashes, e.EnvelopeSHA256)
+	}
+	sort.Strings(hashes)
+	hash := sha256.New()
+	for _, value := range hashes {
+		hash.Write([]byte(value))
+		hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil)), true
+}
+
+// mixedReplaySnapshot takes a writer lock before comparing the complete local
+// operational state. A nonempty expected hash requests an atomic proof write;
+// mismatch or uncertainty leaves no proof and forces the reference importer.
+func (s Index) mixedReplaySnapshot(ctx context.Context, setHash string, objects []portable.EncodedEnvelope, expected string) (string, bool, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE history_index_valid_sets SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
+		return "", false, err
+	}
+	var recoveries int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM redaction_recoveries WHERE project_id=?`, s.ProjectID).Scan(&recoveries); err != nil || recoveries != 0 {
+		return "", false, err
+	}
+	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, object := range objects {
+		e := object.Envelope
+		held, ok := local[portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)]
+		if !ok || !bytes.Equal(held.Bytes, object.Bytes) {
+			return "", false, nil
+		}
+	}
+	if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
+		return "", false, err
+	}
+	keys := make([]string, 0, len(local))
+	for key := range local {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	hash := sha256.New()
+	var length [8]byte
+	for _, key := range keys {
+		binary.BigEndian.PutUint64(length[:], uint64(len(key)))
+		hash.Write(length[:])
+		hash.Write([]byte(key))
+		sum := sha256.Sum256(local[key].Bytes)
+		hash.Write(sum[:])
+	}
+	state := hex.EncodeToString(hash.Sum(nil))
+	if expected != "" {
+		if state != expected {
+			return "", false, nil
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,?) ON CONFLICT(project_id,set_hash) DO UPDATE SET index_version=excluded.index_version,local_state_hash=excluded.local_state_hash`, s.ProjectID, setHash, IndexVersion, state); err != nil {
+			return "", false, err
+		}
+	} else {
+		var saved string
+		err := tx.QueryRowContext(ctx, `SELECT local_state_hash FROM history_index_valid_sets WHERE project_id=? AND set_hash=? AND index_version=?`, s.ProjectID, setHash, IndexVersion).Scan(&saved)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", false, err
+		}
+		if err == nil && saved != "" && saved == state {
+			if err := tx.Commit(); err != nil {
+				return "", false, err
+			}
+			return state, true, nil
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return state, false, nil
 }
 
 // The first selective case is intentionally narrow. A prior complete import
