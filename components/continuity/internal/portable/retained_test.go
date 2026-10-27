@@ -118,3 +118,102 @@ func TestMemoryExportRemainsStableAfterRootChange(t *testing.T) {
 		t.Fatal("project move changed immutable export")
 	}
 }
+
+func TestRetainedNarrativeExportAndNewSupersession(t *testing.T) {
+	ctx, db, id := operationalProject(t, "narrative-reuse")
+	if _, err := (Service{DB: db}).Initialize(ctx, id, "lineage:abababababababababababababababab"); err != nil {
+		t.Fatal(err)
+	}
+	appendNarrative := func(recordID, supersedes string) {
+		t.Helper()
+		_, err := (worknarrative.Service{DB: db}).Append(ctx, worknarrative.Record{
+			ID: recordID, ProjectID: id, Title: recordID, Trigger: "manual", Creator: "test", SupersedesID: supersedes,
+			Claims: []worknarrative.Claim{{Kind: "outcome", Text: "An observation", Authority: "caller_asserted"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendNarrative("first", "")
+	first, err := EncodeMemoryExport(ctx, db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendNarrative("second", "first")
+	second, err := EncodeMemoryExport(ctx, db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := EncodeMemoryExport(ctx, db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := func(export MemoryExport) map[string][]byte {
+		result := make(map[string][]byte)
+		for _, e := range export.Envelopes {
+			result[RecordKey(e.Envelope.RecordType, e.Envelope.RecordID, e.Envelope.RecordRevision)] = e.Bytes
+		}
+		return result
+	}
+	a, b, c := index(first), index(second), index(third)
+	if !bytes.Equal(a[RecordKey("work_narrative", "first", 0)], b[RecordKey("work_narrative", "first", 0)]) {
+		t.Fatal("retained narrative changed")
+	}
+	for _, kind := range []string{"work_narrative", "work_narrative_supersession"} {
+		key := RecordKey(kind, "second", 0)
+		if len(b[key]) == 0 || !bytes.Equal(b[key], c[key]) {
+			t.Fatalf("new %s did not survive retained export", kind)
+		}
+	}
+}
+
+// Retaining an envelope must not change the operational records used by
+// import planning. This compares the reconstruction before retention with the
+// path taken on subsequent exports, including a supersession edge.
+func TestRetainedNarrativeMatchesReconstructedRecords(t *testing.T) {
+	ctx, db, id := operationalProject(t, "narrative-equivalence")
+	if _, err := (Service{DB: db}).Initialize(ctx, id, "lineage:abababababababababababababababab"); err != nil {
+		t.Fatal(err)
+	}
+	service := worknarrative.Service{DB: db}
+	for _, record := range []worknarrative.Record{
+		{ID: "first", ProjectID: id, Title: "First", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "First observation", Authority: "caller_asserted"}}},
+		{ID: "second", ProjectID: id, Title: "Correction", Trigger: "manual", Creator: "test", SupersedesID: "first", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Corrected observation", Authority: "caller_asserted"}}},
+	} {
+		if _, err := service.Append(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := LoadOperationalRecords(ctx, db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EncodeMemoryExport(ctx, db, id); err != nil {
+		t.Fatal(err)
+	}
+	after, err := LoadOperationalRecords(ctx, db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encode := func(records []EnvelopeSpec) map[string][]byte {
+		t.Helper()
+		result := make(map[string][]byte, len(records))
+		for _, spec := range records {
+			e, err := EncodeEnvelope(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result[RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)] = e.Bytes
+		}
+		return result
+	}
+	a, b := encode(before.Records), encode(after.Records)
+	if len(a) != len(b) {
+		t.Fatalf("record count changed after retention: %d to %d", len(a), len(b))
+	}
+	for key, want := range a {
+		if !bytes.Equal(want, b[key]) {
+			t.Fatalf("record %q changed after retention", key)
+		}
+	}
+}

@@ -221,6 +221,29 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 	}
 	records = append(records, recoverySpecs...)
 	invocationIDs := roadmapInvocations
+	// Retained narrative envelopes are immutable. We still read and check the
+	// operational payload and its invocation binding, but need not reconstruct
+	// and redact an envelope that retainedSpecs will replace with those bytes.
+	retainedNarratives := make(map[string]bool)
+	retainedRows, err := source.QueryContext(ctx, `SELECT record_type,record_id FROM portable_envelopes WHERE project_id=? AND record_revision=0 AND record_type IN ('work_narrative','work_narrative_supersession')`, projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for retainedRows.Next() {
+		var kind, id string
+		if err := retainedRows.Scan(&kind, &id); err != nil {
+			retainedRows.Close()
+			return nil, nil, err
+		}
+		retainedNarratives[RecordKey(kind, id, 0)] = true
+	}
+	if err := retainedRows.Err(); err != nil {
+		retainedRows.Close()
+		return nil, nil, err
+	}
+	if err := retainedRows.Close(); err != nil {
+		return nil, nil, err
+	}
 	workRows, err := source.QueryContext(ctx, `SELECT payload_json,COALESCE(creator_invocation_id,'') FROM work_narratives WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, nil, err
@@ -239,6 +262,16 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 			return nil, nil, fmt.Errorf("work narrative payload identity or schema mismatch for %q", record.ID)
 		}
 		record.CreatorInvocationID = creatorInvocationID
+		if retainedNarratives[RecordKey("work_narrative", record.ID, 0)] && (record.SupersedesID == "" || retainedNarratives[RecordKey("work_narrative_supersession", record.ID, 0)]) {
+			records = append(records, EnvelopeSpec{RecordType: "work_narrative", RecordID: record.ID})
+			if record.SupersedesID != "" {
+				records = append(records, EnvelopeSpec{RecordType: "work_narrative_supersession", RecordID: record.ID})
+			}
+			if creatorInvocationID != "" {
+				invocationIDs[creatorInvocationID] = struct{}{}
+			}
+			continue
+		}
 		if record.Source != nil {
 			v := *record.Source
 			v.Publisher = portableText(v.Publisher, projectRoot)

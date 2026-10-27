@@ -17,7 +17,7 @@ import (
 
 const operationalCommit = "0123456789abcdef0123456789abcdef01234567"
 
-func operationalProject(t *testing.T, name string) (context.Context, *sql.DB, string) {
+func operationalProject(t testing.TB, name string) (context.Context, *sql.DB, string) {
 	t.Helper()
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), name)
