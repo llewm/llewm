@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -197,18 +196,28 @@ func writeCanonicalString(output *bytes.Buffer, value string) {
 }
 
 func lessUTF16(left, right string) bool {
-	a := utf16.Encode([]rune(left))
-	b := utf16.Encode([]rune(right))
-	limit := len(a)
-	if len(b) < limit {
-		limit = len(b)
-	}
-	for i := 0; i < limit; i++ {
-		if a[i] != b[i] {
-			return a[i] < b[i]
+	for len(left) > 0 && len(right) > 0 {
+		a, aSize := utf8.DecodeRuneInString(left)
+		b, bSize := utf8.DecodeRuneInString(right)
+		// Supplementary runes sort by their leading surrogate before BMP code
+		// points above the surrogate range. Within one leading surrogate, rune
+		// order is the same as trailing-surrogate order.
+		aFirst, bFirst := a, b
+		if a >= 0x10000 {
+			aFirst = 0xd800 + (a-0x10000)>>10
 		}
+		if b >= 0x10000 {
+			bFirst = 0xd800 + (b-0x10000)>>10
+		}
+		if aFirst != bFirst {
+			return aFirst < bFirst
+		}
+		if a != b {
+			return a < b
+		}
+		left, right = left[aSize:], right[bSize:]
 	}
-	return len(a) < len(b)
+	return len(left) < len(right)
 }
 
 func validateJSONStringEscapes(input []byte) error {

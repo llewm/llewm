@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 func TestCanonicalizeJSONProfile(t *testing.T) {
@@ -195,5 +196,26 @@ func assertBundleRejected(t *testing.T, manifest, records []byte, want string) {
 	t.Helper()
 	if _, err := ValidateBundle(manifest, records); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("expected %q rejection, got %v", want, err)
+	}
+}
+
+func TestUTF16OrderingMatchesReference(t *testing.T) {
+	values := []string{"", "a", "aa", "€", "\ud7ff", "\ue000", "\uffff", "𐀀", "😀", "😁", "\U0010ffff", "a😀", "a\ue000", string([]byte{0xff})}
+	for _, a := range values {
+		for _, b := range values {
+			x, y := utf16.Encode([]rune(a)), utf16.Encode([]rune(b))
+			want := false
+			for i := 0; i < len(x) && i < len(y); i++ {
+				if x[i] != y[i] {
+					want = x[i] < y[i]
+					goto checked
+				}
+			}
+			want = len(x) < len(y)
+		checked:
+			if got := lessUTF16(a, b); got != want {
+				t.Fatalf("ordering %q vs %q: got %v want %v", a, b, got, want)
+			}
+		}
 	}
 }
