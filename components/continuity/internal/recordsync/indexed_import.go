@@ -56,7 +56,7 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 			return ImportResult{}, nil
 		}
 	}
-	result, err := (Importer{DB: s.DB, ProjectID: s.ProjectID}).Import(ctx, objects)
+	result, err := (Importer{DB: s.DB, ProjectID: s.ProjectID, Now: s.Now}).Import(ctx, objects)
 	if err == nil && eligible && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
 		_, err = s.DB.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version) VALUES(?,?,?) ON CONFLICT(project_id,set_hash) DO UPDATE SET index_version=excluded.index_version`, s.ProjectID, setHash, IndexVersion)
 	}

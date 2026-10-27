@@ -76,34 +76,60 @@ func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]
 	return blocks, nil
 }
 
-func (s Syncer) publishBlocks(ctx context.Context, lineage string) (int, error) {
+func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]string, int, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
-		return 0, fmt.Errorf("matching history archive is required for block publication")
+		return nil, 0, fmt.Errorf("matching history archive is required for block publication")
 	}
-	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage}
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
 	blocks, err := index.PlanPublication(ctx, *s.Archive, s.Endpoint(), s.Relay)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	root, err := recordsync.OpenRoot(s.Clone)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	defer root.Close()
 	count := 0
+	var paths []string
+	directory, err := recordsync.BlockDirectory(lineage)
+	if err != nil {
+		return nil, 0, err
+	}
 	for _, block := range blocks {
 		if err := ctx.Err(); err != nil {
-			return count, err
+			return paths, count, err
 		}
 		added, err := recordsync.PublishBlock(root, lineage, block)
 		if err != nil {
-			return count, err
+			return paths, count, err
 		}
+		paths = append(paths, filepath.ToSlash(filepath.Join(directory, block.Hash+".block")))
 		if added {
 			count += len(block.Objects)
 		}
 	}
-	return count, nil
+	return paths, count, nil
+}
+
+// commitBlocks stages only explicitly validated block paths. Never add a whole
+// directory: untracked working-tree files are not part of the transport.
+func commitBlocks(ctx context.Context, repo git, paths []string, message string) error {
+	if _, err := repo.run(ctx, "diff", "--cached", "--quiet"); err != nil {
+		return fmt.Errorf("block publication requires a clean Git index")
+	}
+	for _, path := range paths {
+		if _, err := repo.run(ctx, "add", "--", path); err != nil {
+			return err
+		}
+	}
+	if _, err := repo.run(ctx, "diff", "--cached", "--quiet"); err == nil {
+		return nil
+	} else if exitCode(err) != 1 {
+		return err
+	}
+	_, err := repo.run(ctx, "commit", "--quiet", "-m", message)
+	return err
 }
 
 func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage string) (recordsync.ImportResult, error) {
@@ -114,7 +140,7 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 	if err != nil {
 		return recordsync.ImportResult{}, err
 	}
-	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage}
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
 	for _, block := range blocks {
 		if err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
 			return recordsync.ImportResult{}, err

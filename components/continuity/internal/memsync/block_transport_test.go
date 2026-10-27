@@ -171,7 +171,8 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if err := aa.CaptureLocal(export.Envelopes); err != nil {
 		t.Fatal(err)
 	}
-	if count, err := a.syncer.publishBlocks(ctx, testLineage); err != nil || count != len(export.Envelopes) {
+	paths, count, err := a.syncer.publishBlocks(ctx, testLineage)
+	if err != nil || count != len(export.Envelopes) {
 		t.Fatalf("publish: %d %v", count, err)
 	}
 	repo, err := a.syncer.repository(ctx)
@@ -179,8 +180,15 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory, _ := recordsync.BlockDirectory(testLineage)
-	if err := commit(ctx, repo, directory, len(export.Envelopes), "fixture: publish blocks"); err != nil {
+	untracked := filepath.Join(a.syncer.Clone, directory, "untracked.block")
+	if err := os.WriteFile(untracked, []byte("not an observation"), 0600); err != nil {
 		t.Fatal(err)
+	}
+	if err := commitBlocks(ctx, repo, paths, "fixture: publish blocks"); err != nil {
+		t.Fatal(err)
+	}
+	if tracked, err := repo.run(ctx, "ls-files", "--", filepath.ToSlash(filepath.Join(directory, "untracked.block"))); err != nil || tracked != "" {
+		t.Fatalf("untracked file was committed: %q %v", tracked, err)
 	}
 	if _, err := repo.run(ctx, "push", "origin", "HEAD:refs/heads/main"); err != nil {
 		t.Fatal(err)
@@ -200,5 +208,54 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	}
 	if result, err := b.syncer.importTrackedBlocks(ctx, peer, testLineage); err != nil || result.ImportedRecords != 0 {
 		t.Fatalf("replay: %+v %v", result, err)
+	}
+}
+
+func TestBlockCycleConvergesAcrossGitPeers(t *testing.T) {
+	ctx := context.Background()
+	remote := bareRemote(t)
+	a, b := newMachine(t, "block-cycle-a", remote), newMachine(t, "block-cycle-b", remote)
+	aa, ba := archiveMachine(t, &a), archiveMachine(t, &b)
+	a.syncer.Archive, b.syncer.Archive = &aa, &ba
+	a.decide(t, "from-a", "Observation from A")
+	if result, err := a.syncer.cycleBlocks(ctx, plan{push: true}); err != nil || result.Outcome != OutcomeSynced {
+		t.Fatalf("A sync: %+v %v", result, err)
+	}
+	if result, err := b.syncer.cycleBlocks(ctx, plan{push: true}); err != nil || result.ImportedRecords != 1 {
+		t.Fatalf("B sync: %+v %v", result, err)
+	}
+	b.decide(t, "from-b", "Observation from B")
+	if result, err := b.syncer.cycleBlocks(ctx, plan{push: true}); err != nil || result.Outcome != OutcomeSynced {
+		t.Fatalf("B publication: %+v %v", result, err)
+	}
+	if result, err := a.syncer.cycleBlocks(ctx, plan{push: true}); err != nil || result.ImportedRecords != 1 {
+		t.Fatalf("A import: %+v %v", result, err)
+	}
+}
+
+func TestBlockCycleConvertsRemoteV3AndPreservesFork(t *testing.T) {
+	ctx := context.Background()
+	remote := bareRemote(t)
+	a, b := newMachine(t, "v3-remote", remote), newMachine(t, "v4-converter", remote)
+	a.topic(t, "transport", "Remote alternative")
+	a.sync(t, OutcomeSynced)
+	b.topic(t, "transport", "Local alternative")
+	archive := archiveMachine(t, &b)
+	b.syncer.Archive = &archive
+	result, err := b.syncer.cycleBlocks(ctx, plan{push: true, convert: true})
+	if err != nil || !result.Converted || result.Forks != 1 {
+		t.Fatalf("conversion: %+v %v", result, err)
+	}
+	if forks := b.forks(t); len(forks) != 1 || len(forks[0].Heads) != 2 {
+		t.Fatalf("conversion lost competing observations: %+v", forks)
+	}
+	peer := newMachine(t, "v4-fresh", remote)
+	pa := archiveMachine(t, &peer)
+	peer.syncer.Archive = &pa
+	if result, err := peer.syncer.cycleBlocks(ctx, plan{push: true}); err != nil || result.Outcome != OutcomeSynced {
+		t.Fatalf("fresh peer: %+v %v", result, err)
+	}
+	if forks := peer.forks(t); len(forks) != 1 || len(forks[0].Heads) != 2 {
+		t.Fatalf("fresh peer lost competing observations: %+v", forks)
 	}
 }

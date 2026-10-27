@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
@@ -24,6 +25,7 @@ type Index struct {
 	DB        *sql.DB
 	ProjectID string
 	Lineage   string
+	Now       func() time.Time
 }
 
 // AddBlock atomically indexes a complete block. A prior index version requires
