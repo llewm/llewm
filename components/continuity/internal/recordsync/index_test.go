@@ -2,6 +2,7 @@ package recordsync
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -87,5 +88,36 @@ func TestBlockIndexVersionsDependentsAndRebuild(t *testing.T) {
 	versions, err = index.Versions(ctx, "decision", "target", 1)
 	if err != nil || len(versions) != 1 {
 		t.Fatalf("rebuild failed: %d %v", len(versions), err)
+	}
+}
+
+func TestBlockInventoryRejectsDamagedIdentityAndReferences(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "damaged-index")
+	object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "dependent", RecordRevision: 1, RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`), Refs: []portable.Reference{{Kind: "decision", ID: "target"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{object})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	for _, mutation := range []string{
+		`UPDATE history_index_records SET record_id='wrong'`,
+		`DELETE FROM history_index_refs`,
+		`INSERT INTO history_index_refs(project_id,block_hash,envelope_hash,ref_kind,ref_id) SELECT project_id,block_hash,envelope_hash,'decision','extra' FROM history_index_records`,
+	} {
+		if err := index.Clear(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := index.AddBlock(ctx, block); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, mutation); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := index.blockObjects(ctx, []Block{block}); !errors.Is(err, ErrIndexRebuild) {
+			t.Fatalf("mutation %q was not detected: %v", mutation, err)
+		}
 	}
 }

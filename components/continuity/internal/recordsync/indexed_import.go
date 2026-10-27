@@ -165,16 +165,27 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 		// This catches missing, added, or changed rows without revalidating each
 		// envelope until the semantic importer needs it. IndexVersion must change
 		// whenever block validation rules change.
-		rows, err := s.DB.QueryContext(ctx, `SELECT envelope_json FROM history_index_records WHERE project_id=? AND block_hash=? ORDER BY envelope_json`, s.ProjectID, block.Hash)
+		rows, err := s.DB.QueryContext(ctx, `SELECT envelope_json,envelope_hash,record_type,record_id,record_revision FROM history_index_records WHERE project_id=? AND block_hash=? ORDER BY envelope_json`, s.ProjectID, block.Hash)
 		if err != nil {
 			return nil, err
 		}
 		var bodies [][]byte
+		type refKey struct{ hash, kind, id string }
+		expectedRefs := make(map[refKey]bool)
 		for rows.Next() {
-			var body string
-			if err := rows.Scan(&body); err != nil {
+			var body, hash, kind, id string
+			var revision int
+			if err := rows.Scan(&body, &hash, &kind, &id, &revision); err != nil {
 				rows.Close()
 				return nil, err
+			}
+			var envelope portable.Envelope
+			if err := json.Unmarshal([]byte(body), &envelope); err != nil || envelope.EnvelopeSHA256 != hash || envelope.RecordType != kind || envelope.RecordID != id || envelope.RecordRevision != revision || envelope.LineageID != s.Lineage {
+				rows.Close()
+				return nil, fmt.Errorf("%w: inventory identity differs from envelope", ErrIndexRebuild)
+			}
+			for _, ref := range envelope.Refs {
+				expectedRefs[refKey{hash, ref.Kind, ref.ID}] = true
 			}
 			bodies = append(bodies, []byte(body))
 		}
@@ -191,6 +202,30 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 		}
 		if !bytes.Equal(reconstructed.Bytes(), block.Bytes) {
 			return nil, fmt.Errorf("%w: inventory differs from block", ErrIndexRebuild)
+		}
+		refs, err := s.DB.QueryContext(ctx, `SELECT envelope_hash,ref_kind,ref_id FROM history_index_refs WHERE project_id=? AND block_hash=?`, s.ProjectID, block.Hash)
+		if err != nil {
+			return nil, err
+		}
+		for refs.Next() {
+			var key refKey
+			if err := refs.Scan(&key.hash, &key.kind, &key.id); err != nil {
+				refs.Close()
+				return nil, err
+			}
+			if !expectedRefs[key] {
+				refs.Close()
+				return nil, fmt.Errorf("%w: unexpected inventory reference", ErrIndexRebuild)
+			}
+			delete(expectedRefs, key)
+		}
+		err = refs.Err()
+		refs.Close()
+		if err != nil {
+			return nil, err
+		}
+		if len(expectedRefs) != 0 {
+			return nil, fmt.Errorf("%w: missing inventory reference", ErrIndexRebuild)
 		}
 		for _, body := range bodies {
 			count++
