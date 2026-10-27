@@ -114,6 +114,9 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 	if !eligible {
 		if candidate, ok := mixedReplaySet(objects); ok {
 			mixedHash = candidate
+			if result, used, err := s.tryMixedAdditions(ctx, mixedHash, objects); used {
+				return result, err
+			}
 			var seen int
 			if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash=? AND index_version=?`, s.ProjectID, mixedHash, IndexVersion).Scan(&seen); err == nil && seen != 0 {
 				state, proof, snapshotErr := s.mixedReplaySnapshot(ctx, mixedHash, objects, "")
@@ -197,27 +200,24 @@ func (s Index) mixedReplaySnapshot(ctx context.Context, setHash string, objects 
 	if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
 		return "", false, err
 	}
-	keys := make([]string, 0, len(local))
-	for key := range local {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	hash := sha256.New()
-	var length [8]byte
-	for _, key := range keys {
-		binary.BigEndian.PutUint64(length[:], uint64(len(key)))
-		hash.Write(length[:])
-		hash.Write([]byte(key))
-		sum := sha256.Sum256(local[key].Bytes)
-		hash.Write(sum[:])
-	}
-	state := hex.EncodeToString(hash.Sum(nil))
+	state := localStateHash(local, nil)
 	if expected != "" {
 		if state != expected {
 			return "", false, nil
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,?) ON CONFLICT(project_id,set_hash) DO UPDATE SET index_version=excluded.index_version,local_state_hash=excluded.local_state_hash`, s.ProjectID, setHash, IndexVersion, state); err != nil {
 			return "", false, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_mixed_tip(project_id,set_hash,index_version) VALUES(?,?,?) ON CONFLICT(project_id) DO UPDATE SET set_hash=excluded.set_hash,index_version=excluded.index_version`, s.ProjectID, setHash, IndexVersion); err != nil {
+			return "", false, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_mixed_members WHERE project_id=?`, s.ProjectID); err != nil {
+			return "", false, err
+		}
+		for _, object := range objects {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_mixed_members(project_id,envelope_hash) VALUES(?,?)`, s.ProjectID, object.Envelope.EnvelopeSHA256); err != nil {
+				return "", false, err
+			}
 		}
 	} else {
 		var saved string
@@ -236,6 +236,26 @@ func (s Index) mixedReplaySnapshot(ctx context.Context, setHash string, objects 
 		return "", false, err
 	}
 	return state, false, nil
+}
+
+func localStateHash(local map[string]portable.EncodedEnvelope, excluded map[string]bool) string {
+	keys := make([]string, 0, len(local))
+	for key := range local {
+		if !excluded[key] {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	hash := sha256.New()
+	var length [8]byte
+	for _, key := range keys {
+		binary.BigEndian.PutUint64(length[:], uint64(len(key)))
+		hash.Write(length[:])
+		hash.Write([]byte(key))
+		sum := sha256.Sum256(local[key].Bytes)
+		hash.Write(sum[:])
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // The first selective case is intentionally narrow. A prior complete import

@@ -14,7 +14,7 @@ import (
 // IndexVersion identifies the derived inventory schema and interpretation.
 // Change it whenever block validation, semantic validation, or record and
 // reference indexing semantics change.
-const IndexVersion = 3
+const IndexVersion = 4
 
 // ErrIndexRebuild means the derived inventory cannot be trusted and must be
 // reconstructed from validated transport blocks.
@@ -127,6 +127,9 @@ func (s Index) RepairBlock(ctx context.Context, block Block) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_narrative_tip WHERE project_id=?`, s.ProjectID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_mixed_tip WHERE project_id=?`, s.ProjectID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -195,7 +198,7 @@ func (s Index) RepairStored(ctx context.Context) error {
 		}
 		verified = append(verified, block)
 	}
-	for _, table := range []string{"history_index_refs", "history_index_records", "history_index_valid_sets", "history_index_narrative_tip"} {
+	for _, table := range []string{"history_index_refs", "history_index_records", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
@@ -219,7 +222,7 @@ func (s Index) Clear(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip"} {
+	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
@@ -267,7 +270,7 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip"} {
+	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
