@@ -285,7 +285,7 @@ type Result struct {
 	// DeferredRecords counts records of types this build cannot read. They are
 	// skipped, and the import watermark holds so a newer build imports them.
 	DeferredRecords int `json:"deferred_records"`
-	// Converted reports that this cycle removed the lineage's format-2 records.
+	// Converted reports that the explicit conversion cycle finished.
 	Converted bool `json:"converted,omitempty"`
 	// LeaseNotes reports cross-machine lease events that could not be
 	// mirrored or published, and a lease step that failed.
@@ -300,9 +300,8 @@ func (s Syncer) now() time.Time {
 	return time.Now().UTC()
 }
 
-// Convert fetches and validates the lineage's format-2 observations, then
-// re-encodes every observation as format 3 in a Continuity-made commit. All old
-// writers must be stopped first. It needs the remote.
+// Convert fetches and validates older observations and packs them into format 4.
+// All old writers must be stopped first. It needs the remote.
 func (s Syncer) Convert(ctx context.Context) (Result, error) {
 	return s.run(ctx, plan{push: true, convert: true})
 }
@@ -335,7 +334,7 @@ func (s Syncer) Session(ctx context.Context, budget time.Duration) (Result, erro
 // plan is what one sync attempt may do.
 type plan struct {
 	push bool
-	// convert removes the lineage's format-2 records before pushing.
+	// convert retires the lineage's older tracked formats before pushing.
 	convert bool
 	// deadline, when set, is when the attempt stops waiting on the remote.
 	deadline time.Time
@@ -344,7 +343,7 @@ type plan struct {
 
 func (s Syncer) run(ctx context.Context, p plan) (Result, error) {
 	started := s.now()
-	result, err := s.cycle(ctx, p)
+	result, err := s.cycleBlocks(ctx, p)
 	if err != nil {
 		result.Outcome, result.Detail = OutcomeError, redact.String(err.Error())
 	}
@@ -385,178 +384,6 @@ func stopped(ctx context.Context, step string) error {
 		return fmt.Errorf("sync stopped before %s: %w", step, err)
 	}
 	return nil
-}
-
-func (s Syncer) cycle(ctx context.Context, p plan) (Result, error) {
-	var result Result
-	if err := stopped(ctx, "starting"); err != nil {
-		return result, err
-	}
-	// Local Git and database steps run to completion even when ctx ends: killing
-	// one could leave a lock file, a rebase in progress, or a rolled-back import.
-	local := context.WithoutCancel(ctx)
-	repo, err := s.repository(local)
-	if err != nil {
-		return result, err
-	}
-	lock, err := lockFile(filepath.Join(s.Clone, ".git", "continuity-sync.lock"))
-	if err != nil {
-		return result, err
-	}
-	defer lock.Close()
-	if err := stopped(ctx, "exporting"); err != nil {
-		return result, err
-	}
-
-	export, err := portable.EncodeMemoryExport(local, s.DB, s.ProjectID)
-	if err != nil {
-		return result, fmt.Errorf("export memory records: %w", err)
-	}
-	if s.Archive != nil {
-		if err := s.Archive.CaptureLocal(export.Envelopes); err != nil {
-			return result, err
-		}
-		export.Envelopes, err = s.Archive.Objects(local, s.Endpoint(), s.Relay)
-		if err != nil {
-			return result, err
-		}
-	}
-	lineageDir := portable.MemoryLineageDir(export.Identity.LineageID)
-	written, err := writeNew(s.Clone, export.Envelopes)
-	result.ExportedRecords = len(written)
-	if err != nil {
-		return result, err
-	}
-	message := fmt.Sprintf("continuity: %s +%d records", export.Identity.InstanceID, result.ExportedRecords)
-
-	if err := commit(local, repo, lineageDir, result.ExportedRecords, message); err != nil {
-		return result, err
-	}
-	head, err := repo.run(local, "symbolic-ref", "--short", "HEAD")
-	if err != nil {
-		return result, err
-	}
-	branch := head
-	previous, err := s.importedHead(local)
-	if err != nil {
-		return result, err
-	}
-	offline, deferred, imported := false, false, false
-	for attempt := 0; ; attempt++ {
-		if err := stopped(ctx, "fetching"); err != nil {
-			return result, err
-		}
-		if attempt == 0 {
-			if err := probe(ctx, repo, s.Remote, p.deadline); errors.Is(err, errBudget) {
-				deferred, result.Detail = true, fmt.Sprintf("no time left to fetch within %s; a background sync continues", p.budget)
-				break
-			} else if err != nil {
-				if ctxErr := stopped(ctx, "fetching"); ctxErr != nil {
-					return result, ctxErr
-				}
-				offline, result.Detail = true, "remote unreachable: "+redact.String(err.Error())
-				break
-			}
-		}
-		if err := s.fetch(ctx, repo, p); errors.Is(err, errBudget) {
-			deferred, result.Detail = true, fmt.Sprintf("fetch did not finish within %s; a background sync continues", p.budget)
-			break
-		} else if err != nil {
-			if ctxErr := stopped(ctx, "importing"); ctxErr != nil {
-				return result, ctxErr
-			}
-			offline, result.Detail = true, "remote unreachable: "+redact.String(err.Error())
-			break
-		}
-		branch = remoteBranch(local, repo, head)
-		if remoteExists(local, repo, branch) {
-			if _, err := repo.run(local, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
-				// Nothing committed here yet: start from the remote history.
-				if _, err := repo.run(local, "checkout", "--quiet", "-B", branch, "origin/"+branch); err != nil {
-					return result, err
-				}
-			} else if _, err := repo.run(local, "rebase", "--quiet", "origin/"+branch); err != nil {
-				_, _ = repo.run(local, "rebase", "--abort")
-				return result, err
-			}
-		}
-		if err := s.importNew(local, repo, lineageDir, previous, written, &result); err != nil {
-			return result, fmt.Errorf("import memory records: %w", err)
-		}
-		imported = true
-		exportedBeforeConversion := result.ExportedRecords
-		if err := retireFormerFormat(local, repo, s.Clone, export.Identity, p.convert, &result); err != nil {
-			return result, err
-		}
-		if p.convert && result.ExportedRecords > exportedBeforeConversion {
-			// Conversion includes remote-only and rejected observations, so import
-			// every new-format path after the conversion commit, not just exports.
-			if err := s.importNew(local, repo, lineageDir, "", written, &result); err != nil {
-				return result, fmt.Errorf("import converted memory records: %w", err)
-			}
-		}
-		if upToDate(local, repo, branch) {
-			break // nothing to push; skipping saves a network round trip
-		}
-		if !p.push {
-			deferred, result.Detail = true, "fetched and imported; a background sync pushes"
-			break
-		}
-		if err := stopped(ctx, "pushing"); err != nil {
-			return result, err
-		}
-		// Local versions are pushed even beside a collision so every machine sees both.
-		err := s.push(ctx, repo, branch, p)
-		if err == nil {
-			break
-		} else if stoppedErr := stopped(ctx, "retrying the push"); stoppedErr != nil {
-			return result, stoppedErr
-		} else if attempt == 1 {
-			offline, result.Detail = true, "push rejected: "+redact.String(err.Error())
-			break
-		}
-		// Another writer pushed between fetch and push; take their records and retry once.
-	}
-	if imported && !offline && s.Leases != nil {
-		result.LeaseNotes = s.syncLeases(ctx, repo, p)
-	}
-	if p.convert && !result.Converted {
-		return result, fmt.Errorf("format-3 conversion needs the remote, and it did not finish: %s", result.Detail)
-	}
-	switch {
-	case offline || deferred:
-		// Records already on this machine's clone still reach the project.
-		if !imported {
-			if err := s.importNew(local, repo, lineageDir, previous, written, &result); err != nil {
-				return result, fmt.Errorf("import local memory records: %w", err)
-			}
-		}
-		result.Outcome = OutcomeOffline
-		if deferred {
-			result.Outcome = OutcomeDeferred
-		}
-	default:
-		result.Outcome, result.Detail = OutcomeSynced, "synced with "+redact.String(s.Remote)
-	}
-	if p.convert {
-		result.Detail = "format-2 observations converted; " + result.Detail
-	}
-	if result.Forks > 0 {
-		result.Detail = fmt.Sprintf("%d record revisions have several versions; each is kept as a fork (llewm fork list). %s", result.Forks, result.Detail)
-	}
-	if result.SupersessionForks > 0 {
-		result.Detail = fmt.Sprintf("%d records were superseded more than once; every successor is kept as a fork (llewm fork list). %s", result.SupersessionForks, result.Detail)
-	}
-	if result.Collisions > 0 {
-		result.Outcome = OutcomeCollision
-		result.Detail = fmt.Sprintf("%d records have conflicting versions; other records were imported. %s", result.Collisions, result.Detail)
-	}
-	if result.SemanticPending != "" {
-		result.Outcome = OutcomeError
-		result.Detail = "transport processed; " + result.SemanticPending
-	}
-	result.UnpushedCommits = unpushed(local, repo, branch)
-	return result, nil
 }
 
 // syncLeases mirrors the remote's lease refs and, when the plan may push,
@@ -714,65 +541,6 @@ func unpushed(ctx context.Context, repo git, branch string) int {
 	}
 	count, _ := strconv.Atoi(output)
 	return count
-}
-
-// importNew reads tracked immutable objects into the shared importer. Full scans
-// preserve deferred records and forks even when another transport supplied them.
-func (s Syncer) importNew(ctx context.Context, repo git, lineageDir, previous string, own map[string]bool, result *Result) error {
-	head, err := repo.run(ctx, "rev-parse", "--verify", "--quiet", "HEAD")
-	if err != nil {
-		return nil
-	}
-	listing, err := repo.run(ctx, "ls-files", "--", lineageDir)
-	if err != nil {
-		return err
-	}
-	root, err := recordsync.OpenRoot(s.Clone)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	identity, err := (portable.Service{DB: s.DB}).Get(ctx, s.ProjectID)
-	if err != nil {
-		return err
-	}
-	if identity == nil {
-		return fmt.Errorf("portable identity required")
-	}
-	var objects []portable.EncodedEnvelope
-	total := 0
-	for _, relative := range strings.Fields(listing) {
-		e, err := recordsync.ReadObject(root, filepath.FromSlash(relative), identity.LineageID)
-		if err != nil {
-			return err
-		}
-		total += len(e.Bytes)
-		if total > portable.MaxRecordsBytes || len(objects) >= portable.MaxRecordCount {
-			return fmt.Errorf("memory record scan exceeds bounds")
-		}
-		objects = append(objects, e)
-	}
-	if s.Archive != nil {
-		for _, e := range objects {
-			if _, err := s.Archive.Put(e, s.Endpoint()); err != nil {
-				return err
-			}
-		}
-	}
-	imported, err := (recordsync.Importer{DB: s.DB, ProjectID: s.ProjectID, Now: s.Now}).Import(ctx, objects)
-	result.ImportedRecords += imported.ImportedRecords
-	result.Collisions, result.Forks, result.SupersessionForks, result.DeferredRecords = imported.Collisions, imported.Forks, imported.SupersessionForks, imported.DeferredRecords
-	if err != nil {
-		if s.Archive != nil && errors.Is(err, recordsync.ErrSemanticPending) {
-			result.SemanticPending = redact.String(err.Error())
-			return nil
-		}
-		return err
-	}
-	if result.Collisions == 0 && result.DeferredRecords == 0 && result.SemanticPending == "" {
-		result.ImportedHead = head
-	}
-	return nil
 }
 
 func (s Syncer) importedHead(ctx context.Context) (string, error) {

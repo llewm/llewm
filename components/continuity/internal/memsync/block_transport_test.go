@@ -246,7 +246,23 @@ func TestBlockCycleConvertsRemoteV3AndPreservesFork(t *testing.T) {
 	remote := bareRemote(t)
 	a, b := newMachine(t, "v3-remote", remote), newMachine(t, "v4-converter", remote)
 	a.topic(t, "transport", "Remote alternative")
-	a.sync(t, OutcomeSynced)
+	export, err := portable.EncodeMemoryExport(ctx, a.db, a.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeNew(a.syncer.Clone, export.Envelopes); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := a.syncer.repository(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := commit(ctx, repo, portable.MemoryLineageDir(testLineage), len(export.Envelopes), "fixture: v3 history"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.run(ctx, "push", "origin", "HEAD:refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
 	b.topic(t, "transport", "Local alternative")
 	archive := archiveMachine(t, &b)
 	b.syncer.Archive = &archive

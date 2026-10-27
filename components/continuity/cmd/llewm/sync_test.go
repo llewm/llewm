@@ -149,6 +149,13 @@ func TestSyncCommandsAcrossTwoCheckouts(t *testing.T) {
 	}
 }
 
+func TestSyncConversionRequiresStoppedWritersConfirmation(t *testing.T) {
+	err, _ := runCLIError("sync", "convert")
+	if err == nil || !strings.Contains(err.Error(), "--writers-stopped") {
+		t.Fatalf("conversion did not require writer confirmation: %v", err)
+	}
+}
+
 func TestAutomaticSyncTriggers(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	var started []string

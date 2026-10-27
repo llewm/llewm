@@ -134,9 +134,8 @@ restoring the previous automatic-sync setting.
   committer identity when the user has none. They are exempt from the engineer's
   Git-note and work-narrative commit policy, because they are machine records, not
   engineering work.
-- The repository holds only curated, redacted, immutable envelopes at
-  `v3/<lineage>/records/<type>/<identity-sha256>/<envelope-sha256>.json`; the
-  top directory names the portable format. There is no
+- The repository holds curated, redacted, immutable envelopes in content-addressed
+  blocks at `v4/<lineage>/blocks/<block-sha256>.block`. There is no
   SQLite, no device-private data (raw events, sessions, usage, hook telemetry), and no
   credentials.
 - A project that opts in to cross-machine leases (`[leases] remote = true`) also
@@ -150,13 +149,10 @@ restoring the previous automatic-sync setting.
   remote must accept pushes to custom refs. Like the history branch, they are
   never edited or deleted by hand.
 
-## Format 3 conversion
+## Format 4 conversion
 
-Format 3 uses `llewm-portable-record` and `llewm-portable-memory` identifiers and
-writes `v3/`. Ordinary imports accept only format 3. An explicit converter reads
-validated format-2 observations under `v2/`; it is not an old-client sync mode.
-
-Before adopting a format-3 binary:
+Format 4 packs the existing canonical envelopes into immutable, bounded blocks.
+Ordinary Git sync refuses older tracked records. Before adopting a format-4 binary:
 
 1. Verify a consistent backup of the operational database and preserve the memory
    history. Confirm that every existing writer is stopped and will either upgrade
@@ -173,28 +169,26 @@ Before adopting a format-3 binary:
    machine with the remote available:
 
 ```sh
-llewm sync convert --output json
+llewm sync convert --writers-stopped --output json
 ```
 
-The converter fetches before examining the old partition, validates every old
-observation's canonical bytes, hashes, lineage and content-derived path, and then
-re-encodes the observations themselves. Remote-only records and rejected heads
-are retained. IDs, revisions, timestamps, references, payload bytes and payload
-content hashes are preserved; envelope hashes change with the format identity.
-The converter writes the new partition and retires `v2/` in a normal memory Git
-commit. Original bytes remain in Git history; stored historical fork observations
-remain unchanged in the database and can still be read deliberately.
+The converter fetches before examining the old partition and validates each
+tracked observation's bytes, lineage, hash and path. It packs every v3 envelope,
+including remote-only records and rejected heads, without changing its bytes.
+It stages the blocks and retires tracked v3 paths in a normal memory Git commit;
+the original bytes remain in Git history and the local archive. Format-2 records
+first pass through the existing explicit format-3 conversion.
 
 Retired contract-family observations are carried forward as archival transport
 records and continue to be skipped by operational import. Conversion refuses
-invalid or unsupported schemas and exceeds neither the
+invalid transport records and exceeds neither the
 100,000-record nor 64 MiB input budget. Refusal leaves the old partition intact
 and does not push. It requires remote access. Repeating a successful conversion
 writes no additional observations and does not reopen settled forks. Verify
 receipts and fresh-machine recovery before enabling other upgraded writers.
 
 If `v1/` still exists, complete the earlier format-1-to-2 conversion with the
-original format-2 build first. The format-3 converter does not remove unreadable
+original format-2 build first. This converter does not remove unreadable
 format-1 records or manufacture replacements from incomplete local state.
 
 ## What can and cannot be changed

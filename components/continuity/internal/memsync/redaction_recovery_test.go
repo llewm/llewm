@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +15,58 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
+
+func TestBlockRedactionRepairUsesTrackedObservations(t *testing.T) {
+	ctx := context.Background()
+	m := newMachine(t, "block-repair", bareRemote(t))
+	projectRoot, peerProject := "/different/peer/root", "project-0123456789abcdef"
+	if _, err := (worknarrative.Service{DB: m.db}).Append(ctx, worknarrative.Record{ID: "repair-block", ProjectID: m.project, Title: "Original", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: projectRoot + " " + peerProject, Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	export, err := portable.EncodeMemoryExport(ctx, m.db, m.project)
+	if err != nil || len(export.Envelopes) != 1 {
+		t.Fatalf("export: %d %v", len(export.Envelopes), err)
+	}
+	original := export.Envelopes[0]
+	spec, err := portable.DecodeMemoryEnvelope(original.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Payload = []byte(strings.ReplaceAll(strings.ReplaceAll(string(spec.Payload), projectRoot, "[PROJECT_ROOT]"), peerProject, "[PROJECT_ID]"))
+	derived, err := portable.EncodeEnvelope(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{original, derived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := recordsync.OpenRoot(m.syncer.Clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
+		root.Close()
+		t.Fatal(err)
+	}
+	root.Close()
+	repo, err := m.syncer.repository(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := recordsync.BlockDirectory(testLineage)
+	if err := commitBlocks(ctx, repo, []string{filepath.ToSlash(filepath.Join(dir, block.Hash+".block"))}, "fixture: repair observations"); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := m.syncer.RepairRedaction(ctx, original.Envelope.EnvelopeSHA256, derived.Envelope.EnvelopeSHA256, projectRoot, peerProject, "test", "historical re-export", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.syncer.RepairRedaction(ctx, original.Envelope.EnvelopeSHA256, derived.Envelope.EnvelopeSHA256, projectRoot, peerProject, "test", "historical re-export", preview.RecoveryID, true)
+	if err != nil || !result.Applied {
+		t.Fatalf("repair: %+v %v", result, err)
+	}
+}
 
 func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	ctx := context.Background()
@@ -61,16 +112,26 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 		pairs = append(pairs, pair{e, d})
 		variants = append(variants, d)
 	}
-	// Simulate the historical writer through the same append-only export helpers.
-	written, err := writeNew(a.syncer.Clone, variants)
+	// Simulate the historical writer with an append-only block.
+	block, err := recordsync.EncodeBlock(testLineage, variants)
 	if err != nil {
 		t.Fatal(err)
 	}
+	transportRoot, err := recordsync.OpenRoot(a.syncer.Clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recordsync.PublishBlock(transportRoot, testLineage, block); err != nil {
+		transportRoot.Close()
+		t.Fatal(err)
+	}
+	transportRoot.Close()
 	repo, err := a.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commit(ctx, repo, portable.MemoryLineageDir(testLineage), len(written), "fixture: historical re-export"); err != nil {
+	directory, _ := recordsync.BlockDirectory(testLineage)
+	if err := commitBlocks(ctx, repo, []string{filepath.ToSlash(filepath.Join(directory, block.Hash+".block"))}, "fixture: historical re-export"); err != nil {
 		t.Fatal(err)
 	}
 	collision := a.sync(t, OutcomeCollision)
@@ -113,31 +174,14 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	fresh.sync(t, OutcomeSynced)
 	// Replay the recovered history into two empty projects and compare the
 	// block-backed importer with the current full scan.
-	listing, err := repo.run(ctx, "ls-files", "--", portable.MemoryLineageDir(testLineage))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rootHandle, err := recordsync.OpenRoot(a.syncer.Clone)
+	blocks, err := a.syncer.trackedBlocks(ctx, repo, testLineage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var objects []portable.EncodedEnvelope
-	var blocks []recordsync.Block
-	for _, path := range strings.Fields(listing) {
-		object, err := recordsync.ReadObject(rootHandle, filepath.FromSlash(path), testLineage)
-		if err != nil {
-			rootHandle.Close()
-			t.Fatal(err)
-		}
-		block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{object})
-		if err != nil {
-			rootHandle.Close()
-			t.Fatal(err)
-		}
-		objects = append(objects, object)
-		blocks = append(blocks, block)
+	for _, block := range blocks {
+		objects = append(objects, block.Objects...)
 	}
-	rootHandle.Close()
 	reference := localHistoryMachine(t, "recovery-reference")
 	indexed := localHistoryMachine(t, "recovery-indexed")
 	want, wantErr := (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
@@ -173,10 +217,14 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 		if err != nil || procedure.Steps[0].ArgvTemplate[1] != text {
 			t.Fatalf("lost exact procedure: %#v %v", procedure, err)
 		}
+		repo, err := m.syncer.repository(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, p := range pairs {
 			for _, e := range []portable.EncodedEnvelope{p.original, p.derived} {
-				body, err := os.ReadFile(filepath.Join(m.syncer.Clone, portable.MemoryRecordPath(e.Envelope)))
-				if err != nil || !bytes.Equal(body, portable.MemoryFileBytes(e)) {
+				bodies, err := m.syncer.trackedBlockObservations(ctx, repo, testLineage, e.Envelope.EnvelopeSHA256)
+				if err != nil || !bytes.Equal(bodies[e.Envelope.EnvelopeSHA256], e.Bytes) {
 					t.Fatal("immutable observation changed")
 				}
 			}

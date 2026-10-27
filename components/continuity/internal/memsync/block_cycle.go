@@ -88,15 +88,17 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		}
 		// Convert older format-2 records first; this operation refuses them in
 		// an ordinary sync. Both conversion steps require stopped old writers.
-		if err := retireFormerFormat(local, repo, s.Clone, export.Identity, p.convert, &result); err != nil {
+		var legacy Result
+		if err := retireFormerFormat(local, repo, s.Clone, export.Identity, p.convert, &legacy); err != nil {
 			return err
 		}
+		result.ExportedRecords += legacy.ExportedRecords
 		snapshot, err := s.trackedV3Snapshot(local, repo, export.Identity.LineageID)
 		if err != nil {
 			return err
 		}
 		if len(snapshot.Objects) != 0 && !p.convert {
-			return fmt.Errorf("format-3 observations require explicit conversion after stopping old writers")
+			return fmt.Errorf("format-3 observations require explicit conversion: stop old writers, then run `llewm sync convert --writers-stopped`")
 		}
 		if p.convert {
 			converted, err := s.convertTrackedV3(local, repo, export.Identity)

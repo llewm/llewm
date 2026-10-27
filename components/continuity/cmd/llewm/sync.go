@@ -123,17 +123,19 @@ func syncCommand() *cobra.Command {
 	parent.Flags().DurationVar(&profileDuration, "profile-duration", 30*time.Second, "maximum CPU profile duration (up to 5m)")
 
 	var convertOutput string
+	var writersStopped bool
 	convert := &cobra.Command{
 		Use:   "convert",
-		Short: "Convert this lineage's format-2 observations to format 3 and sync",
-		Long: `Run one sync that also converts this lineage's format-2 observations (v2/) in the
-memory repository in one Continuity-made commit and pushes it. Run it once, on
-one machine, after every machine that syncs this lineage runs a format-3 build;
-until then, ordinary sync refuses a repository with format-2 observations.
-Original observations remain in Git history; payload and record identities are
-preserved. Unknown or invalid records refuse conversion before removal.`,
+		Short: "Convert this lineage's history to format 4 and sync",
+		Long: `Fetch and convert this lineage's older observations to format 4, then push.
+Stop all old writers before conversion and confirm this with --writers-stopped.
+Original observations remain in Git history and the local archive. Invalid or
+incomplete records refuse conversion before removal.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !writersStopped {
+				return fmt.Errorf("conversion requires --writers-stopped after stopping all old writers")
+			}
 			format, err := outputFormat(convertOutput)
 			if err != nil {
 				return err
@@ -155,6 +157,7 @@ preserved. Unknown or invalid records refuse conversion before removal.`,
 			})
 		},
 	}
+	convert.Flags().BoolVar(&writersStopped, "writers-stopped", false, "confirm all older sync writers are stopped")
 	convert.Flags().StringVar(&convertOutput, "output", "text", "text or json")
 	parent.AddCommand(convert)
 	parent.AddCommand(syncRedactionRecoveryCommand())
@@ -463,14 +466,18 @@ func syncSettings(ctx context.Context, settings config.Sync, clone string) []str
 
 // cloneLineages lists the lineages present in a memory clone.
 func cloneLineages(clone string) []string {
-	entries, err := os.ReadDir(filepath.Join(clone, portable.MemoryRepositoryRoot))
-	if err != nil {
-		return nil
-	}
+	seen := make(map[string]bool)
 	var lineages []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			lineages = append(lineages, "lineage:"+entry.Name())
+	for _, version := range []string{"v4", portable.MemoryRepositoryRoot, portable.FormerMemoryRepositoryRoot} {
+		entries, err := os.ReadDir(filepath.Join(clone, version))
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && !seen[entry.Name()] {
+				seen[entry.Name()] = true
+				lineages = append(lineages, "lineage:"+entry.Name())
+			}
 		}
 	}
 	sort.Strings(lineages)

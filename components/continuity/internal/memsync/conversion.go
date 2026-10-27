@@ -79,7 +79,7 @@ func retireFormerFormat(ctx context.Context, repo git, clone string, identity po
 		return err
 	}
 	if !convert {
-		return fmt.Errorf("the memory repository holds format-2 observations for this lineage; retire all format-2 writers, then run `llewm sync convert` once; no history is discarded")
+		return fmt.Errorf("the memory repository holds format-2 observations for this lineage; retire all older writers, then run `llewm sync convert --writers-stopped`; no history is discarded")
 	}
 	records, err := previousEnvelopes(clone, identity.LineageID)
 	if err != nil {

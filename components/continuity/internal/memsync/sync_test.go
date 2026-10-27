@@ -22,6 +22,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/topic"
 )
 
@@ -153,7 +154,7 @@ func TestTwoMachinesSyncThroughOneRemote(t *testing.T) {
 		}
 	}
 	files, err := exec.Command("git", "-C", a.syncer.Clone, "ls-files").Output()
-	if err != nil || strings.Count(string(files), "\n") != 3 || !strings.Contains(string(files), "v3/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/records/decision/") {
+	if err != nil || strings.Count(string(files), "\n") != 3 || !strings.Contains(string(files), "v4/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/blocks/") {
 		t.Fatalf("memory repository files:\n%s %v", files, err)
 	}
 }
@@ -509,13 +510,23 @@ func TestUnknownRecordTypesAreDeferred(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	future := filepath.Join(a.syncer.Clone, portable.MemoryRecordPath(e))
-	if err := os.MkdirAll(filepath.Dir(future), 0700); err != nil {
+	future, err := portable.DecodeTransportEnvelope(canonical)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(future, append(canonical, '\n'), 0600); err != nil {
+	block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{future})
+	if err != nil {
 		t.Fatal(err)
 	}
+	root, err := recordsync.OpenRoot(a.syncer.Clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
+		root.Close()
+		t.Fatal(err)
+	}
+	root.Close()
 
 	for _, args := range [][]string{{"add", "--all"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "future"}, {"push", "--quiet", "origin", "HEAD"}} {
 		if output, err := exec.Command("git", append([]string{"-C", a.syncer.Clone}, args...)...).CombinedOutput(); err != nil {
@@ -728,7 +739,7 @@ func TestFormatTwoConversionPreservesRemoteOnlyHistory(t *testing.T) {
 		t.Fatalf("convert: %#v %v", converted, err)
 	}
 	log, err := exec.Command("git", "-C", b.syncer.Clone, "log", "-1", "--format=%s").Output()
-	if err != nil || !strings.Contains(string(log), "convert to format 3") {
+	if err != nil || !strings.Contains(string(log), "convert to format 4") {
 		t.Fatalf("conversion commit: %q %v", log, err)
 	}
 	a.sync(t, OutcomeSynced)

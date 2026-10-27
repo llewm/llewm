@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -49,30 +48,9 @@ func (s Syncer) RepairRedaction(ctx context.Context, originalHash, derivedHash, 
 	if identity == nil {
 		return result, fmt.Errorf("project has no portable identity")
 	}
-	lineageDir := portable.MemoryLineageDir(identity.LineageID)
-	listing, err := repo.run(ctx, "ls-files", "--", lineageDir)
+	bodies, err := s.trackedBlockObservations(ctx, repo, identity.LineageID, originalHash, derivedHash)
 	if err != nil {
 		return result, err
-	}
-	bodies := map[string][]byte{}
-	for _, relative := range strings.Fields(listing) {
-		name := strings.TrimSuffix(filepath.Base(relative), ".json")
-		if name != originalHash && name != derivedHash {
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(s.Clone, filepath.FromSlash(relative)))
-		if err != nil {
-			return result, err
-		}
-		spec, err := portable.DecodeMemoryFile(relative, body)
-		if err != nil {
-			return result, err
-		}
-		encoded, err := portable.EncodeEnvelope(spec)
-		if err != nil {
-			return result, err
-		}
-		bodies[name] = encoded.Bytes
 	}
 	if len(bodies) != 2 {
 		return result, fmt.Errorf("both different observations must already be tracked in this lineage")

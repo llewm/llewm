@@ -228,7 +228,11 @@ func TestHybridRelaysOpaqueEnvelopeBytesWithoutSemanticApplication(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := recordsync.WriteFile(root, portable.MemoryRecordPath(future.Envelope), portable.MemoryFileBytes(future), false); err != nil {
+	block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{future})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
 		t.Fatal(err)
 	}
 	root.Close()
