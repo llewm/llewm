@@ -104,3 +104,37 @@ func TestAuthorizedBlocksRespectRecordOrigins(t *testing.T) {
 		}
 	}
 }
+
+func TestConvertV3SnapshotPreservesCompetingEnvelopes(t *testing.T) {
+	makeObject := func(payload string) portable.EncodedEnvelope {
+		t.Helper()
+		object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "fork", RecordRevision: 1, RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(payload)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return object
+	}
+	a, b := makeObject(`{"head":1}`), makeObject(`{"head":2}`)
+	scan := ScanResult{Objects: []portable.EncodedEnvelope{a, b}}
+	blocks, err := ConvertV3Snapshot(lineage, scan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]byte{a.Envelope.EnvelopeSHA256: a.Bytes, b.Envelope.EnvelopeSHA256: b.Bytes}
+	for _, block := range blocks {
+		for _, object := range block.Objects {
+			if !bytes.Equal(want[object.Envelope.EnvelopeSHA256], object.Bytes) {
+				t.Fatal("conversion changed an observation")
+			}
+			delete(want, object.Envelope.EnvelopeSHA256)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatal("conversion dropped an observation")
+	}
+	for _, incomplete := range []ScanResult{{Objects: scan.Objects, Pending: 1}, {Objects: scan.Objects, Invalid: 1}, {Objects: []portable.EncodedEnvelope{a, a}}} {
+		if _, err := ConvertV3Snapshot(lineage, incomplete); err == nil {
+			t.Fatal("conversion accepted an incomplete or duplicate inventory")
+		}
+	}
+}

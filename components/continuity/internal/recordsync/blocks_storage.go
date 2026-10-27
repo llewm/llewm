@@ -50,6 +50,37 @@ func packBlocks(lineage string, objects []portable.EncodedEnvelope) ([]Block, er
 	return result, nil
 }
 
+// ConvertV3Snapshot packs a complete v3 observation inventory into v4 blocks.
+// It does not publish or remove anything. The transport must establish that
+// the inventory covers its authoritative paths and pass the scan status; an
+// incomplete inventory must never be used to retire the old representation.
+func ConvertV3Snapshot(lineage string, scan ScanResult) ([]Block, error) {
+	if scan.Pending != 0 || scan.Invalid != 0 {
+		return nil, fmt.Errorf("v3 conversion requires a complete valid inventory")
+	}
+	if len(scan.Objects) > portable.MaxRecordCount {
+		return nil, fmt.Errorf("v3 conversion exceeds record limit")
+	}
+	objects := append([]portable.EncodedEnvelope(nil), scan.Objects...)
+	seen := make(map[string]bool, len(objects))
+	total := 0
+	for _, object := range objects {
+		validated, err := portable.DecodeTransportEnvelope(object.Bytes)
+		if err != nil || validated.Envelope.LineageID != lineage {
+			return nil, fmt.Errorf("v3 conversion found an invalid envelope")
+		}
+		if seen[validated.Envelope.EnvelopeSHA256] {
+			return nil, fmt.Errorf("v3 conversion found a duplicate envelope")
+		}
+		seen[validated.Envelope.EnvelopeSHA256] = true
+		total += len(validated.Bytes)
+		if total > portable.MaxRecordsBytes {
+			return nil, fmt.Errorf("v3 conversion exceeds byte limit")
+		}
+	}
+	return packBlocks(lineage, objects)
+}
+
 // BlockDirectory is the experimental block namespace. It does not replace
 // the current record-per-file transport until both transports are qualified.
 func BlockDirectory(lineage string) (string, error) {
