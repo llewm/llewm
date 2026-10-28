@@ -13,7 +13,7 @@ func TestRecoveryReplayEligibilityRejectsUnknownSchemas(t *testing.T) {
 	}
 	recovery := object("redaction_recovery", 1, strings.Repeat("1", 64))
 	retired := object("contract", 1, strings.Repeat("2", 64))
-	if key, ok := recoveryReplaySet([]portable.EncodedEnvelope{recovery, retired}); !ok || !strings.HasPrefix(key, "recovery:v2:") {
+	if key, ok := recoveryReplaySet([]portable.EncodedEnvelope{recovery, retired}); !ok || !strings.HasPrefix(key, "recovery:v3:") {
 		t.Fatalf("retired observation prevented proof candidacy: %q %v", key, ok)
 	}
 	unknown := object("work_narrative", 999, strings.Repeat("3", 64))

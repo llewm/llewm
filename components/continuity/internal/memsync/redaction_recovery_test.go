@@ -339,26 +339,98 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got || want.ImportedRecords == 0 {
 		t.Fatalf("missing correction was skipped: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
 	}
-	// An unrelated valid variant of a recovered identity must still reach the
-	// full importer and surface its fork or collision.
-	variant := localHistoryMachine(t, "recovery-variant")
-	if _, err := (worknarrative.Service{DB: variant.db}).Append(ctx, worknarrative.Record{ID: "original", ProjectID: variant.project, Title: "Different observation", Trigger: "manual", Creator: "codex", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Unrelated content", Authority: "caller_asserted"}}}); err != nil {
-		t.Fatal(err)
+	// A genuinely different versioned roadmap node must first be recorded as
+	// a fork; subsequent unchanged replays can prove the recorded observations.
+	var equivalent portable.EncodedEnvelope
+	for _, object := range variants {
+		if object.Envelope.RecordType == "roadmap_node" {
+			equivalent = object
+			break
+		}
 	}
-	variantExport, err := portable.EncodeMemoryExport(ctx, variant.db, variant.project)
-	if err != nil || len(variantExport.Envelopes) != 1 {
-		t.Fatalf("variant export: %d %v", len(variantExport.Envelopes), err)
-	}
-	variantBlock, err := recordsync.EncodeBlock(testLineage, variantExport.Envelopes)
+	variantSpec, err := portable.DecodeMemoryEnvelope(equivalent.Bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	conflictObjects := append(append([]portable.EncodedEnvelope{}, objects...), variantExport.Envelopes...)
+	var payload map[string]any
+	if err := json.Unmarshal(variantSpec.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["kind"] = "milestone"
+	variantSpec.Payload, err = json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	variantObject, err := portable.EncodeEnvelope(variantSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	variantBlock, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{variantObject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflictObjects := append(append([]portable.EncodedEnvelope{}, objects...), variantObject)
 	conflictBlocks := append(append([]recordsync.Block{}, blocks...), variantBlock)
 	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, conflictObjects)
 	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, conflictBlocks)
 	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got || want.Forks+want.Collisions == 0 {
 		t.Fatalf("unrecovered variant was skipped: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
+	}
+	for i := 0; i < 3; i++ {
+		want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, conflictObjects)
+		got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, conflictBlocks)
+		if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+			t.Fatalf("known fork replay %d differs: full=%+v %v indexed=%+v %v", i, want, wantErr, got, gotErr)
+		}
+	}
+	if err := indexed.db.QueryRow(`SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:v3:%' AND local_state_hash<>''`, indexed.project).Scan(&proofs); err != nil || proofs < 2 {
+		t.Fatalf("known fork replay did not establish a proof: %d %v", proofs, err)
+	}
+	// Simulate damage to one append-only fork observation in disposable
+	// fixtures. A prior proof must not suppress the reference repair.
+	variantHash := variantObject.Envelope.EnvelopeSHA256
+	for _, m := range []machine{reference, indexed} {
+		if _, err := m.db.Exec(`DROP TRIGGER fork_head_observations_no_delete`); err != nil {
+			t.Fatal(err)
+		}
+		result, err := m.db.Exec(`DELETE FROM fork_head_observations WHERE project_id=? AND envelope_sha256=?`, m.project, variantHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if deleted, err := result.RowsAffected(); err != nil || deleted != 1 {
+			t.Fatalf("fixture observation not removed: %d %v", deleted, err)
+		}
+	}
+	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, conflictObjects)
+	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, conflictBlocks)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("missing fork observation replay differs: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
+	}
+	for _, m := range []machine{reference, indexed} {
+		var found int
+		if err := m.db.QueryRow(`SELECT COUNT(*) FROM fork_head_observations WHERE project_id=? AND envelope_sha256=?`, m.project, variantHash).Scan(&found); err != nil || found != 1 {
+			t.Fatalf("fork observation was not restored: %d %v", found, err)
+		}
+	}
+	// Revision-zero competing narratives are collisions, never recorded forks.
+	variant := localHistoryMachine(t, "recovery-collision")
+	if _, err := (worknarrative.Service{DB: variant.db}).Append(ctx, worknarrative.Record{ID: "original", ProjectID: variant.project, Title: "Different observation", Trigger: "manual", Creator: "codex", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Unrelated content", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	variantExport, err := portable.EncodeMemoryExport(ctx, variant.db, variant.project)
+	if err != nil || len(variantExport.Envelopes) != 1 {
+		t.Fatalf("collision export: %d %v", len(variantExport.Envelopes), err)
+	}
+	collisionBlock, err := recordsync.EncodeBlock(testLineage, variantExport.Envelopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collisionObjects := append(append([]portable.EncodedEnvelope{}, objects...), variantExport.Envelopes...)
+	collisionBlocks := append(append([]recordsync.Block{}, blocks...), collisionBlock)
+	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, collisionObjects)
+	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, collisionBlocks)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got || want.Collisions == 0 {
+		t.Fatalf("revision-zero collision was skipped: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
 	}
 	for _, m := range []machine{a, b, fresh} {
 		procedure, err := (procedures.Service{DB: m.db}).Get(ctx, m.project, "exact", 1)

@@ -47,7 +47,7 @@ func recoveryReplaySet(objects []portable.EncodedEnvelope) (string, bool) {
 	}
 	// Version the proof domain independently of block indexing so older
 	// processes cannot reuse proofs made under different recovery rules.
-	return "recovery:v2:" + hex.EncodeToString(hash.Sum(nil)), true
+	return "recovery:v3:" + hex.EncodeToString(hash.Sum(nil)), true
 }
 
 // recoveryReplaySnapshot proves that all incoming observations, including
@@ -92,8 +92,26 @@ func (s Index) recoveryReplaySnapshot(ctx context.Context, setHash string, objec
 			// Mirror the reference importer's grouping, including recovery
 			// normalization and its explicit roadmap equivalence rule.
 			heads, err := forkHeads(group, recovered)
-			if err != nil || len(heads) != 1 {
+			if err != nil || len(heads) == 0 {
 				return "", false, nil
+			}
+			if len(heads) > 1 {
+				// A full replay would record each competing head plus the local
+				// head. Skip only when both append-only stores already contain
+				// every observation it would write.
+				first := heads[0]
+				held, ok := local[portable.RecordKey(first.RecordType, first.RecordID, first.Revision)]
+				if !ok {
+					return "", false, nil
+				}
+				for _, head := range withLocalHead(heads, held) {
+					var known int
+					err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM fork_heads WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=? AND content_sha256=?) AND EXISTS(SELECT 1 FROM fork_head_observations WHERE project_id=? AND envelope_sha256=?)`, s.ProjectID, head.RecordType, head.RecordID, head.Revision, head.ContentSHA256, s.ProjectID, head.EnvelopeSHA256).Scan(&known)
+					if err != nil || known == 0 {
+						return "", false, err
+					}
+				}
+				continue
 			}
 			object, err = portable.DecodeTransportEnvelope(heads[0].Envelope)
 			if err != nil {
