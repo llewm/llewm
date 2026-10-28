@@ -83,3 +83,23 @@ func TestBootstrapChoosesTaskByPresenceSessionBranchOrAsks(t *testing.T) {
 		t.Fatalf("hook bootstrap does not name the session:\n%s", resumed)
 	}
 }
+
+func TestFreshSessionRecoversLastLocallyObservedClientTask(t *testing.T) {
+	testProject(t)
+	runCLI(t, "", "init")
+	runCLI(t, `{"session_id":"old","hook_event_name":"SessionStart","source":"startup"}`, "hook", "codex")
+	runCLI(t, "", "checkpoint", "create", "--task", "Work", "--task-id", "work", "--next", "Continue", "--session", "old")
+	// A later handoff of the same task omitted the session identifier.
+	runCLI(t, "", "checkpoint", "create", "--task", "Work", "--task-id", "work", "--predecessor-checkpoint", taskTip(t, "work"), "--next", "Continue without a session")
+	runCLI(t, "", "checkpoint", "create", "--task", "Old open task", "--task-id", "other", "--next", "Later")
+	runCLI(t, `{"session_id":"old","hook_event_name":"SessionEnd","reason":"exit"}`, "hook", "codex")
+	hook := runCLI(t, `{"session_id":"new","hook_event_name":"SessionStart","source":"startup"}`, "hook", "codex")
+	if !strings.Contains(hook, "Task ID: work") || !strings.Contains(hook, "Chosen by local client history") {
+		t.Fatalf("fresh client did not recover local task:\n%s", hook)
+	}
+	// A second observed live session makes the local-history hint ambiguous.
+	concurrent := runCLI(t, `{"session_id":"third","hook_event_name":"SessionStart","source":"startup"}`, "hook", "codex")
+	if !strings.Contains(concurrent, "Task selection needed") {
+		t.Fatalf("local task guessed with another live session:\n%s", concurrent)
+	}
+}

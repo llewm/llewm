@@ -34,7 +34,8 @@ func (a *App) SessionTask(ctx context.Context, sessionID string) (string, error)
 
 // chooseTask picks the bootstrap's task: an explicit selection as given; else
 // the task this session has live presence on, then the task it last checkpointed,
-// then an unambiguous local restart handoff, then the newest task last checkpointed on a current branch, then the
+// then an unambiguous local restart handoff, then recent local client history
+// with no other observed session, then the newest task last checkpointed on a current branch, then the
 // project-wide newest checkpoint, unless several in-progress tasks contend
 // (see bootstrap.Choose). It also lists the other active tasks. It returns nil
 // on failure, which keeps the selection.
@@ -70,13 +71,25 @@ func chooseTask(ctx context.Context, db *sql.DB, repositories project.Repositori
 			return nil
 		}
 		instance, client := restartScope(ctx, db, projectID, sessionID)
+		// Local client history is available even without a sync identity.
+		if client == "" && sessionID != "" {
+			_ = db.QueryRowContext(ctx, `SELECT client FROM sessions WHERE project_id=? AND id=?`, projectID, sessionID).Scan(&client)
+		}
 		presentByOthers := map[string]string{}
+		otherSession := presenceReport.Truncated
 		for _, value := range presenceReport.Presence {
+			if sessionID == "" || value.SessionID != sessionID {
+				otherSession = true
+			}
 			if value.TaskID != "" && (sessionID == "" || value.SessionID != sessionID) {
 				presentByOthers[value.TaskID] = value.Client + " (session " + value.SessionID + ")"
 			}
 		}
-		choice = bootstrap.Choose(tips, present, current, bootstrap.ChooseContext{SessionTask: sessionTask, RestartInstance: instance, RestartClient: client, Now: now, Closed: closed, PresentByOthers: func(taskID string) string { return presentByOthers[taskID] }})
+		localTask := ""
+		if client != "" && !otherSession {
+			localTask = lastLocalClientTask(ctx, db, projectID, client, sessionID, now.Add(-bootstrap.ContentionWindow))
+		}
+		choice = bootstrap.Choose(tips, present, current, bootstrap.ChooseContext{SessionTask: sessionTask, LocalTask: localTask, RestartInstance: instance, RestartClient: client, Now: now, Closed: closed, PresentByOthers: func(taskID string) string { return presentByOthers[taskID] }})
 		if choice.Rule == bootstrap.RuleAmbiguous {
 			return &choice
 		}
@@ -95,6 +108,17 @@ func chooseTask(ctx context.Context, db *sql.DB, repositories project.Repositori
 	}
 	choice.Others, choice.OthersOmitted = bootstrap.OtherActive(tips, chosen, closed)
 	return &choice
+}
+
+// lastLocalClientTask uses locally observed sessions, not a portable checkpoint
+// timestamp alone, as evidence of which task this client last worked on.
+func lastLocalClientTask(ctx context.Context, db *sql.DB, projectID, client, currentSession string, since time.Time) string {
+	var task string
+	err := db.QueryRowContext(ctx, `SELECT c.task_id FROM checkpoints c JOIN sessions s ON s.project_id=c.project_id AND s.id=c.session_id WHERE c.project_id=? AND s.client=? AND c.session_id<>? AND c.created_at>=? AND c.task_id IS NOT NULL AND c.task_id<>'' ORDER BY c.created_at DESC,c.id DESC LIMIT 1`, projectID, client, currentSession, since.UTC().Format(time.RFC3339Nano)).Scan(&task)
+	if err != nil {
+		return ""
+	}
+	return task
 }
 
 // restartScope requires a locally observed session and the local instance.

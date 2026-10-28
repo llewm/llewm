@@ -103,6 +103,12 @@ func TestChooseAsksInsteadOfTakingAnotherAgentsTask(t *testing.T) {
 	if resumed := Choose(tips, nil, main, ChooseContext{SessionTask: "codex-task", Now: now}); resumed.Rule != RuleSession || resumed.Selection.TaskID != "codex-task" {
 		t.Fatalf("session affinity: %#v", resumed)
 	}
+	if local := Choose(tips, nil, main, ChooseContext{LocalTask: "codex-task", Now: now}); local.Rule != RuleLocal || local.Selection.TaskID != "codex-task" {
+		t.Fatalf("local client affinity: %#v", local)
+	}
+	if offBranch := Choose(tips, nil, []checkpoint.CodeBranch{{Branch: "elsewhere"}}, ChooseContext{LocalTask: "codex-task", Now: now}); offBranch.Rule != RuleAmbiguous {
+		t.Fatalf("local history overrode branch: %#v", offBranch)
+	}
 	// Live presence still wins over session affinity.
 	if present := Choose(tips, []string{"claude-task"}, main, ChooseContext{SessionTask: "codex-task", Now: now}); present.Rule != RulePresence || present.Selection.TaskID != "claude-task" {
 		t.Fatalf("presence precedence: %#v", present)
@@ -167,12 +173,12 @@ func TestOtherActiveAndChoiceLine(t *testing.T) {
 		t.Fatalf("others: %#v omitted %d", others, omitted)
 	}
 	line := ChoiceLine(Choice{Rule: RuleBranch, Detail: "its latest checkpoint was on the current branch `topic`", Others: others, OthersOmitted: omitted})
-	for _, want := range []string{"Chosen by branch:", "Order: explicit, presence, session, restart handoff, current branch, newest.", "`a` (blocked, on `topic`)", "`b` (in_progress, detached HEAD)", "`c` (paused, on `lib@x`)", "and 1 more", "--task-id"} {
+	for _, want := range []string{"Chosen by branch:", "Order: explicit, presence, session, restart handoff, local client history, current branch, newest.", "`a` (blocked, on `topic`)", "`b` (in_progress, detached HEAD)", "`c` (paused, on `lib@x`)", "and 1 more", "--task-id"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("line lacks %q: %s", want, line)
 		}
 	}
-	if line := ChoiceLine(Choice{Rule: RuleExplicit}); line != "Chosen by explicit selection. Order: explicit, presence, session, restart handoff, current branch, newest." {
+	if line := ChoiceLine(Choice{Rule: RuleExplicit}); line != "Chosen by explicit selection. Order: explicit, presence, session, restart handoff, local client history, current branch, newest." {
 		t.Fatalf("explicit line: %s", line)
 	}
 }
