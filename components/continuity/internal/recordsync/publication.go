@@ -79,17 +79,34 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 // verified destination blocks before planning additions. An incomplete or
 // invalid destination scan must be retried before rebuilding its catalog.
 func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, error) {
-	blocks, err := s.planPublication(ctx, archive, endpoint, relay)
+	return s.planPublicationWithRecovery(ctx, archive, endpoint, relay, nil)
+}
+
+// PlanPublicationWithInventory returns the publication plan and a complete
+// validated archive snapshot from the same scan, for local semantic import.
+// Records arriving after the snapshot are picked up on the next cycle.
+func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, []Block, error) {
+	var inventory []portable.EncodedEnvelope
+	blocks, err := s.planPublicationWithRecovery(ctx, archive, endpoint, relay, &inventory)
+	if err != nil {
+		return nil, nil, err
+	}
+	all, err := packValidatedBlocks(s.Lineage, inventory)
+	return blocks, all, err
+}
+
+func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope) ([]Block, error) {
+	blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory)
 	if !errors.Is(err, ErrIndexRebuild) {
 		return blocks, err
 	}
 	if repairErr := s.repairStored(ctx, endpoint); repairErr != nil {
 		return nil, repairErr
 	}
-	return s.planPublication(ctx, archive, endpoint, relay)
+	return s.planPublication(ctx, archive, endpoint, relay, inventory)
 }
 
-func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, error) {
+func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope) ([]Block, error) {
 	if endpoint == "" || archive.Lineage != s.Lineage {
 		return nil, fmt.Errorf("publication endpoint and matching lineage are required")
 	}
@@ -103,7 +120,7 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
 		return nil, err
 	}
-	allowed, err := archive.Objects(ctx, endpoint, relay)
+	allowed, all, err := archive.objects(ctx, endpoint, relay)
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +245,9 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	if inventory != nil {
+		*inventory = all
 	}
 	return result, nil
 }

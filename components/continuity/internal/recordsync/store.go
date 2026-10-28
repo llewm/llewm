@@ -352,20 +352,27 @@ func (a Archive) CaptureLocal(envelopes []portable.EncodedEnvelope) error {
 	return nil
 }
 func (a Archive) Objects(ctx context.Context, endpoint string, relay bool) ([]portable.EncodedEnvelope, error) {
+	allowed, _, err := a.objects(ctx, endpoint, relay)
+	return allowed, err
+}
+
+// objects returns both destination-authorized objects and the complete
+// validated snapshot. Both views come from the same archive scan.
+func (a Archive) objects(ctx context.Context, endpoint string, relay bool) ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
 	root, err := OpenRoot(a.Directory)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer root.Close()
 	scan, err := Scan(ctx, root, a.Lineage)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if scan.Pending+scan.Invalid > 0 {
-		return nil, fmt.Errorf("local archive contains incomplete or invalid records")
+		return nil, nil, fmt.Errorf("local archive contains incomplete or invalid records")
 	}
 	if relay {
-		return scan.Objects, nil
+		return scan.Objects, scan.Objects, nil
 	}
 	var result []portable.EncodedEnvelope
 	for _, e := range scan.Objects {
@@ -374,14 +381,14 @@ func (a Archive) Objects(ctx context.Context, endpoint string, relay bool) ([]po
 			if _, err := root.Lstat(filepath.Join("origins", e.Envelope.EnvelopeSHA256, Hash(origin))); err == nil {
 				allowed = true
 			} else if !errors.Is(err, fs.ErrNotExist) {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		if allowed {
 			result = append(result, e)
 		}
 	}
-	return result, nil
+	return result, scan.Objects, nil
 }
 func (a Archive) SaveStatus(endpoint string, value any) error {
 	body, err := json.Marshal(value)

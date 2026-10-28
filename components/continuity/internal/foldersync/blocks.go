@@ -64,7 +64,7 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 			return result, err
 		}
 	}
-	blocks, err := index.PlanPublication(ctx, s.Archive, s.Endpoint.ID(), s.Endpoint.Relay)
+	blocks, all, err := index.PlanPublicationWithInventory(ctx, s.Archive, s.Endpoint.ID(), s.Endpoint.Relay)
 	if err != nil {
 		return result, err
 	}
@@ -84,10 +84,6 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 		if added {
 			result.PublishedRecords += len(block.Objects)
 		}
-	}
-	all, err := s.Archive.AuthorizedBlocks(ctx, "", true)
-	if err != nil {
-		return result, err
 	}
 	result.ImportResult, err = index.ImportBlocks(ctx, all)
 	if err != nil {

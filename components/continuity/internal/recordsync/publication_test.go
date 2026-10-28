@@ -41,8 +41,8 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_publication BEFORE INSERT ON history_index_publications BEGIN SELECT RAISE(ABORT,'injected failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.PlanPublication(ctx, archive, endpoint, false); err == nil {
-		t.Fatal("publication failure was ignored")
+	if planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false); err == nil || planned != nil || inventory != nil {
+		t.Fatalf("publication failure exposed a partial snapshot: %+v %+v %v", planned, inventory, err)
 	}
 	var staged int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=?`, project).Scan(&staged); err != nil || staged != 0 {
@@ -54,6 +54,15 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 	initial, err := index.PlanPublication(ctx, archive, endpoint, false)
 	if err != nil || len(initial) != 1 || len(initial[0].Objects) != 1 || initial[0].Objects[0].Envelope.RecordID != "local" {
 		t.Fatalf("initial plan: %+v %v", initial, err)
+	}
+	planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false)
+	if err != nil || len(planned) != 1 || planned[0].Hash != initial[0].Hash || len(inventory) != 1 || len(inventory[0].Objects) != 2 {
+		t.Fatalf("restricted plan and complete local inventory: %+v %+v %v", planned, inventory, err)
+	}
+	for _, object := range planned[0].Objects {
+		if object.Envelope.RecordID == "foreign" {
+			t.Fatal("local inventory leaked foreign record into restricted publication")
+		}
 	}
 	// No delivery yet: a fresh plan must return the exact staged block.
 	retry, err := index.PlanPublication(ctx, archive, endpoint, false)
