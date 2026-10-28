@@ -198,13 +198,15 @@ func mixedReplaySet(objects []portable.EncodedEnvelope) (string, bool) {
 // operational state. A nonempty expected hash requests an atomic proof write;
 // mismatch or uncertainty leaves no proof and forces the reference importer.
 func (s Index) mixedReplaySnapshot(ctx context.Context, setHash string, objects []portable.EncodedEnvelope, expected string) (string, bool, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: expected == ""})
 	if err != nil {
 		return "", false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE history_index_valid_sets SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
-		return "", false, err
+	if expected != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE history_index_valid_sets SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
+			return "", false, err
+		}
 	}
 	var recoveries int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM redaction_recoveries WHERE project_id=?`, s.ProjectID).Scan(&recoveries); err != nil || recoveries != 0 {

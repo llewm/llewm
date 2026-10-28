@@ -51,17 +51,19 @@ func recoveryReplaySet(objects []portable.EncodedEnvelope) (string, bool) {
 }
 
 // recoveryReplaySnapshot proves that all incoming observations, including
-// recovery records, resolve to exact existing local envelopes. It holds the
-// writer lock for the state comparison and any proof update. Uncertainty is a
-// cache miss; the full importer remains responsible for recovery semantics.
+// recovery records, resolve to exact existing local envelopes. Proof lookups
+// use a consistent read snapshot; proof updates hold the writer lock.
+// Uncertainty is a cache miss; the full importer owns recovery semantics.
 func (s Index) recoveryReplaySnapshot(ctx context.Context, setHash string, objects []portable.EncodedEnvelope, expected string) (string, bool, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: expected == ""})
 	if err != nil {
 		return "", false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE history_index_valid_sets SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
-		return "", false, err
+	if expected != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE history_index_valid_sets SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
+			return "", false, err
+		}
 	}
 	recovered, err := portable.RecoveredEnvelopes(ctx, tx, s.ProjectID)
 	if err != nil {

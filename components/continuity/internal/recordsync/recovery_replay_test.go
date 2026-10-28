@@ -1,11 +1,33 @@
 package recordsync
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
+
+func TestReplayProofLookupsDoNotReserveWriter(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "readonly-replay")
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	writer, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Rollback()
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	for name, read := range map[string]func() (string, bool, error){
+		"mixed":    func() (string, bool, error) { return index.mixedReplaySnapshot(readCtx, "missing", nil, "") },
+		"recovery": func() (string, bool, error) { return index.recoveryReplaySnapshot(readCtx, "missing", nil, "") },
+	} {
+		if _, proof, err := read(); err != nil || proof {
+			t.Fatalf("%s read while writer reserved: proof=%t err=%v", name, proof, err)
+		}
+	}
+}
 
 func TestRecoveryReplayEligibilityRejectsUnknownSchemas(t *testing.T) {
 	object := func(kind string, schema int, hash string) portable.EncodedEnvelope {
