@@ -81,6 +81,43 @@ func runHistorySync(ctx context.Context, application *app.App, session, prompt b
 		}
 	}
 	pass()
+	// A folder-only project can rebuild the disposable inventory once every
+	// configured folder supplies a complete, independently validated snapshot.
+	// Git-backed projects need the Git clone lock across that same operation.
+	if settings.Remote == "" && len(failures) > 0 {
+		indexOnly := true
+		for _, failure := range failures {
+			if !errors.Is(failure, recordsync.ErrIndexRebuild) {
+				indexOnly = false
+				break
+			}
+		}
+		if indexOnly {
+			inventories := make(map[string][]recordsync.Block, len(settings.Folders))
+			var rebuildErr error
+			for _, endpoint := range settings.Folders {
+				clone, _ := settings.MemoryClone()
+				if rebuildErr = foldersync.Separate(endpoint.Directory, config.StateDir(application.Root), application.Config.Storage.Database, application.Config.Backups.Dir, filepath.Join(application.Root, ".git"), clone); rebuildErr != nil {
+					break
+				}
+				inventory, err := (foldersync.Syncer{DB: application.DB, ProjectID: application.ProjectID, Archive: archive, Endpoint: endpoint}).Inventory(ctx)
+				if err != nil {
+					rebuildErr = err
+					break
+				}
+				inventories[endpoint.ID()] = inventory
+			}
+			if rebuildErr == nil {
+				rebuildErr = (recordsync.Index{DB: application.DB, ProjectID: application.ProjectID, Lineage: archive.Lineage}).Rebuild(ctx, inventories)
+			}
+			if rebuildErr != nil {
+				failures = append(failures, fmt.Errorf("folder inventory rebuild: %w", rebuildErr))
+			} else {
+				failures = nil
+				pass()
+			}
+		}
+	}
 	if settings.Remote != "" {
 		syncer, err := projectSyncer(application)
 		if err != nil {

@@ -28,6 +28,12 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 	if result, err := source.Sync(ctx); err != nil || result.PublishedRecords != len(objects) {
 		t.Fatalf("source publication: %+v %v", result, err)
 	}
+	if _, err := source.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, source.ProjectID); err != nil {
+		t.Fatal(err)
+	}
+	if inventory, err := source.Inventory(ctx); err != nil || len(inventory) == 0 {
+		t.Fatalf("independent inventory: %d %v", len(inventory), err)
+	}
 	if result, err := target.Sync(ctx); err != nil || result.ImportedRecords != len(objects) {
 		t.Fatalf("target import: %+v %v", result, err)
 	}
@@ -44,6 +50,9 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 	}
 	if result, err := target.Sync(ctx); err == nil || result.Outcome != "pending" || result.PendingFiles != 1 {
 		t.Fatalf("incomplete inventory accepted: %+v %v", result, err)
+	}
+	if inventory, err := source.Inventory(ctx); err == nil || inventory != nil {
+		t.Fatalf("rebuild accepted incomplete inventory: %d %v", len(inventory), err)
 	}
 }
 

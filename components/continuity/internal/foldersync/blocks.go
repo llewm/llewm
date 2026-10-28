@@ -10,6 +10,47 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
+// Inventory reads a complete endpoint snapshot without relying on the derived
+// block index. It is suitable for rebuilding that index only after every
+// configured endpoint has supplied an equally complete snapshot.
+func (s Syncer) Inventory(ctx context.Context) ([]recordsync.Block, error) {
+	root, err := recordsync.OpenRoot(s.Endpoint.Directory)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	marker, err := readMarker(root)
+	if err != nil {
+		return nil, err
+	}
+	if marker.StoreID != s.Endpoint.StoreID || s.Endpoint.LineageID != s.Archive.Lineage {
+		return nil, fmt.Errorf("folder identity/lineage differs from explicit configuration")
+	}
+	identity, err := (portable.Service{DB: s.DB}).Get(ctx, s.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if identity == nil || identity.LineageID != s.Endpoint.LineageID {
+		return nil, fmt.Errorf("folder route differs from selected project's lineage")
+	}
+	scan, err := recordsync.ScanBlocks(ctx, root, s.Archive.Lineage)
+	if err != nil {
+		return nil, err
+	}
+	if scan.Pending+scan.Invalid != 0 {
+		return nil, fmt.Errorf("folder block inventory is incomplete or invalid")
+	}
+	if err := verifyConversion(root, marker, s.Archive.Lineage, scan.Blocks); err != nil {
+		return nil, err
+	}
+	live, liveErr := Inspect(s.Endpoint.Directory)
+	current, currentErr := readMarker(root)
+	if liveErr != nil || live != marker || currentErr != nil || current != marker {
+		return nil, fmt.Errorf("configured folder path or marker became unavailable or changed")
+	}
+	return scan.Blocks, nil
+}
+
 // Sync performs one v4 folder cycle. The caller captures local records into
 // Archive first and explicitly converts each lineage before its first sync.
 func (s Syncer) Sync(ctx context.Context) (result Result, err error) {

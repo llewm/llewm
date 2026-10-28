@@ -7,11 +7,84 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestFolderOnlyCoordinatorRecoversFromAnotherEndpoint(t *testing.T) {
+	ctx := context.Background()
+	root := testProject(t)
+	runCLI(t, "", "init")
+	var identity portable.Identity
+	decodeCLI(t, runCLI(t, "", "sync", "init"), &identity)
+	var endpoints []foldersync.Endpoint
+	for _, name := range []string{"first", "second"} {
+		var endpoint foldersync.Endpoint
+		decodeCLI(t, runCLI(t, "", "sync", "folder", "add", name, "--directory", t.TempDir(), "--create", "--confirm-lineage", identity.LineageID), &endpoint)
+		runCLI(t, "", "sync", "folder", "convert", name, "--writers-stopped")
+		endpoints = append(endpoints, endpoint)
+	}
+	application, err := app.Open(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+	archive, err := projectArchive(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: identity.LineageID, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "coordinator-fixture", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Index: []byte(`{"title":"Recovered decision","status":"accepted"}`), Payload: []byte(`{"title":"Recovered decision","rationale":"Preserve staged intent","disposition":"accepted","actor":"owner","actor_type":"human","review_source":"","links":[],"operational_schema_version":1}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.Put(object, "local"); err != nil {
+		t.Fatal(err)
+	}
+	index := recordsync.Index{DB: application.DB, ProjectID: application.ProjectID, Lineage: identity.LineageID}
+	staged, err := index.PlanPublication(ctx, archive, endpoints[0].ID(), false)
+	if err != nil || len(staged) != 1 {
+		t.Fatalf("stage: %d %v", len(staged), err)
+	}
+	destination, err := recordsync.OpenRoot(endpoints[1].Directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = recordsync.PublishBlock(destination, identity.LineageID, staged[0])
+	destination.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(endpoints[1].Directory, foldersync.MarkerFile)
+	if err := os.Rename(markerPath, markerPath+".unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runHistorySync(ctx, application, false, false); err == nil {
+		t.Fatal("rebuild accepted an unavailable endpoint")
+	}
+	var members int
+	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash).Scan(&members); err != nil || members != 1 {
+		t.Fatalf("unavailable endpoint changed staged membership: %d %v", members, err)
+	}
+	if err := os.Rename(markerPath+".unavailable", markerPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runHistorySync(ctx, application, false, false); err != nil {
+		t.Fatalf("coordinated rebuild: %v", err)
+	}
+	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash).Scan(&members); err != nil || members != 2 {
+		t.Fatalf("staged and observed memberships: %d %v", members, err)
+	}
+}
 
 func TestSharedFolderCLIJoinsExistingHistoryWithoutGit(t *testing.T) {
 	rootA := testProject(t)
