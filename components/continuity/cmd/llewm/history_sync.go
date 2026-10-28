@@ -45,12 +45,17 @@ func runHistorySync(ctx context.Context, application *app.App, session, prompt b
 	if err != nil {
 		return historyResult{}, err
 	}
-	local, err := portable.EncodeMemoryExport(ctx, application.DB, application.ProjectID)
-	if err != nil {
-		return historyResult{}, err
-	}
-	if err := archive.CaptureLocal(local.Envelopes); err != nil {
-		return historyResult{}, err
+	// Folder sync needs a local snapshot before its first pass. The Git cycle
+	// takes its own snapshot under the clone lock after observing tracked
+	// provenance, so a Git-only sync must not export and capture it twice.
+	if len(settings.Folders) > 0 {
+		local, err := portable.EncodeMemoryExport(ctx, application.DB, application.ProjectID)
+		if err != nil {
+			return historyResult{}, err
+		}
+		if err := archive.CaptureLocal(local.Envelopes); err != nil {
+			return historyResult{}, err
+		}
 	}
 	var result historyResult
 	results := map[string]foldersync.Result{}
