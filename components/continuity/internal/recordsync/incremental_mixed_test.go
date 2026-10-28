@@ -8,8 +8,88 @@ import (
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/topic"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
+
+func TestMixedFirstTopicRevisionMatchesReference(t *testing.T) {
+	ctx, source, sourceID := indexedTestProject(t, "topic-add-source")
+	_, indexed, indexedID := indexedTestProject(t, "topic-add-indexed")
+	_, full, fullID := indexedTestProject(t, "topic-add-full")
+	for _, id := range []string{"root", "successor"} {
+		parent := ""
+		if id == "successor" {
+			parent = "root"
+		}
+		if _, err := (worknarrative.Service{DB: source}).Append(ctx, worknarrative.Record{ID: id, ProjectID: sourceID, Title: id, Trigger: "manual", Creator: "test", SupersedesID: parent, Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index := Index{DB: indexed, ProjectID: indexedID, Lineage: lineage}
+	initial, err := portable.EncodeMemoryExport(ctx, source, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, initial.Envelopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := index.ImportBlocks(ctx, []Block{block}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (Importer{DB: full, ProjectID: fullID}).Import(ctx, initial.Envelopes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for revision := 1; revision <= 2; revision++ {
+		if _, err := (topic.Service{DB: source}).Record(ctx, topic.Topic{ID: "new-topic", ProjectID: sourceID, Title: fmt.Sprintf("Topic revision %d", revision), Creator: "test"}); err != nil {
+			t.Fatal(err)
+		}
+		export, err := portable.EncodeMemoryExport(ctx, source, sourceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash, eligible := mixedReplaySet(export.Envelopes)
+		if !eligible {
+			t.Fatal("ineligible fixture")
+		}
+		want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, export.Envelopes)
+		got, used, gotErr := index.tryMixedAdditions(ctx, hash, export.Envelopes)
+		if revision == 1 && !used {
+			t.Fatalf("first revision missed shortcut: %v", gotErr)
+		}
+		if revision == 2 {
+			if used {
+				t.Fatal("later revision bypassed reference importer")
+			}
+			block, err := EncodeBlock(lineage, export.Envelopes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, gotErr = index.ImportBlocks(ctx, []Block{block})
+		}
+		if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+			t.Fatalf("revision %d: reference=%+v %v indexed=%+v %v", revision, want, wantErr, got, gotErr)
+		}
+		wantRecords, err := portable.LocalEnvelopes(ctx, full, fullID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotRecords, err := portable.LocalEnvelopes(ctx, indexed, indexedID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(wantRecords) != len(gotRecords) {
+			t.Fatal("semantic counts differ")
+		}
+		for key, value := range wantRecords {
+			if !bytes.Equal(value.Bytes, gotRecords[key].Bytes) {
+				t.Fatalf("semantic record %s differs", key)
+			}
+		}
+	}
+}
 
 // Exercise the public coordinator across changing block boundaries, local
 // invalidation, and dependent additions. Shortcut-only tests cannot establish

@@ -14,7 +14,6 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
-	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 	"github.com/spf13/cobra"
@@ -81,11 +80,7 @@ func runHistorySync(ctx context.Context, application *app.App, session, prompt b
 	// takes its own snapshot under the clone lock after observing tracked
 	// provenance, so a Git-only sync must not export and capture it twice.
 	if len(settings.Folders) > 0 {
-		local, err := portable.EncodeMemoryExport(ctx, application.DB, application.ProjectID)
-		if err != nil {
-			return historyResult{}, err
-		}
-		if err := archive.CaptureLocal(local.Envelopes); err != nil {
+		if _, err := archive.CaptureProject(ctx, application.DB, application.ProjectID); err != nil {
 			return historyResult{}, err
 		}
 	}
@@ -198,7 +193,16 @@ func (s historyStatus) Line(now time.Time) string {
 		lines = append(lines, s.Status.Line(now))
 	}
 	for _, endpoint := range s.Folders {
-		lines = append(lines, fmt.Sprintf("Folder %s: last local outcome %s at %s; peer receipt %s", endpoint.Endpoint, endpoint.Outcome, endpoint.At.UTC().Format(time.RFC3339), endpoint.PeerReceipt))
+		line := fmt.Sprintf("Folder %s: last local outcome %s at %s; peer receipt %s", endpoint.Endpoint, endpoint.Outcome, endpoint.At.UTC().Format(time.RFC3339), endpoint.PeerReceipt)
+		if endpoint.Unchanged {
+			line += " · unchanged locally"
+		} else if endpoint.DurationMS > 0 {
+			line += " · full local cycle"
+		}
+		if endpoint.DurationMS > 0 {
+			line += " · duration " + (time.Duration(endpoint.DurationMS) * time.Millisecond).String()
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, " · ")
 }

@@ -116,3 +116,53 @@ func BenchmarkHistorySyncUnchangedGate(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkFolderSyncUnchangedGate(b *testing.B) {
+	ctx := context.Background()
+	for _, cached := range []bool{false, true} {
+		b.Run(fmt.Sprintf("proof_%t", cached), func(b *testing.B) {
+			m := newMachine(b, "folder-gate-benchmark", bareRemote(b))
+			archive, err := recordsync.OpenArchive(filepath.Join(b.TempDir(), "archive"), testLineage)
+			if err != nil {
+				b.Fatal(err)
+			}
+			for i := 0; i < 5669; i++ {
+				m.decide(b, fmt.Sprintf("record-%04d", i), "Observation")
+			}
+			directory := b.TempDir()
+			marker, err := foldersync.Create(directory)
+			if err != nil {
+				b.Fatal(err)
+			}
+			s := foldersync.Syncer{DB: m.db, ProjectID: m.project, Archive: archive, Endpoint: foldersync.Endpoint{Name: "bench", Directory: directory, StoreID: marker.StoreID, LineageID: testLineage}}
+			if err := s.Convert(ctx); err != nil {
+				b.Fatal(err)
+			}
+			cycle := func() (foldersync.Result, error) {
+				if _, err := archive.CaptureProject(ctx, m.db, m.project); err != nil {
+					return foldersync.Result{}, err
+				}
+				return s.Sync(ctx)
+			}
+			for i := 0; i < 5; i++ {
+				if _, err := cycle(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if !cached {
+					b.StopTimer()
+					if _, err := m.db.Exec(`DELETE FROM history_sync_proofs`); err != nil {
+						b.Fatal(err)
+					}
+					b.StartTimer()
+				}
+				result, err := cycle()
+				if err != nil || result.Unchanged != cached {
+					b.Fatalf("cycle: %+v %v", result, err)
+				}
+			}
+		})
+	}
+}

@@ -121,8 +121,19 @@ and ctime), including provenance. It does not open or decode record contents;
 even same-size edits with restored mtime invalidate the proof. Status files are
 excluded. Platforms without this change identity retain full validation.
 This still costs a metadata walk, rather than constant work independent of
-archive size. Generic folder endpoints retain their complete validated scan;
-they do not yet expose a trustworthy atomic multiwriter change token.
+archive size. Folder endpoints can reuse a local completion proof too: the
+configured marker/lineage, endpoint contents, archive metadata, database token,
+build and relay policy must remain unchanged. Missing, changed or uncertain
+state takes the complete validated scan and publication-repair path. Folder
+results retain `unchanged` and `duration_ms`, visible through status and TUI
+Health. They still report peer receipt as unknown: local filesystem stability
+is not a provider delivery acknowledgement. The coordinator can also reuse a completed local export/capture proof while
+its database and archive inputs remain stable. A capture with unresolved actor
+dependencies is never cached.
+
+Guarded mixed imports also accept a reference-free first topic revision. Later
+topic revisions, aliases, links and other unqualified additions retain the full
+reference importer. Existing dependency and local-state guards still apply.
 
 The immediate sync JSON result includes `unchanged: true` when this proof skips
 export, archive content reads, block processing, and semantic replay. Migration
@@ -130,6 +141,11 @@ export, archive content reads, block processing, and semantic replay. Migration
 and the TUI Health view show the last recorded mode and duration; older attempts
 have unknown mode rather than being inferred from their transfer counts. Proofs are
 not portable import receipts and are never evidence of another peer's receipt.
+
+Curated exports include a referenced creator invocation and its transitive
+parent invocations, loaded in bounded batches. Unrelated invocation activity
+is excluded. This preserves the attribution dependencies needed by a fresh
+destination.
 
 Writer API 124 retains each canonical envelope in an append-only local table
 at its first memory export or successful import (migration 076). Later exports

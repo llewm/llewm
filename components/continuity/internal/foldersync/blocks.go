@@ -56,6 +56,7 @@ func (s Syncer) Inventory(ctx context.Context) ([]recordsync.Block, error) {
 func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 	result = Result{Endpoint: s.Endpoint.Name, Outcome: "error", At: time.Now().UTC(), PeerReceipt: "unknown"}
 	defer func() {
+		result.DurationMS = time.Since(result.At).Milliseconds()
 		if err != nil {
 			result.Detail = redact.String(err.Error())
 		}
@@ -83,6 +84,13 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 	}
 	if identity == nil || identity.LineageID != s.Endpoint.LineageID {
 		return result, fmt.Errorf("folder route differs from selected project's lineage")
+	}
+	before, guardErr := s.completionGuard(ctx)
+	if guardErr == nil && s.completedUnchanged(ctx, before) {
+		result.Unchanged = true
+		result.Outcome = "published_locally"
+		result.Detail = "unchanged local snapshot; external delivery and peer receipt are unconfirmed"
+		return result, nil
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: s.Archive.Lineage}
 	scan, err := index.ScanBlocks(ctx, root)
@@ -135,6 +143,9 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 	result.Detail = "validated locally; external delivery and peer receipt are unconfirmed"
 	if result.DeferredRecords+result.Collisions > 0 {
 		result.Outcome = "pending"
+	}
+	if guardErr == nil {
+		s.rememberCompletion(ctx, before, result)
 	}
 	return result, nil
 }

@@ -3,6 +3,7 @@ package recordsync
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
@@ -14,12 +15,22 @@ import (
 // optimization guard, never an assertion about endpoint delivery or semantics.
 // Platforms without inode/change-time metadata decline this optimization.
 func (a Archive) ChangeStamp(ctx context.Context) (string, error) {
-	root, err := OpenRoot(a.Directory)
+	return DirectoryChangeStamp(ctx, a.Directory)
+}
+
+// DirectoryChangeStamp also supports endpoint guards. It establishes only
+// local filesystem stability, never provider delivery or peer receipt.
+func DirectoryChangeStamp(ctx context.Context, directory string) (string, error) {
+	root, err := OpenRoot(directory)
 	if err != nil {
 		return "", err
 	}
 	defer root.Close()
 	h := sha256.New()
+	// Reuse a fixed-width binary encoding rather than allocating decimal
+	// strings for every inode, timestamp and size in both metadata walks.
+	var identityBytes [65]byte
+	separator := []byte{0}
 	entries := 0
 	err = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -47,7 +58,12 @@ func (a Archive) ChangeStamp(ctx context.Context) (string, error) {
 		if !ok {
 			return fmt.Errorf("archive change identity unavailable")
 		}
-		fmt.Fprintf(h, "%s\x00%s\x00", filepath.ToSlash(path), identity)
+		for i, value := range identity {
+			binary.BigEndian.PutUint64(identityBytes[i*8:], value)
+		}
+		h.Write([]byte(filepath.ToSlash(path)))
+		h.Write(separator)
+		h.Write(identityBytes[:])
 		return nil
 	})
 	if err != nil {

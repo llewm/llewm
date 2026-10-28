@@ -3,15 +3,14 @@
 package recordsync
 
 import (
-	"fmt"
 	"os"
 	"syscall"
 )
 
-func fileIdentity(info os.FileInfo) (string, bool) {
+func fileIdentity(info os.FileInfo) ([8]uint64, bool) {
 	s, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return "", false
+		return [8]uint64{}, false
 	}
-	return fmt.Sprintf("%d:%d:%d:%d:%d:%d:%d:%d", s.Dev, s.Ino, s.Mode, s.Size, s.Mtim.Sec, s.Mtim.Nsec, s.Ctim.Sec, s.Ctim.Nsec), true
+	return [8]uint64{s.Dev, s.Ino, uint64(s.Mode), uint64(s.Size), uint64(s.Mtim.Sec), uint64(s.Mtim.Nsec), uint64(s.Ctim.Sec), uint64(s.Ctim.Nsec)}, true
 }

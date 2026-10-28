@@ -1,0 +1,86 @@
+//go:build linux
+
+package recordsync
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/llewm/llewm/components/continuity/internal/attribution"
+	"github.com/llewm/llewm/components/continuity/internal/decision"
+	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
+)
+
+func TestCaptureProjectReuseAndRepair(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "capture")
+	a, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: "decision", Title: "Decision", Rationale: "Observation", Disposition: "accepted", Actor: "test", ActorType: "human", Authority: "caller_asserted"}); err != nil {
+		t.Fatal(err)
+	}
+	warm := func() {
+		t.Helper()
+		for i := 0; i < 4; i++ {
+			reused, err := a.CaptureProject(ctx, db, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reused {
+				return
+			}
+		}
+		t.Fatal("capture never reused")
+	}
+	warm()
+	at := time.Now()
+	for _, item := range []struct{ id, parent string }{{"root", ""}, {"child", "root"}} {
+		if _, err := (attribution.Service{DB: db}).AppendInvocation(ctx, attribution.Invocation{ID: item.id, ProjectID: project, ParentInvocationID: item.parent, ActorType: "agent", IdentitySource: "caller_asserted", OccurredAt: at, ReceivedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || !reused {
+		t.Fatalf("raw attribution invalidated capture: %t %v", reused, err)
+	}
+	if _, err := (worknarrative.Service{DB: db}).Append(ctx, worknarrative.Record{ID: "work", ProjectID: project, Title: "Work", Trigger: "manual", Creator: "test", CreatorInvocationID: "child", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || reused {
+		t.Fatalf("new dependency skipped: %t %v", reused, err)
+	}
+	warm()
+	export, err := portable.EncodeMemoryExport(ctx, db, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(export.Envelopes) != 4 {
+		t.Fatalf("missing attribution ancestors: %d", len(export.Envelopes))
+	}
+	path := filepath.Join(a.Directory, portable.MemoryRecordPath(export.Envelopes[0].Envelope))
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || reused {
+		t.Fatalf("missing archive file not repaired: %t %v", reused, err)
+	}
+	warm()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := portable.MemoryFileBytes(export.Envelopes[0])
+	body[len(body)-2] ^= 1
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err == nil || reused {
+		t.Fatalf("corrupt archive file reused: %t %v", reused, err)
+	}
+}

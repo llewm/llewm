@@ -98,6 +98,8 @@ func readMarker(root *os.Root) (Marker, error) {
 }
 
 type Result struct {
+	Unchanged        bool   `json:"unchanged,omitempty"`
+	DurationMS       int64  `json:"duration_ms"`
 	Endpoint         string `json:"endpoint"`
 	Outcome          string `json:"outcome"`
 	PublishedRecords int    `json:"published_records"`
