@@ -326,9 +326,12 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 		return nil, nil, err
 	}
 	found := make(map[string]struct{}, len(invocations))
+	// Invocation metadata repeats heavily across a session. Keep only a small,
+	// per-snapshot cache; arbitrary text and redaction results are never persisted.
+	invocationText := cachedPortableText(projectRoot)
 	for _, invocation := range invocations {
 		found[invocation.ID] = struct{}{}
-		spec, err := invocationSpec(lineageID, projectRoot, invocation)
+		spec, err := invocationSpec(lineageID, invocationText, invocation)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -403,12 +406,12 @@ func loadInvocations(ctx context.Context, source queryer, projectID string, ids 
 	return values, rows.Err()
 }
 
-func invocationSpec(lineageID, projectRoot string, value attribution.Invocation) (EnvelopeSpec, error) {
+func invocationSpec(lineageID string, text func(string) string, value attribution.Invocation) (EnvelopeSpec, error) {
 	payload, err := json.Marshal(invocationPayload{
 		SessionID: value.SessionID, ParentInvocationID: value.ParentInvocationID,
-		ActorType: portableText(value.ActorType, projectRoot), Client: portableText(value.Client, projectRoot), ClientVersion: portableText(value.ClientVersion, projectRoot),
-		Provider: portableText(value.Provider, projectRoot), Model: portableText(value.Model, projectRoot), EffortRequested: portableEffortText(value.EffortRequested, projectRoot),
-		EffortEffective: portableEffortText(value.EffortEffective, projectRoot), IdentitySource: value.IdentitySource,
+		ActorType: text(value.ActorType), Client: text(value.Client), ClientVersion: text(value.ClientVersion),
+		Provider: text(value.Provider), Model: text(value.Model), EffortRequested: portableEffortText(value.EffortRequested, text),
+		EffortEffective: portableEffortText(value.EffortEffective, text), IdentitySource: value.IdentitySource,
 		OccurredAt: value.OccurredAt.UTC().Format(time.RFC3339Nano), ReceivedAt: value.ReceivedAt.UTC().Format(time.RFC3339Nano),
 		OperationalSchemaVersion: value.SchemaVersion,
 	})
@@ -422,22 +425,22 @@ func invocationSpec(lineageID, projectRoot string, value attribution.Invocation)
 	if value.ParentInvocationID != "" {
 		refs = append(refs, Reference{Kind: "actor_invocation", ID: value.ParentInvocationID})
 	}
-	index, err := json.Marshal(envelopeIndex{Title: portableText(value.Model, projectRoot)})
+	index, err := json.Marshal(envelopeIndex{Title: text(value.Model)})
 	if err != nil {
 		return EnvelopeSpec{}, err
 	}
 	return EnvelopeSpec{LineageID: lineageID, RecordType: "actor_invocation", RecordSchemaVersion: 1, RecordID: value.ID, RecordedAt: value.OccurredAt, Authority: value.IdentitySource, Index: index, Refs: refs, Payload: payload}, nil
 }
 
-func portableEffortText(value *attribution.Effort, projectRoot string) *attribution.Effort {
+func portableEffortText(value *attribution.Effort, text func(string) string) *attribution.Effort {
 	if value == nil {
 		return nil
 	}
 	copy := *value
-	copy.Raw = portableText(copy.Raw, projectRoot)
-	copy.Normalized = portableText(copy.Normalized, projectRoot)
-	copy.Source = portableText(copy.Source, projectRoot)
-	copy.Authority = portableText(copy.Authority, projectRoot)
+	copy.Raw = text(copy.Raw)
+	copy.Normalized = text(copy.Normalized)
+	copy.Source = text(copy.Source)
+	copy.Authority = text(copy.Authority)
 	return &copy
 }
 
@@ -458,6 +461,20 @@ func portableText(value, projectRoot string) string {
 		}
 	}
 	return value
+}
+
+func cachedPortableText(projectRoot string) func(string) string {
+	cache := make(map[string]string)
+	return func(value string) string {
+		if result, ok := cache[value]; ok {
+			return result
+		}
+		result := portableText(value, projectRoot)
+		if len(cache) < 256 && len(value) <= 256 {
+			cache[value] = result
+		}
+		return result
+	}
 }
 
 func portableEffort(raw, normalized, source, authority sql.NullString) *attribution.Effort {

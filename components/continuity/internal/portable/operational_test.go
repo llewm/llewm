@@ -17,6 +17,45 @@ import (
 
 const operationalCommit = "0123456789abcdef0123456789abcdef01234567"
 
+func TestCachedInvocationTextMatchesRedaction(t *testing.T) {
+	root := "/home/example/project"
+	value := attribution.Invocation{ID: "invocation", ActorType: "agent", Client: "codex", ClientVersion: "1", Provider: "example", Model: "token=secret-value", IdentitySource: "caller_asserted", OccurredAt: time.Now().UTC(), ReceivedAt: time.Now().UTC(), SchemaVersion: 1, EffortRequested: &attribution.Effort{Raw: root + "/config", Normalized: "high", Source: "caller", Authority: "caller_asserted"}}
+	uncached := func(s string) string { return portableText(s, root) }
+	cached := cachedPortableText(root)
+	for i := 0; i < 2; i++ {
+		want, err := invocationSpec("lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", uncached, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := invocationSpec("lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", cached, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(want.Payload) != string(got.Payload) || string(want.Index) != string(got.Index) || strings.Contains(string(got.Payload), "secret-value") || strings.Contains(string(got.Payload), root) {
+			t.Fatalf("cached invocation differs or leaked sensitive text: %s", got.Payload)
+		}
+	}
+}
+
+func BenchmarkInvocationRepeatedMetadata(b *testing.B) {
+	root := "/home/example/project"
+	value := attribution.Invocation{ID: "invocation", ActorType: "agent", Client: "codex", ClientVersion: "1", Provider: "example", Model: "model", IdentitySource: "caller_asserted", OccurredAt: time.Unix(1, 0), ReceivedAt: time.Unix(1, 0), SchemaVersion: 1, EffortRequested: &attribution.Effort{Raw: "high", Normalized: "high", Source: "caller", Authority: "caller_asserted"}}
+	for _, cached := range []bool{false, true} {
+		name := "uncached"
+		text := func(s string) string { return portableText(s, root) }
+		if cached {
+			name, text = "cached", cachedPortableText(root)
+		}
+		b.Run(name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				if _, err := invocationSpec("lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", text, value); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func operationalProject(t testing.TB, name string) (context.Context, *sql.DB, string) {
 	t.Helper()
 	ctx := context.Background()
