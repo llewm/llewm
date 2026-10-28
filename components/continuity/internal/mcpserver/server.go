@@ -773,6 +773,11 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 	addTool(server, &mcp.Tool{Name: "continuity_bootstrap", Description: "Return the continuity bootstrap for the project. The SessionStart hook already delivers it; with no selection, an unchanged packet returns a one-line notice unless full is set."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BootstrapInput) (*mcp.CallToolResult, BootstrapOutput, error) {
 			selection := checkpoint.Selection{CheckpointID: input.CheckpointID, TaskID: input.TaskID, SessionID: input.SessionID}
+			inferredSession := false
+			if input.CurrentSessionID == "" && selection == (checkpoint.Selection{}) {
+				input.CurrentSessionID = soleRecentSession(ctx, application, startedAt)
+				inferredSession = input.CurrentSessionID != ""
+			}
 			packet, err := application.Bootstrap.BuildForSession(ctx, application.ProjectID, application.Root, application.Config.Project.Name, selection, input.CurrentSessionID)
 			if err != nil {
 				return nil, BootstrapOutput{}, err
@@ -783,6 +788,10 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 				warning = "Continuity MCP or its plugin is stale; inspect continuity_info, refresh the matching plugin if needed, and restart the parent client."
 			}
 			markdown := bootstrap.Markdown(packet)
+			packetHash := bootstrap.PacketHash(markdown)
+			if inferredSession {
+				markdown += "\nSession ID inferred from the sole recent local presence observation; this is a routing hint, not proof of process identity.\n"
+			}
 			if !input.Full && selection == (checkpoint.Selection{}) {
 				// The client starts this process with its session, so the session's
 				// SessionStart delivery falls shortly before or after startedAt.
@@ -790,8 +799,11 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 				if err != nil {
 					return nil, BootstrapOutput{}, err
 				}
-				if delivery, unchanged := bootstrap.DeliveredUnchanged(deliveries, bootstrap.PacketHash(markdown)); unchanged {
+				if delivery, unchanged := bootstrap.DeliveredUnchanged(deliveries, packetHash); unchanged {
 					notice := fmt.Sprintf("Unchanged since this session's SessionStart bootstrap (delivered %s, checkpoint %s); it is already in your context. Call again with full: true if it no longer is, for example after compaction.", delivery.DeliveredAt.Format(time.RFC3339), cmp.Or(delivery.CheckpointID, "none"))
+					if inferredSession {
+						notice += " Session inferred from the sole recent local presence observation; this is a routing hint."
+					}
 					return nil, BootstrapOutput{Markdown: notice, Unchanged: true, RuntimeWarning: warning}, nil
 				}
 			}
@@ -1075,6 +1087,22 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 	return server
 }
 
+// soleRecentSession provides a bounded routing hint when a startup hook recorded
+// presence but did not deliver its bootstrap. More than one observed session,
+// a truncated report, or a session outside the server's startup window is
+// ambiguous and must never be attributed implicitly.
+func soleRecentSession(ctx context.Context, application *app.App, startedAt time.Time) string {
+	report, err := application.Presence.List(ctx, application.ProjectID, presence.Query{LiveOnly: true, Limit: presence.MaxLimit, Now: time.Now().UTC()})
+	if err != nil || report.Truncated || len(report.Presence) != 1 {
+		return ""
+	}
+	event := report.Presence[0]
+	if event.SessionID == "" || event.StartedAt.Before(startedAt.Add(-deliveryWindowSlack)) || event.StartedAt.After(startedAt.Add(deliveryWindowSlack)) {
+		return ""
+	}
+	return event.SessionID
+}
+
 // observeMCPPresence attributes one stdio server to the sole recent SessionStart
 // delivery when that association is unambiguous. MCP does not carry the host
 // client's Continuity session ID, so ambiguity deliberately records nothing.
@@ -1092,6 +1120,12 @@ func observeMCPPresence(ctx context.Context, application *app.App, startedAt tim
 		if delivery.Client != newest.Client || delivery.SessionID != newest.SessionID {
 			return
 		}
+	}
+	// A delivery from a session that subsequently ended is not evidence that
+	// this new server belongs to that session.
+	var sessionStatus string
+	if err := application.DB.QueryRowContext(ctx, `SELECT status FROM sessions WHERE project_id=? AND id=?`, application.ProjectID, newest.SessionID).Scan(&sessionStatus); err != nil || sessionStatus == "ended" {
+		return
 	}
 	_ = application.ObservePresence(ctx, newest.Client, newest.SessionID, "", eventType, application.Root, time.Now().UTC())
 }

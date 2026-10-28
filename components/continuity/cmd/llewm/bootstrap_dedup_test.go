@@ -75,3 +75,42 @@ func TestMCPBootstrapSkipsThePacketTheSessionStartHookDelivered(t *testing.T) {
 		t.Fatal("bootstrap naming its session was not unchanged")
 	}
 }
+
+func TestMCPBootstrapRecoversWhenStartupWasNotDelivered(t *testing.T) {
+	root := testProject(t)
+	runCLI(t, "", "init")
+	runCLI(t, `{"session_id":"old","hook_event_name":"SessionStart","source":"startup"}`, "hook", "codex")
+	runCLI(t, "", "checkpoint", "create", "--task", "Local work", "--task-id", "local-work", "--next", "Continue", "--session", "old")
+	runCLI(t, "", "checkpoint", "create", "--task", "Other work", "--task-id", "other-work", "--next", "Later")
+	runCLI(t, `{"session_id":"old","hook_event_name":"SessionEnd","reason":"exit"}`, "hook", "codex")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child.Dir = t.TempDir()
+	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "recovery", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	// A later hook establishes presence without any SessionStart delivery.
+	runCLI(t, `{"session_id":"new","hook_event_name":"UserPromptSubmit"}`, "hook", "codex")
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "continuity_bootstrap", Arguments: map[string]any{"full": true}})
+	if err != nil || result.IsError {
+		t.Fatalf("bootstrap: %v %#v", err, result)
+	}
+	body, _ := json.Marshal(result.StructuredContent)
+	if !strings.Contains(string(body), "Task ID: local-work") || !strings.Contains(string(body), "Session ID inferred") {
+		t.Fatalf("missing inferred local task: %s", body)
+	}
+	// A second live session makes attribution ambiguous.
+	runCLI(t, `{"session_id":"other","hook_event_name":"UserPromptSubmit"}`, "hook", "codex")
+	result, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "continuity_bootstrap", Arguments: map[string]any{"full": true}})
+	if err != nil || result.IsError {
+		t.Fatalf("bootstrap with two sessions: %v %#v", err, result)
+	}
+	body, _ = json.Marshal(result.StructuredContent)
+	if strings.Contains(string(body), "Session ID inferred") || !strings.Contains(string(body), "Task selection needed") {
+		t.Fatalf("ambiguous sessions were attributed: %s", body)
+	}
+}
