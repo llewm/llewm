@@ -10,6 +10,76 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
+// Exercise the public coordinator across changing block boundaries, local
+// invalidation, and dependent additions. Shortcut-only tests cannot establish
+// that fallback and proof renewal compose correctly over several sync cycles.
+func TestMixedImportCyclesMatchReference(t *testing.T) {
+	ctx, source, sourceID := indexedTestProject(t, "cycles-source")
+	_, indexed, indexedID := indexedTestProject(t, "cycles-indexed")
+	_, full, fullID := indexedTestProject(t, "cycles-full")
+	appendRecord := func(db *sql.DB, project, id, parent string) {
+		t.Helper()
+		_, err := (worknarrative.Service{DB: db}).Append(ctx, worknarrative.Record{ID: id, ProjectID: project, Title: id, Trigger: "manual", Creator: "test", SupersedesID: parent, Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendRecord(source, sourceID, "root", "")
+	appendRecord(source, sourceID, "head", "root")
+	index := Index{DB: indexed, ProjectID: indexedID, Lineage: lineage}
+	head := "head"
+	for cycle := 0; cycle < 6; cycle++ {
+		if cycle == 2 {
+			appendRecord(indexed, indexedID, "local", "")
+			local, err := portable.EncodeMemoryExport(ctx, indexed, indexedID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := (Importer{DB: full, ProjectID: fullID}).Import(ctx, local.Envelopes); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if cycle > 0 {
+			parent := ""
+			if cycle%2 == 0 {
+				parent = head
+			}
+			appendRecord(source, sourceID, fmt.Sprintf("addition-%d", cycle), parent)
+			if parent != "" {
+				head = fmt.Sprintf("addition-%d", cycle)
+			}
+		}
+		exported, err := portable.EncodeMemoryExport(ctx, source, sourceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var blocks []Block
+		// Alternate a single block and one block per object, in reverse order.
+		if cycle%2 == 0 {
+			block, err := EncodeBlock(lineage, exported.Envelopes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			blocks = append(blocks, block)
+		} else {
+			for i := len(exported.Envelopes) - 1; i >= 0; i-- {
+				block, err := EncodeBlock(lineage, exported.Envelopes[i:i+1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				blocks = append(blocks, block)
+			}
+		}
+		for replay := 0; replay < 3; replay++ {
+			want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, exported.Envelopes)
+			got, gotErr := index.ImportBlocks(ctx, blocks)
+			if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+				t.Fatalf("cycle %d replay %d: full=%+v %v indexed=%+v %v", cycle, replay, want, wantErr, got, gotErr)
+			}
+		}
+	}
+}
+
 func TestMixedAdditionsMatchFullImportAndGuardDependencies(t *testing.T) {
 	ctx, source, sourceID := indexedTestProject(t, "mixed-add-source")
 	_, indexed, indexedID := indexedTestProject(t, "mixed-add-indexed")
