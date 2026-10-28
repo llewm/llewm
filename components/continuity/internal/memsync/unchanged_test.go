@@ -10,10 +10,75 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
+	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
+
+func TestUnchangedSyncIgnoresCoordinationButTracksLeaseStamps(t *testing.T) {
+	ctx := context.Background()
+	m := newMachine(t, "lease-coordination", bareRemote(t))
+	m.decide(t, "first", "Observation")
+	warmUnchanged(t, m)
+	service := lease.Service{DB: m.db}
+	request := lease.Request{ProjectID: m.project, ScopeKind: "task", ScopeID: "working", Holder: "codex", SessionID: "before-restart", TTL: time.Hour}
+	grant, err := service.Acquire(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Token = grant.Lease.Token
+	check := func() {
+		t.Helper()
+		if !m.sync(t, OutcomeSynced).Unchanged {
+			t.Fatal("coordination forced full history processing")
+		}
+	}
+	check()
+	if _, err := service.Renew(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	// Mirroring an already published grant only records remote delivery.
+	if _, err := m.db.Exec(`INSERT INTO lease_remote_events(grant_id,sequence,version,observed_at) VALUES(?,1,'verified-remote-version',?)`, grant.Lease.ID, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	if _, err := service.Release(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	// Unlike the grant itself, a stamp on a history write must travel.
+	if err := lease.InsertStamp(ctx, m.db, m.project, lease.Stamp{RecordKind: lease.StampCheckpoint, RecordID: "recorded-write", ScopeKind: request.ScopeKind, ScopeID: request.ScopeID, State: lease.Leased, Token: request.Token, Holder: request.Holder, SessionID: request.SessionID, InstanceID: grant.Lease.InstanceID, RecordedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.sync(t, OutcomeSynced); got.Unchanged || got.ExportedRecords == 0 {
+		t.Fatalf("canonical lease stamp skipped: %+v", got)
+	}
+}
+
+func TestUnchangedSyncStillMirrorsRemoteLeaseChanges(t *testing.T) {
+	ctx := context.Background()
+	remote := bareRemote(t)
+	a, b := newMachine(t, "lease-mirror-a", remote), newMachine(t, "lease-mirror-b", remote)
+	a.syncer.Leases = &lease.Service{DB: a.db}
+	a.decide(t, "first", "Observation")
+	warmUnchanged(t, a)
+	peer := lease.Service{DB: b.db, Remote: b.syncer.LeaseRemote()}
+	if _, err := peer.Acquire(ctx, lease.Request{ProjectID: b.project, ScopeKind: "task", ScopeID: "peer-work", Holder: "codex", SessionID: "peer-session", TTL: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.sync(t, OutcomeSynced); !got.Unchanged || len(got.LeaseNotes) != 0 {
+		t.Fatalf("lease-only remote change forced history replay: %+v", got)
+	}
+	mirrored, err := a.syncer.Leases.List(ctx, a.project, false)
+	if err != nil || len(mirrored) != 1 || mirrored[0].SessionID != "peer-session" || !mirrored[0].OnRemote {
+		t.Fatalf("fast path missed lease change: %+v %v", mirrored, err)
+	}
+	if !a.sync(t, OutcomeSynced).Unchanged {
+		t.Fatal("cycle's own lease mirroring invalidated the next cycle")
+	}
+}
 
 func warmUnchanged(t *testing.T, m machine) {
 	t.Helper()

@@ -142,6 +142,13 @@ and the TUI Health view show the last recorded mode and duration; older attempts
 have unknown mode rather than being inferred from their transfer counts. Proofs are
 not portable import receipts and are never evidence of another peer's receipt.
 
+Migration 084 excludes coordination grants, renewals/releases, and remote lease
+mirror receipts from the history generation token. They use separate lease refs;
+an unchanged history cycle still reconciles them. Lease stamps on history writes
+and stale-write resolutions remain canonical exported records and invalidate the
+history proof. Receiving or publishing a coordination lease alone must not force
+export or semantic replay on the next cycle.
+
 Curated exports include a referenced creator invocation and its transitive
 parent invocations, loaded in bounded batches. Unrelated invocation activity
 is excluded. This preserves the attribution dependencies needed by a fresh

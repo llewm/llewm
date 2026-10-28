@@ -16,6 +16,11 @@ func TestSyncGenerationCoversSchema(t *testing.T) {
 	}
 	defer db.Close()
 	excluded := map[string]bool{}
+	// Coordination uses separate lease refs, not curated envelope import.
+	// lease_stamps and stale_write_resolutions are exported and stay tracked.
+	for _, name := range []string{"lease_grants", "lease_events", "lease_remote_events"} {
+		excluded[name] = true
+	}
 	for _, name := range strings.Fields(`bootstrap_deliveries contract_index_entries events head_observations commit_authors presence_events sessions sync_attempts usage_requests usage_sources usage_tool_calls usage_tool_results roadmap_sync_files roadmap_sync_runs portable_import_receipts history_sync_generation history_sync_proofs schema_migrations`) {
 		excluded[name] = true
 	}
