@@ -3,6 +3,9 @@ package memsync
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -88,6 +91,9 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	if _, err := (procedures.Service{DB: a.db}).Append(ctx, procedures.Procedure{ProjectID: a.project, ID: "exact", Title: "Exact", Purpose: text, Kind: "runbook", Status: "accepted", Platforms: []string{"linux"}, DeclaredEffects: []string{"install"}, Steps: []procedures.Step{{ID: "copy", Description: "Copy", ArgvTemplate: []string{"copy", text}}}, Source: "test"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := a.db.Exec(`INSERT INTO roadmap_nodes(project_id,node_id,revision,title,status,priority,source_path,authority,recorded_at,schema_version,kind,evidence_refs_json) VALUES(?,'equivalent-node',1,'Node','active',10,'docs/roadmap.md','caller_asserted','2026-01-01T00:00:00Z',1,'work_item','[]')`, a.project); err != nil {
+		t.Fatal(err)
+	}
 	a.sync(t, OutcomeSynced)
 	b.sync(t, OutcomeSynced)
 	local, err := portable.LocalEnvelopes(ctx, a.db, a.project)
@@ -98,6 +104,28 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	var pairs []pair
 	var variants []portable.EncodedEnvelope
 	for _, e := range local {
+		if e.Envelope.RecordType == "roadmap_node" {
+			spec, err := portable.DecodeMemoryEnvelope(e.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(spec.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			payload["kind"], payload["evidence_refs"] = "work_item", []string{}
+			spec.RecordSchemaVersion = 2
+			spec.Payload, err = json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			equivalent, err := portable.EncodeEnvelope(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			variants = append(variants, equivalent)
+			continue
+		}
 		if e.Envelope.RecordType != "checkpoint" && e.Envelope.RecordType != "work_narrative" && e.Envelope.RecordType != "procedure" {
 			continue
 		}
@@ -183,6 +211,38 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	for _, block := range blocks {
 		objects = append(objects, block.Objects...)
 	}
+	// Retired records remain transport-valid but are ignored by the full
+	// importer. Their presence must not block an otherwise valid proof.
+	retired := objects[0].Envelope
+	retired.RecordType, retired.EnvelopeSHA256 = "contract", ""
+	unsigned, err := json.Marshal(retired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsigned, err = portable.CanonicalizeJSON(unsigned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(unsigned)
+	retired.EnvelopeSHA256 = hex.EncodeToString(sum[:])
+	wire, err := json.Marshal(retired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err = portable.CanonicalizeJSON(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredObject, err := portable.DecodeTransportEnvelope(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredBlock, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{retiredObject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects = append(objects, retiredObject)
+	blocks = append(blocks, retiredBlock)
 	reference := localHistoryMachine(t, "recovery-reference")
 	indexed := localHistoryMachine(t, "recovery-indexed")
 	want, wantErr := (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
@@ -202,6 +262,19 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	var proofs int
 	if err := indexed.db.QueryRow(`SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:%' AND local_state_hash<>''`, indexed.project).Scan(&proofs); err != nil || proofs != 1 {
 		t.Fatalf("unchanged recovery proof missing: %d %v", proofs, err)
+	}
+	reversed := append([]recordsync.Block{}, blocks...)
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+	var reversedObjects []portable.EncodedEnvelope
+	for _, block := range reversed {
+		reversedObjects = append(reversedObjects, block.Objects...)
+	}
+	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, reversedObjects)
+	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, reversed)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("reordered equivalent observations differ: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
 	}
 	var previousState string
 	if err := indexed.db.QueryRow(`SELECT local_state_hash FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:%'`, indexed.project).Scan(&previousState); err != nil {

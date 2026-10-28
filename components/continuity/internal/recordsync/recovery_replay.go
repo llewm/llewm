@@ -9,6 +9,7 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
 
@@ -21,7 +22,13 @@ func recoveryReplaySet(objects []portable.EncodedEnvelope) (string, bool) {
 	var hashes []string
 	hasRecovery := false
 	for _, object := range objects {
-		if !portable.SupportedEnvelope(object.Envelope) || portable.RetiredRecordType(object.Envelope.RecordType) {
+		if portable.RetiredRecordType(object.Envelope.RecordType) {
+			// The reference importer ignores retired observations. Keep them in
+			// the exact input fingerprint, but do not require a local record.
+			hashes = append(hashes, object.Envelope.EnvelopeSHA256)
+			continue
+		}
+		if !portable.SupportedEnvelope(object.Envelope) {
 			return "", false
 		}
 		if object.Envelope.RecordType == "redaction_recovery" {
@@ -38,7 +45,9 @@ func recoveryReplaySet(objects []portable.EncodedEnvelope) (string, bool) {
 		hash.Write([]byte(value))
 		hash.Write([]byte{0})
 	}
-	return "recovery:" + hex.EncodeToString(hash.Sum(nil)), true
+	// Version the proof domain independently of block indexing so older
+	// processes cannot reuse proofs made under different recovery rules.
+	return "recovery:v2:" + hex.EncodeToString(hash.Sum(nil)), true
 }
 
 // recoveryReplaySnapshot proves that all incoming observations, including
@@ -62,19 +71,45 @@ func (s Index) recoveryReplaySnapshot(ctx context.Context, setHash string, objec
 	if err != nil {
 		return "", false, err
 	}
-	normalized := make(map[string][]byte, len(objects))
+	groups := make(map[string][]portable.EncodedEnvelope)
 	for _, object := range objects {
-		if original, ok := recovered[object.Envelope.EnvelopeSHA256]; ok {
-			object = original
+		if portable.RetiredRecordType(object.Envelope.RecordType) {
+			continue
 		}
 		e := object.Envelope
 		key := portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)
-		if previous, ok := normalized[key]; ok && !bytes.Equal(previous, object.Bytes) {
+		groups[key] = append(groups[key], object)
+	}
+	normalized := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		object := group[0]
+		if len(group) > 1 {
+			// Recovery records are imported together before fork handling. A
+			// duplicate correction identity must take the reference path.
+			if object.Envelope.RecordType == "redaction_recovery" {
+				return "", false, nil
+			}
+			// Mirror the reference importer's grouping, including recovery
+			// normalization and its explicit roadmap equivalence rule.
+			heads, err := forkHeads(group, recovered)
+			if err != nil || len(heads) != 1 {
+				return "", false, nil
+			}
+			object, err = portable.DecodeTransportEnvelope(heads[0].Envelope)
+			if err != nil {
+				return "", false, nil
+			}
+		}
+		e := object.Envelope
+		key := portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)
+		// Different raw identities resolving to the same selected identity
+		// would be submitted twice to the reference importer.
+		if normalized[key] {
 			return "", false, nil
 		}
-		normalized[key] = object.Bytes
+		normalized[key] = true
 		held, ok := local[key]
-		if !ok || !bytes.Equal(held.Bytes, object.Bytes) {
+		if !ok || (!bytes.Equal(held.Bytes, object.Bytes) && !fork.EquivalentRoadmapNodeEnvelopes([][]byte{held.Bytes, object.Bytes})) {
 			return "", false, nil
 		}
 	}
