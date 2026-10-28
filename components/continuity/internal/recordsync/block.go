@@ -21,9 +21,34 @@ const MaxBlockRecords = 512
 // Block is a content-addressed, deterministic collection of wire envelopes.
 // The hash identifies the entire encoded block, including its version.
 type Block struct {
-	Hash    string
-	Bytes   []byte
-	Objects []portable.EncodedEnvelope
+	Hash      string
+	Bytes     []byte
+	Objects   []portable.EncodedEnvelope
+	validated *validatedBlockContents
+}
+
+// A private copy prevents a caller from mutating exported Block fields and
+// turning an unvalidated envelope into a trusted archive-cache entry.
+type validatedBlockContents struct {
+	lineage string
+	objects []portable.EncodedEnvelope
+}
+
+func copyEnvelope(e portable.EncodedEnvelope) portable.EncodedEnvelope {
+	copy := e
+	copy.Bytes = append([]byte(nil), e.Bytes...)
+	copy.Envelope.Index = append([]byte(nil), e.Envelope.Index...)
+	copy.Envelope.Payload = append([]byte(nil), e.Envelope.Payload...)
+	copy.Envelope.Refs = append([]portable.Reference(nil), e.Envelope.Refs...)
+	return copy
+}
+
+func sealBlockContents(lineage string, objects []portable.EncodedEnvelope) *validatedBlockContents {
+	sealed := &validatedBlockContents{lineage: lineage, objects: make([]portable.EncodedEnvelope, len(objects))}
+	for i, object := range objects {
+		sealed.objects[i] = copyEnvelope(object)
+	}
+	return sealed
 }
 
 // EncodeBlock validates envelopes before publication. Sorting by canonical

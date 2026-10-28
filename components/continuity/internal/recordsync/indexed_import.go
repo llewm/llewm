@@ -48,6 +48,7 @@ func (s Index) ReadBlock(ctx context.Context, root *os.Root, path string) (Block
 		return Block{}, err
 	}
 	block.Objects = objects
+	block.validated = sealBlockContents(s.Lineage, objects)
 	return block, nil
 }
 

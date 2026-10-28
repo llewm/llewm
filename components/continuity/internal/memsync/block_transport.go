@@ -165,12 +165,12 @@ func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage 
 	return bodies, nil
 }
 
-func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]string, int, []recordsync.Block, error) {
+func (s Syncer) publishBlocks(ctx context.Context, lineage string, known []recordsync.Block) ([]string, int, []recordsync.Block, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return nil, 0, nil, fmt.Errorf("matching history archive is required for block publication")
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
-	blocks, inventory, err := index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay)
+	blocks, inventory, err := index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay, known)
 	if err != nil {
 		return nil, 0, nil, err
 	}

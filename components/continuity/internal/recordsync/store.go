@@ -189,6 +189,10 @@ type ScanResult struct {
 // inside the selected lineage record tree. Other lineage namespaces are never scanned. Partial/missing/corrupt files never reach the importer.
 // No mtime or shared cursor is used. The caller decides whether a scan is usable.
 func Scan(ctx context.Context, root *os.Root, lineage string) (ScanResult, error) {
+	return scanWithKnown(ctx, root, lineage, nil)
+}
+
+func scanWithKnown(ctx context.Context, root *os.Root, lineage string, known map[string]portable.EncodedEnvelope) (ScanResult, error) {
 	var result ScanResult
 	if !lineagePattern.MatchString(lineage) {
 		return result, fmt.Errorf("invalid scan lineage")
@@ -250,7 +254,18 @@ func Scan(ctx context.Context, root *os.Root, lineage string) (ScanResult, error
 					result.Invalid++
 					continue
 				}
-				e, err := ReadObject(root, child, lineage)
+				var e portable.EncodedEnvelope
+				var err error
+				if cached, ok := known[child]; ok {
+					body, readErr := ReadFile(root, child, MaxObjectBytes)
+					if readErr == nil && bytes.Equal(body, portable.MemoryFileBytes(cached)) {
+						e = copyEnvelope(cached)
+					} else {
+						e, err = ReadObject(root, child, lineage)
+					}
+				} else {
+					e, err = ReadObject(root, child, lineage)
+				}
 				if err != nil {
 					result.Pending++
 					continue
@@ -359,12 +374,31 @@ func (a Archive) Objects(ctx context.Context, endpoint string, relay bool) ([]po
 // objects returns both destination-authorized objects and the complete
 // validated snapshot. Both views come from the same archive scan.
 func (a Archive) objects(ctx context.Context, endpoint string, relay bool) ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+	return a.objectsWithBlocks(ctx, endpoint, relay, nil)
+}
+
+func (a Archive) objectsWithBlocks(ctx context.Context, endpoint string, relay bool, blocks []Block) ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
 	root, err := OpenRoot(a.Directory)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer root.Close()
-	scan, err := Scan(ctx, root, a.Lineage)
+	known := make(map[string]portable.EncodedEnvelope)
+	knownCount, knownBytes := 0, 0
+	for _, block := range blocks {
+		if block.validated == nil || block.validated.lineage != a.Lineage {
+			continue
+		}
+		for _, object := range block.validated.objects {
+			knownCount++
+			knownBytes += len(object.Bytes)
+			if knownCount > portable.MaxRecordCount || knownBytes > portable.MaxRecordsBytes {
+				return nil, nil, fmt.Errorf("validated archive hints exceed bounds")
+			}
+			known[portable.MemoryRecordPath(object.Envelope)] = object
+		}
+	}
+	scan, err := scanWithKnown(ctx, root, a.Lineage, known)
 	if err != nil {
 		return nil, nil, err
 	}

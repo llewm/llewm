@@ -15,6 +15,74 @@ import (
 
 const lineage = "lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func TestArchiveValidatedHintsPreserveIntegrity(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "archive-hints")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := fixture(t)
+	if _, err := archive.Put(object, "local"); err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{object})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	root, err := OpenRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if _, err := PublishBlock(root, lineage, block); err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	base, err := BlockDirectory(lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	known, err := index.ReadBlock(ctx, root, filepath.Join(base, block.Hash+".block"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mutating exported fields cannot modify the private validation evidence.
+	known.Objects[0].Bytes[0] = 'x'
+	known.Objects[0].Envelope.RecordID = "forged"
+	known.Objects[0].Envelope.Payload[0] = 'x'
+	_, got, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known})
+	if err != nil || len(got) != 1 || !bytes.Equal(got[0].Bytes, object.Bytes) {
+		t.Fatalf("valid cached result changed: %+v %v", got, err)
+	}
+	got[0].Bytes[0] = 'x'
+	_, got, err = archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known})
+	if err != nil || len(got) != 1 || !bytes.Equal(got[0].Bytes, object.Bytes) {
+		t.Fatalf("cached result aliased caller data: %+v %v", got, err)
+	}
+	foreign, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "foreign", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.Put(foreign, "folder:other"); err != nil {
+		t.Fatal(err)
+	}
+	allowed, all, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known})
+	if err != nil || len(allowed) != 1 || len(all) != 2 || allowed[0].Envelope.EnvelopeSHA256 != object.Envelope.EnvelopeSHA256 {
+		t.Fatalf("hint changed provenance or missed new data: %d %d %v", len(allowed), len(all), err)
+	}
+	path := filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))
+	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known}); err == nil {
+		t.Fatal("cached hint accepted damaged archive bytes")
+	}
+	if _, _, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{{Objects: []portable.EncodedEnvelope{object}}}); err == nil {
+		t.Fatal("forged unsealed hint accepted damaged archive bytes")
+	}
+}
+
 func fixture(t *testing.T) portable.EncodedEnvelope {
 	t.Helper()
 	e, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "sample", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: json.RawMessage(`{}`)})

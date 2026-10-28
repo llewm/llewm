@@ -78,7 +78,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if err := s.Archive.CaptureLocal(export.Envelopes); err != nil {
 		return result, err
 	}
-	paths, count, snapshot, err := s.publishBlocks(local, export.Identity.LineageID)
+	paths, count, snapshot, err := s.publishBlocks(local, export.Identity.LineageID, tracked)
 	result.ExportedRecords = count
 	if err != nil {
 		return result, err

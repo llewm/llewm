@@ -114,15 +114,15 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 // verified destination blocks before planning additions. An incomplete or
 // invalid destination scan must be retried before rebuilding its catalog.
 func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, error) {
-	return s.planPublicationWithRecovery(ctx, archive, endpoint, relay, nil)
+	return s.planPublicationWithRecovery(ctx, archive, endpoint, relay, nil, nil)
 }
 
 // PlanPublicationWithInventory returns the publication plan and a complete
 // validated archive snapshot from the same scan, for local semantic import.
 // Records arriving after the snapshot are picked up on the next cycle.
-func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, []Block, error) {
+func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool, known []Block) ([]Block, []Block, error) {
 	var inventory []portable.EncodedEnvelope
-	blocks, err := s.planPublicationWithRecovery(ctx, archive, endpoint, relay, &inventory)
+	blocks, err := s.planPublicationWithRecovery(ctx, archive, endpoint, relay, &inventory, known)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -130,11 +130,11 @@ func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive
 	return blocks, all, err
 }
 
-func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope) ([]Block, error) {
+func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, known []Block) ([]Block, error) {
 	repaired := false
 	for attempt := 0; attempt < 3; attempt++ {
 		blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
-			return archive.objects(ctx, endpoint, relay)
+			return archive.objectsWithBlocks(ctx, endpoint, relay, known)
 		})
 		if errors.Is(err, errPublicationChanged) {
 			continue

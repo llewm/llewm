@@ -41,7 +41,7 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_publication BEFORE INSERT ON history_index_publications BEGIN SELECT RAISE(ABORT,'injected failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false); err == nil || planned != nil || inventory != nil {
+	if planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false, nil); err == nil || planned != nil || inventory != nil {
 		t.Fatalf("publication failure exposed a partial snapshot: %+v %+v %v", planned, inventory, err)
 	}
 	var staged int
@@ -55,7 +55,7 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 	if err != nil || len(initial) != 1 || len(initial[0].Objects) != 1 || initial[0].Objects[0].Envelope.RecordID != "local" {
 		t.Fatalf("initial plan: %+v %v", initial, err)
 	}
-	planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false)
+	planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false, nil)
 	if err != nil || len(planned) != 1 || planned[0].Hash != initial[0].Hash || len(inventory) != 1 || len(inventory[0].Objects) != 2 {
 		t.Fatalf("restricted plan and complete local inventory: %+v %+v %v", planned, inventory, err)
 	}
