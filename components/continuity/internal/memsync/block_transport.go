@@ -1,6 +1,7 @@
 package memsync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -102,40 +103,40 @@ func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage 
 	return bodies, nil
 }
 
-func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]string, int, error) {
+func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]string, int, []recordsync.Block, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
-		return nil, 0, fmt.Errorf("matching history archive is required for block publication")
+		return nil, 0, nil, fmt.Errorf("matching history archive is required for block publication")
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
-	blocks, err := index.PlanPublication(ctx, *s.Archive, s.Endpoint(), s.Relay)
+	blocks, inventory, err := index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	root, err := recordsync.OpenRoot(s.Clone)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer root.Close()
 	count := 0
 	var paths []string
 	directory, err := recordsync.BlockDirectory(lineage)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	for _, block := range blocks {
 		if err := ctx.Err(); err != nil {
-			return paths, count, err
+			return paths, count, nil, err
 		}
 		added, err := recordsync.PublishBlock(root, lineage, block)
 		if err != nil {
-			return paths, count, err
+			return paths, count, nil, err
 		}
 		paths = append(paths, filepath.ToSlash(filepath.Join(directory, block.Hash+".block")))
 		if added {
 			count += len(block.Objects)
 		}
 	}
-	return paths, count, nil
+	return paths, count, inventory, nil
 }
 
 // commitBlocks stages only explicitly validated block paths. Never add a whole
@@ -158,7 +159,7 @@ func commitBlocks(ctx context.Context, repo git, paths []string, message string)
 	return err
 }
 
-func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage string) (recordsync.ImportResult, error) {
+func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage string, snapshot []recordsync.Block) (recordsync.ImportResult, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return recordsync.ImportResult{}, fmt.Errorf("matching history archive is required for block import")
 	}
@@ -167,14 +168,33 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 		return recordsync.ImportResult{}, err
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
+	// The publication snapshot is complete at its scan time. Reuse it only
+	// when every fetched record was already present with the same bytes;
+	// otherwise rescan after observation to include newly received records.
+	// Unrelated concurrent arrivals after the snapshot are picked up next cycle.
+	known := make(map[string][]byte)
+	for _, block := range snapshot {
+		for _, object := range block.Objects {
+			known[object.Envelope.EnvelopeSHA256] = object.Bytes
+		}
+	}
+	complete := snapshot != nil
 	for _, block := range blocks {
 		if _, err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
 			return recordsync.ImportResult{}, err
 		}
+		for _, object := range block.Objects {
+			if !bytes.Equal(known[object.Envelope.EnvelopeSHA256], object.Bytes) {
+				complete = false
+			}
+		}
 	}
-	all, err := s.Archive.AuthorizedBlocks(ctx, "", true)
-	if err != nil {
-		return recordsync.ImportResult{}, err
+	all := snapshot
+	if !complete {
+		all, err = s.Archive.AuthorizedBlocks(ctx, "", true)
+		if err != nil {
+			return recordsync.ImportResult{}, err
+		}
 	}
 	return index.ImportBlocks(ctx, all)
 }

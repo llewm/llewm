@@ -179,7 +179,7 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if err := aa.CaptureLocal(export.Envelopes); err != nil {
 		t.Fatal(err)
 	}
-	paths, count, err := a.syncer.publishBlocks(ctx, testLineage)
+	paths, count, snapshot, err := a.syncer.publishBlocks(ctx, testLineage)
 	if err != nil || count != len(export.Envelopes) {
 		t.Fatalf("publish: %d %v", count, err)
 	}
@@ -211,10 +211,11 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if _, err := peer.run(ctx, "checkout", "-B", "main", "origin/main"); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := b.syncer.importTrackedBlocks(ctx, peer, testLineage); err != nil || result.ImportedRecords != len(export.Envelopes) {
+	// A snapshot from before fetch must not hide newly tracked records.
+	if result, err := b.syncer.importTrackedBlocks(ctx, peer, testLineage, []recordsync.Block{}); err != nil || result.ImportedRecords != len(export.Envelopes) {
 		t.Fatalf("import: %+v %v", result, err)
 	}
-	if result, err := b.syncer.importTrackedBlocks(ctx, peer, testLineage); err != nil || result.ImportedRecords != 0 {
+	if result, err := b.syncer.importTrackedBlocks(ctx, peer, testLineage, snapshot); err != nil || result.ImportedRecords != 0 {
 		t.Fatalf("replay: %+v %v", result, err)
 	}
 }

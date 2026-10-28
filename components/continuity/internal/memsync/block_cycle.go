@@ -78,7 +78,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if err := s.Archive.CaptureLocal(export.Envelopes); err != nil {
 		return result, err
 	}
-	paths, count, err := s.publishBlocks(local, export.Identity.LineageID)
+	paths, count, snapshot, err := s.publishBlocks(local, export.Identity.LineageID)
 	result.ExportedRecords = count
 	if err != nil {
 		return result, err
@@ -93,7 +93,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	branch := head
 	importBlocks := func() error {
 		importCurrent := func() error {
-			imported, err := s.importTrackedBlocks(local, repo, export.Identity.LineageID)
+			imported, err := s.importTrackedBlocks(local, repo, export.Identity.LineageID, snapshot)
 			result.ImportedRecords += imported.ImportedRecords
 			result.Collisions, result.Forks, result.SupersessionForks, result.DeferredRecords = imported.Collisions, imported.Forks, imported.SupersessionForks, imported.DeferredRecords
 			if err != nil {
