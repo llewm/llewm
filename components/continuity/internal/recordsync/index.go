@@ -281,6 +281,41 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 		return err
 	}
 	defer tx.Rollback()
+	// Publication rows also represent staged writes that may not yet exist at
+	// their destinations. Refuse a snapshot that would discard any of them.
+	// Take the writer lock before checking, so a concurrent plan cannot add
+	// intent between this check and the replacement.
+	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
+		return err
+	}
+	provided := make(map[string]map[string]bool, len(inventories))
+	for endpoint, blocks := range inventories {
+		key := Hash(endpoint)
+		provided[key] = make(map[string]bool, len(blocks))
+		for _, block := range blocks {
+			provided[key][block.Hash] = true
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT endpoint_hash,block_hash FROM history_index_publications WHERE project_id=?`, s.ProjectID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var endpoint, block string
+		if err := rows.Scan(&endpoint, &block); err != nil {
+			rows.Close()
+			return err
+		}
+		if !provided[endpoint][block] {
+			rows.Close()
+			return fmt.Errorf("%w: rebuild omits existing publication intent", ErrIndexRebuild)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
 	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err

@@ -298,6 +298,17 @@ func TestRebuildRestoresEndpointMembershipAtomically(t *testing.T) {
 		}
 	}
 	check()
+	// A valid destination scan can omit staged publication intent, or an
+	// entire endpoint. Neither is a complete recovery inventory.
+	for _, incomplete := range []map[string][]Block{
+		{"folder:a": {block}},
+		{"folder:a": {block}, "git:b": {}},
+	} {
+		if err := index.Rebuild(ctx, incomplete); !errors.Is(err, ErrIndexRebuild) {
+			t.Fatalf("incomplete publication inventory accepted: %v", err)
+		}
+		check()
+	}
 	bad := block
 	bad.Hash = Hash("wrong")
 	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {bad}}); err == nil {
