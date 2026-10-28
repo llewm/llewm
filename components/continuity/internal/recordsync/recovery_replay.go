@@ -47,7 +47,7 @@ func recoveryReplaySet(objects []portable.EncodedEnvelope) (string, bool) {
 	}
 	// Version the proof domain independently of block indexing so older
 	// processes cannot reuse proofs made under different recovery rules.
-	return "recovery:v3:" + hex.EncodeToString(hash.Sum(nil)), true
+	return "recovery:v4:" + hex.EncodeToString(hash.Sum(nil)), true
 }
 
 // recoveryReplaySnapshot proves that all incoming observations, including
@@ -134,7 +134,7 @@ func (s Index) recoveryReplaySnapshot(ctx context.Context, setHash string, objec
 	if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
 		return "", false, err
 	}
-	state := localStateHash(local, nil)
+	state := localStateHash(local, recoveryInvocationExclusions(local, objects, recovered))
 	if expected != "" {
 		if state != expected {
 			return "", false, nil
@@ -159,4 +159,57 @@ func (s Index) recoveryReplaySnapshot(ctx context.Context, setHash string, objec
 		return "", false, err
 	}
 	return state, false, nil
+}
+
+// Unreferenced local invocations cannot affect this import. Keep every input
+// invocation and every invocation referenced by local or incoming records,
+// including transitive invocation parents, in the state fingerprint.
+func recoveryInvocationExclusions(local map[string]portable.EncodedEnvelope, objects []portable.EncodedEnvelope, recovered map[string]portable.EncodedEnvelope) map[string]bool {
+	needed := make(map[string]bool)
+	markRefs := func(object portable.EncodedEnvelope) {
+		for _, ref := range object.Envelope.Refs {
+			if ref.Kind == "actor_invocation" {
+				needed[ref.ID] = true
+			}
+		}
+	}
+	for _, object := range objects {
+		if object.Envelope.RecordType == "actor_invocation" {
+			needed[object.Envelope.RecordID] = true
+		}
+		markRefs(object)
+		if original, ok := recovered[object.Envelope.EnvelopeSHA256]; ok {
+			if original.Envelope.RecordType == "actor_invocation" {
+				needed[original.Envelope.RecordID] = true
+			}
+			markRefs(original)
+		}
+	}
+	invocations := make(map[string]portable.EncodedEnvelope)
+	for _, object := range local {
+		if object.Envelope.RecordType == "actor_invocation" {
+			invocations[object.Envelope.RecordID] = object
+		} else {
+			markRefs(object)
+		}
+	}
+	queue := make([]string, 0, len(needed))
+	for id := range needed {
+		queue = append(queue, id)
+	}
+	for i := 0; i < len(queue); i++ {
+		for _, ref := range invocations[queue[i]].Envelope.Refs {
+			if ref.Kind == "actor_invocation" && !needed[ref.ID] {
+				needed[ref.ID] = true
+				queue = append(queue, ref.ID)
+			}
+		}
+	}
+	excluded := make(map[string]bool)
+	for key, object := range local {
+		if object.Envelope.RecordType == "actor_invocation" && !needed[object.Envelope.RecordID] {
+			excluded[key] = true
+		}
+	}
+	return excluded
 }

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
@@ -383,8 +384,27 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 			t.Fatalf("known fork replay %d differs: full=%+v %v indexed=%+v %v", i, want, wantErr, got, gotErr)
 		}
 	}
-	if err := indexed.db.QueryRow(`SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:v3:%' AND local_state_hash<>''`, indexed.project).Scan(&proofs); err != nil || proofs < 2 {
+	if err := indexed.db.QueryRow(`SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:v4:%' AND local_state_hash<>''`, indexed.project).Scan(&proofs); err != nil || proofs < 2 {
 		t.Fatalf("known fork replay did not establish a proof: %d %v", proofs, err)
+	}
+	at := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, m := range []machine{reference, indexed} {
+		if _, err := (attribution.Service{DB: m.db}).AppendInvocation(ctx, attribution.Invocation{ID: "unrelated-activity", ProjectID: m.project, ActorType: "tool", IdentitySource: "unknown", OccurredAt: at, ReceivedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A full replay would attempt to record the known fork heads. Reject that
+	// attempt in the indexed fixture to prove unrelated activity used the proof.
+	if _, err := indexed.db.Exec(`CREATE TRIGGER reject_full_replay BEFORE INSERT ON fork_head_observations BEGIN SELECT RAISE(ABORT,'full replay attempted'); END`); err != nil {
+		t.Fatal(err)
+	}
+	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, conflictObjects)
+	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, conflictBlocks)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("unrelated activity invalidated proof: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
+	}
+	if _, err := indexed.db.Exec(`DROP TRIGGER reject_full_replay`); err != nil {
+		t.Fatal(err)
 	}
 	// Simulate damage to one append-only fork observation in disposable
 	// fixtures. A prior proof must not suppress the reference repair.
