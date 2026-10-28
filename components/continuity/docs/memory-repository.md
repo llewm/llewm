@@ -125,7 +125,10 @@ archive size. Generic folder endpoints retain their complete validated scan;
 they do not yet expose a trustworthy atomic multiwriter change token.
 
 The immediate sync JSON result includes `unchanged: true` when this proof skips
-export, archive content reads, block processing, and semantic replay. Proofs are
+export, archive content reads, block processing, and semantic replay. Migration
+083 retains that observed mode and fork counters in sync attempts. `sync status`
+and the TUI Health view show the last recorded mode and duration; older attempts
+have unknown mode rather than being inferred from their transfer counts. Proofs are
 not portable import receipts and are never evidence of another peer's receipt.
 
 Writer API 124 retains each canonical envelope in an append-only local table

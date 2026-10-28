@@ -36,6 +36,7 @@ type terminalSource interface {
 	Checkpoints(context.Context, string, string) (checkpoint.ListPage, error)
 	Checkpoint(context.Context, string) (*checkpoint.Checkpoint, error)
 	Health(context.Context) (readiness.Report, error)
+	Sync(context.Context) (historyStatus, error)
 	Releases(context.Context) (release.View, error)
 	Report(context.Context, string) (*workitem.BugReport, error)
 	Work(ctx context.Context, view string) (workstate.List, error)
@@ -58,6 +59,10 @@ const terminalPageSize = 20
 type appTerminalSource struct {
 	app      *app.App
 	checkout project.Checkout
+}
+
+func (s appTerminalSource) Sync(ctx context.Context) (historyStatus, error) {
+	return projectSyncStatus(ctx, s.app)
 }
 
 func (s appTerminalSource) Current(ctx context.Context) (*checkpoint.Checkpoint, error) {

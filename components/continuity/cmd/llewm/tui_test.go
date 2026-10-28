@@ -12,6 +12,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/history"
+	"github.com/llewm/llewm/components/continuity/internal/memsync"
 	"github.com/llewm/llewm/components/continuity/internal/readiness"
 	"github.com/llewm/llewm/components/continuity/internal/release"
 	"github.com/llewm/llewm/components/continuity/internal/roadmap"
@@ -30,6 +31,7 @@ type fakeTerminalSource struct {
 	checkpointPages    map[string]checkpoint.ListPage
 	checkpointRecords  map[string]*checkpoint.Checkpoint
 	health             readiness.Report
+	sync               historyStatus
 	releases           release.View
 	report             *workitem.BugReport
 	failure            string
@@ -44,6 +46,21 @@ type fakeTerminalSource struct {
 	hits               []history.Hit
 	searches           []history.SearchOptions
 	current            *checkpoint.Checkpoint
+}
+
+func TestTUIHealthShowsRecordedSyncModeAndDuration(t *testing.T) {
+	now := time.Now()
+	attempt := &memsync.Attempt{Result: memsync.Result{Outcome: memsync.OutcomeSynced, Unchanged: true}, Mode: "unchanged", StartedAt: now.Add(-2 * time.Second), FinishedAt: now}
+	source := &fakeTerminalSource{sync: historyStatus{Status: memsync.Status{Configured: true, Latest: attempt, LastSynced: attempt}}}
+	v := newTerminalView(source)
+	v.view = "health"
+	if err := v.detail(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(v.details, "\n")
+	if !strings.Contains(text, "unchanged") || !strings.Contains(text, "duration 2s") {
+		t.Fatal(text)
+	}
 }
 
 func (f *fakeTerminalSource) Current(context.Context) (*checkpoint.Checkpoint, error) {
@@ -757,6 +774,8 @@ func (f *fakeTerminalSource) Checkpoints(_ context.Context, taskID, cursor strin
 func (f *fakeTerminalSource) Checkpoint(_ context.Context, id string) (*checkpoint.Checkpoint, error) {
 	return f.checkpointRecords[id], nil
 }
+func (f *fakeTerminalSource) Sync(context.Context) (historyStatus, error) { return f.sync, nil }
+
 func (f *fakeTerminalSource) Health(context.Context) (readiness.Report, error) {
 	if f.failure != "" {
 		return readiness.Report{}, errors.New(f.failure)

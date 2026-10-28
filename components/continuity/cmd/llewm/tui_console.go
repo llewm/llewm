@@ -17,6 +17,8 @@ type terminalConsoleState struct {
 	checkpoints checkpoint.ListPage
 	cursors     []string
 	health      readiness.Report
+	sync        historyStatus
+	syncError   string
 	releases    release.View
 	indexes     map[string]int
 	loaded      map[string]bool
@@ -53,6 +55,12 @@ func (v *terminalView) ensureConsole(ctx context.Context) error {
 		v.console.cursors = nil
 	case "health":
 		v.console.health, err = v.source.Health(ctx)
+		syncStatus, syncErr := v.source.Sync(ctx)
+		v.console.sync = syncStatus
+		v.console.syncError = ""
+		if syncErr != nil {
+			v.console.syncError = syncErr.Error()
+		}
 	case "releases":
 		v.console.releases, err = v.source.Releases(ctx)
 	default:
@@ -147,6 +155,11 @@ func (v *terminalView) consoleDetail(ctx context.Context) (bool, error) {
 	case "health":
 		h := c.health
 		v.details = []string{"Readiness: " + h.Stage, "Source commit: " + valueOrUnknown(h.Source.GitCommit), "Installed commit: " + valueOrUnknown(h.Installed.Executable.GitCommit), "Executable: " + h.Installed.Executable.Path, "Database: " + h.Database.State + " · " + h.Database.AppliedMigration, "Integrity: " + h.Database.Integrity, "MCP runtime: " + h.Runtime.Reason, "Next: " + h.RecommendedNextAction}
+		if c.syncError != "" {
+			v.details = append(v.details, "Sync status unavailable: "+c.syncError)
+		} else if line := c.sync.Line(v.now()); line != "" {
+			v.details = append(v.details, line)
+		}
 		if h.Source.Dirty != nil {
 			v.details = append(v.details, fmt.Sprintf("Source dirty: %t", *h.Source.Dirty))
 		}
@@ -226,6 +239,11 @@ func (v *terminalView) consoleRows(width int) ([]string, bool) {
 			rows.add(c.project.Name, c.project.ProjectID, "•", "local")
 		case "health":
 			rows.add(c.health.RecommendedNextAction, "", "•", c.health.Stage)
+			if c.syncError != "" {
+				rows.add("Sync status unavailable: "+c.syncError, "", "•", "error")
+			} else if line := c.sync.Line(v.now()); line != "" {
+				rows.add(line, "", "•", "sync")
+			}
 		case "checkpoints":
 			return checkpointRows(c.checkpoints, width), true
 		case "releases":

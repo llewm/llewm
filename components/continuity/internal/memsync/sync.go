@@ -556,15 +556,16 @@ func (s Syncer) importedHead(ctx context.Context) (string, error) {
 
 func (s Syncer) record(ctx context.Context, started time.Time, result *Result) error {
 	result.ID = activity.NewID()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO sync_attempts(id,project_id,remote,started_at,finished_at,outcome,exported_records,imported_records,collisions,unpushed_commits,imported_head,detail,deferred_records,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,NULLIF(?,''),?,?,1)`,
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO sync_attempts(id,project_id,remote,started_at,finished_at,outcome,exported_records,imported_records,collisions,unpushed_commits,imported_head,detail,deferred_records,unchanged,forks,supersession_forks,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,NULLIF(?,''),?,?,?,?,?,1)`,
 		result.ID, s.ProjectID, redact.String(s.Remote), started.Format(time.RFC3339Nano), s.now().Format(time.RFC3339Nano), result.Outcome,
-		result.ExportedRecords, result.ImportedRecords, result.Collisions, result.UnpushedCommits, result.ImportedHead, result.Detail, result.DeferredRecords)
+		result.ExportedRecords, result.ImportedRecords, result.Collisions, result.UnpushedCommits, result.ImportedHead, result.Detail, result.DeferredRecords, result.Unchanged, result.Forks, result.SupersessionForks)
 	return err
 }
 
 // Attempt is one recorded sync attempt.
 type Attempt struct {
 	Result
+	Mode       string    `json:"mode,omitempty"`
 	Remote     string    `json:"remote"`
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at"`
@@ -599,7 +600,7 @@ func ReadRemoteStatus(ctx context.Context, db *sql.DB, projectID, remote string)
 
 func readStatus(ctx context.Context, db *sql.DB, projectID, remote string, scoped bool) (Status, error) {
 	var status Status
-	query := `SELECT id,remote,started_at,finished_at,outcome,exported_records,imported_records,collisions,unpushed_commits,COALESCE(imported_head,''),detail,deferred_records FROM sync_attempts WHERE project_id=?`
+	query := `SELECT id,remote,started_at,finished_at,outcome,exported_records,imported_records,collisions,unpushed_commits,COALESCE(imported_head,''),detail,deferred_records,unchanged,forks,supersession_forks FROM sync_attempts WHERE project_id=?`
 	args := []any{projectID}
 	if scoped {
 		query += ` AND remote=?`
@@ -612,9 +613,17 @@ func readStatus(ctx context.Context, db *sql.DB, projectID, remote string, scope
 	defer rows.Close()
 	for rows.Next() {
 		var attempt Attempt
+		var unchanged sql.NullBool
 		var started, finished string
-		if err := rows.Scan(&attempt.ID, &attempt.Remote, &started, &finished, &attempt.Outcome, &attempt.ExportedRecords, &attempt.ImportedRecords, &attempt.Collisions, &attempt.UnpushedCommits, &attempt.ImportedHead, &attempt.Detail, &attempt.DeferredRecords); err != nil {
+		if err := rows.Scan(&attempt.ID, &attempt.Remote, &started, &finished, &attempt.Outcome, &attempt.ExportedRecords, &attempt.ImportedRecords, &attempt.Collisions, &attempt.UnpushedCommits, &attempt.ImportedHead, &attempt.Detail, &attempt.DeferredRecords, &unchanged, &attempt.Forks, &attempt.SupersessionForks); err != nil {
 			return status, err
+		}
+		if unchanged.Valid {
+			attempt.Unchanged = unchanged.Bool
+			attempt.Mode = "full"
+			if unchanged.Bool {
+				attempt.Mode = "unchanged"
+			}
 		}
 		attempt.StartedAt, _ = time.Parse(time.RFC3339Nano, started)
 		attempt.FinishedAt, _ = time.Parse(time.RFC3339Nano, finished)
@@ -651,6 +660,14 @@ func (s Status) Line(now time.Time) string {
 		parts = append(parts, "last synced "+age(now.Sub(s.LastSynced.FinishedAt)))
 	} else {
 		parts = append(parts, "never synced")
+	}
+	if s.Latest.Unchanged {
+		parts = append(parts, "unchanged")
+	} else if s.Latest.Mode == "full" {
+		parts = append(parts, "full cycle")
+	}
+	if elapsed := s.Latest.FinishedAt.Sub(s.Latest.StartedAt); !s.Latest.StartedAt.IsZero() && !s.Latest.FinishedAt.IsZero() && elapsed > 0 {
+		parts = append(parts, "duration "+elapsed.Round(time.Millisecond).String())
 	}
 	if s.Latest.UnpushedCommits > 0 {
 		parts = append(parts, fmt.Sprintf("%d unpushed commits", s.Latest.UnpushedCommits))

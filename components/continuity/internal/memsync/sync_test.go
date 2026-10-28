@@ -28,6 +28,35 @@ import (
 
 const testLineage = "lineage:5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
 
+func TestRecordedSyncModeAndCountersSurviveStatusRead(t *testing.T) {
+	ctx := context.Background()
+	m := newMachine(t, "recorded-mode", bareRemote(t))
+	start := time.Now().Add(-2 * time.Second)
+	result := Result{Outcome: OutcomeSynced, Unchanged: true, Forks: 2, SupersessionForks: 3}
+	if err := m.syncer.record(ctx, start, &result); err != nil {
+		t.Fatal(err)
+	}
+	status, err := ReadRemoteStatus(ctx, m.db, m.project, m.syncer.Remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Latest == nil || !status.Latest.Unchanged || status.Latest.Mode != "unchanged" || status.Latest.Forks != 2 || status.Latest.SupersessionForks != 3 {
+		t.Fatalf("lost recorded outcomes: %+v", status.Latest)
+	}
+	status.Configured = true
+	line := status.Line(time.Now())
+	if !strings.Contains(line, "unchanged") || !strings.Contains(line, "duration") {
+		t.Fatal(line)
+	}
+	if _, err := m.db.Exec(`INSERT INTO sync_attempts(id,project_id,remote,started_at,finished_at,outcome,exported_records,imported_records,collisions,unpushed_commits,detail,schema_version) SELECT 'legacy',project_id,remote,started_at,finished_at,outcome,0,0,0,0,detail,1 FROM sync_attempts WHERE id=?`, result.ID); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := ReadRemoteStatus(ctx, m.db, m.project, m.syncer.Remote)
+	if err != nil || legacy.Latest.Mode != "" || legacy.Latest.Unchanged {
+		t.Fatalf("legacy mode inferred: %+v %v", legacy.Latest, err)
+	}
+}
+
 func TestSyncWatermarkAndStatusAreScopedToDestination(t *testing.T) {
 	ctx := context.Background()
 	m := newMachine(t, "two-destinations", bareRemote(t))
