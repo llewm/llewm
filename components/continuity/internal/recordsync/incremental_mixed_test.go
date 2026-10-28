@@ -3,6 +3,7 @@ package recordsync
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
@@ -54,6 +55,40 @@ func TestMixedAdditionsMatchFullImportAndGuardDependencies(t *testing.T) {
 	}
 	if _, proof, err := index.mixedReplaySnapshot(ctx, setHash, export.Envelopes, ""); err != nil || !proof {
 		t.Fatalf("new mixed proof missing: %v", err)
+	}
+	// Common task and commit anchors are metadata, and should not force a
+	// full replay of an otherwise independent narrative.
+	_, err = (worknarrative.Service{DB: source}).Append(ctx, worknarrative.Record{ID: "anchored", ProjectID: sourceID, Title: "anchored", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}, Anchors: []worknarrative.Anchor{{Kind: "task", Target: "task-a", Authority: "caller_asserted"}, {Kind: "commit", Target: strings.Repeat("a", 40), Authority: "caller_asserted"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchored, err := portable.EncodeMemoryExport(ctx, source, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchoredHash, ok := mixedReplaySet(anchored.Envelopes)
+	if !ok {
+		t.Fatal("anchored fixture ineligible")
+	}
+	want, wantErr = (Importer{DB: full, ProjectID: fullID}).Import(ctx, anchored.Envelopes)
+	got, used, gotErr = index.tryMixedAdditions(ctx, anchoredHash, anchored.Envelopes)
+	if !used || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("anchored: full=%+v %v incremental=%+v used=%t %v", want, wantErr, got, used, gotErr)
+	}
+	if _, proof, err := index.mixedReplaySnapshot(ctx, anchoredHash, anchored.Envelopes, ""); err != nil || !proof {
+		t.Fatalf("anchored proof missing: %v", err)
+	}
+	_, err = (worknarrative.Service{DB: source}).Append(ctx, worknarrative.Record{ID: "other-anchor", ProjectID: sourceID, Title: "other anchor", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}, Anchors: []worknarrative.Anchor{{Kind: "roadmap_node", Target: "node-a", Authority: "caller_asserted"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := portable.EncodeMemoryExport(ctx, source, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherHash, _ := mixedReplaySet(other.Envelopes)
+	if _, used, err := index.tryMixedAdditions(ctx, otherHash, other.Envelopes); err != nil || used {
+		t.Fatalf("unproven anchor incorrectly used shortcut: used=%t %v", used, err)
 	}
 	// A local change outside the added input invalidates the previous proof.
 	appendRecord(indexed, indexedID, "unrelated-local", "")

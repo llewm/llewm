@@ -13,8 +13,8 @@ import (
 
 var errMixedProofChanged = errors.New("mixed replay proof changed")
 
-// tryMixedAdditions handles independent decisions and narratives, and a new
-// narratives with supersession edges to proven or newly added narratives.
+// tryMixedAdditions handles independent decisions and narratives, task- or
+// commit-anchored narratives, and supersession edges to proven or new narratives.
 // All other changes use the full importer.
 func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []portable.EncodedEnvelope) (ImportResult, bool, error) {
 	var prior, priorState string
@@ -64,8 +64,14 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 		e := object.Envelope
 		if e.RecordType == "work_narrative_supersession" {
 			edges = append(edges, object)
-		} else if (e.RecordType != "decision" && e.RecordType != "work_narrative") || len(e.Refs) != 0 {
+		} else if e.RecordType != "decision" && e.RecordType != "work_narrative" {
 			return ImportResult{}, false, nil
+		} else {
+			for _, ref := range e.Refs {
+				if e.RecordType != "work_narrative" || (ref.Kind != "task" && ref.Kind != "commit") {
+					return ImportResult{}, false, nil
+				}
+			}
 		}
 		if e.RecordType == "work_narrative" {
 			newNarratives[e.RecordID] = true
