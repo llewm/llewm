@@ -227,6 +227,53 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	}
 }
 
+func TestPublicationRepairIgnoresCorruptOtherEndpoint(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "repair-destination")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := fixture(t)
+	second, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "other-repair", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.Put(first, "local"); err != nil {
+		t.Fatal(err)
+	}
+	a, err := EncodeBlock(lineage, []portable.EncodedEnvelope{first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := EncodeBlock(lineage, []portable.EncodedEnvelope{second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {a}, "folder:b": {b}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, project, b.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); err != nil {
+		t.Fatalf("unrelated corruption blocked repair: %v", err)
+	}
+	var version, memberships int
+	if err := db.QueryRowContext(ctx, `SELECT index_version FROM history_index_blocks WHERE project_id=? AND block_hash=?`, project, b.Hash).Scan(&version); err != nil || version != 0 {
+		t.Fatalf("unrelated block changed: %d %v", version, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, project, b.Hash).Scan(&memberships); err != nil || memberships != 1 {
+		t.Fatalf("membership lost: %d %v", memberships, err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:b", false); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("corrupt destination accepted: %v", err)
+	}
+}
+
 func TestStaleOtherEndpointDoesNotBlockPublication(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "stale-endpoint")
 	archive, err := OpenArchive(t.TempDir(), lineage)

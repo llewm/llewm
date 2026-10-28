@@ -138,6 +138,12 @@ func (s Index) RepairBlock(ctx context.Context, block Block) error {
 // record/reference rows. Endpoint memberships remain untouched. If any block
 // cannot be reconstructed, nothing is changed and its transport copy is needed.
 func (s Index) RepairStored(ctx context.Context) error {
+	return s.repairStored(ctx, "")
+}
+
+// repairStored limits reconstruction to an endpoint when supplied. Unrelated
+// damaged blocks must not prevent a destination from repairing its own plan.
+func (s Index) repairStored(ctx context.Context, endpoint string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -146,7 +152,7 @@ func (s Index) RepairStored(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT b.block_hash,r.envelope_json FROM history_index_blocks b LEFT JOIN history_index_records r ON r.project_id=b.project_id AND r.block_hash=b.block_hash WHERE b.project_id=? ORDER BY b.block_hash,r.envelope_json`, s.ProjectID)
+	rows, err := tx.QueryContext(ctx, `SELECT b.block_hash,r.envelope_json FROM history_index_blocks b LEFT JOIN history_index_records r ON r.project_id=b.project_id AND r.block_hash=b.block_hash WHERE b.project_id=? AND (?='' OR EXISTS (SELECT 1 FROM history_index_publications p WHERE p.project_id=b.project_id AND p.block_hash=b.block_hash AND p.endpoint_hash=?)) ORDER BY b.block_hash,r.envelope_json`, s.ProjectID, endpoint, Hash(endpoint))
 	if err != nil {
 		return err
 	}
@@ -198,15 +204,20 @@ func (s Index) RepairStored(ctx context.Context) error {
 		}
 		verified = append(verified, block)
 	}
-	for _, table := range []string{"history_index_refs", "history_index_records", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
+	for _, table := range []string{"history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=? WHERE project_id=?`, IndexVersion, s.ProjectID); err != nil {
-		return err
-	}
 	for _, block := range verified {
+		for _, table := range []string{"history_index_refs", "history_index_records"} {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=? AND block_hash=?`, s.ProjectID, block.Hash); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=? WHERE project_id=? AND block_hash=?`, IndexVersion, s.ProjectID, block.Hash); err != nil {
+			return err
+		}
 		if err := s.insertBlockObjects(ctx, tx, block); err != nil {
 			return err
 		}

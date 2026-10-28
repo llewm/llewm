@@ -83,7 +83,7 @@ func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint st
 	if !errors.Is(err, ErrIndexRebuild) {
 		return blocks, err
 	}
-	if repairErr := s.RepairStored(ctx); repairErr != nil {
+	if repairErr := s.repairStored(ctx, endpoint); repairErr != nil {
 		return nil, repairErr
 	}
 	return s.planPublication(ctx, archive, endpoint, relay)
