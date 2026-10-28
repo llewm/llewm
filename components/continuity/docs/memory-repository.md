@@ -96,6 +96,34 @@ can read every lineage stored there; lineage directories do not enforce access.
 
 ## Commits and content
 
+### Unchanged syncs
+
+Migration 081 adds device-local completion proofs for Git sync. SQL triggers
+change a durable token whenever canonical records, export dependencies, or the
+derived inventory change. Sync-attempt logs, raw telemetry, and other excluded
+bookkeeping do not invalidate the token. Tracking is conservative across the
+whole database: a relevant change in another project may cause a full cycle.
+
+After a successful, stable cycle with no pending semantic or delivery work,
+later cycles can reuse its proof. They still verify the configured remote,
+fetch, compare the lineage's v2/v3/v4 subtree identities, require a clean tracked
+working tree, and check local database and archive state again. An unrelated
+lineage's commit does not require record replay. A missing or invalidated proof,
+changed policy or build, local edits, pending push, or uncertain state runs the
+full workflow. Explicit conversion always runs the full workflow.
+
+On Linux, the archive guard walks metadata (device, inode, mode, size, mtime,
+and ctime), including provenance. It does not open or decode record contents;
+even same-size edits with restored mtime invalidate the proof. Status files are
+excluded. Platforms without this change identity retain full validation.
+This still costs a metadata walk, rather than constant work independent of
+archive size. Generic folder endpoints retain their complete validated scan;
+they do not yet expose a trustworthy atomic multiwriter change token.
+
+The immediate sync JSON result includes `unchanged: true` when this proof skips
+export, archive content reads, block processing, and semantic replay. Proofs are
+not portable import receipts and are never evidence of another peer's receipt.
+
 Writer API 124 retains each canonical envelope in an append-only local table
 at its first memory export or successful import (migration 076). Later exports
 reuse that form, including after a root move. Imported prose is already portable;

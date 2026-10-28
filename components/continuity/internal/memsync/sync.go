@@ -268,6 +268,8 @@ type Syncer struct {
 
 // Result describes one sync attempt.
 type Result struct {
+	// Unchanged reports reuse of a completed, guarded sync proof.
+	Unchanged       bool   `json:"unchanged,omitempty"`
 	ID              string `json:"id"`
 	Outcome         string `json:"outcome"`
 	ExportedRecords int    `json:"exported_records"`

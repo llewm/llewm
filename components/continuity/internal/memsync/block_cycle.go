@@ -12,8 +12,8 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
-// cycleBlocks is the v4 Git workflow. It remains separate until conversion,
-// endpoint coordination and complete-workflow equivalence are qualified.
+// cycleBlocks is the Git block workflow, including guarded reuse of a completed
+// cycle when the local inputs and fetched lineage tree remain unchanged.
 func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	var result Result
 	if err := stopped(ctx, "starting"); err != nil {
@@ -29,6 +29,15 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		return result, err
 	}
 	defer lock.Close()
+	before, guardErr := s.guard(local, repo)
+	prefetched := false
+	if !p.convert && guardErr == nil {
+		unchanged, ok, fetched := s.tryUnchanged(ctx, repo, p, before)
+		prefetched = fetched
+		if ok {
+			return unchanged, nil
+		}
+	}
 	if err := stopped(ctx, "exporting"); err != nil {
 		return result, err
 	}
@@ -143,7 +152,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		if err := stopped(ctx, "fetching"); err != nil {
 			return result, err
 		}
-		if attempt == 0 {
+		if attempt == 0 && !prefetched {
 			if err := probe(ctx, repo, s.Remote, p.deadline); errors.Is(err, errBudget) {
 				deferred, result.Detail = true, fmt.Sprintf("no time left to fetch within %s; a background sync continues", p.budget)
 				break
@@ -155,15 +164,17 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 				break
 			}
 		}
-		if err := s.fetch(ctx, repo, p); errors.Is(err, errBudget) {
-			deferred, result.Detail = true, fmt.Sprintf("fetch did not finish within %s; a background sync continues", p.budget)
-			break
-		} else if err != nil {
-			if ctxErr := stopped(ctx, "importing"); ctxErr != nil {
-				return result, ctxErr
+		if attempt != 0 || !prefetched {
+			if err := s.fetch(ctx, repo, p); errors.Is(err, errBudget) {
+				deferred, result.Detail = true, fmt.Sprintf("fetch did not finish within %s; a background sync continues", p.budget)
+				break
+			} else if err != nil {
+				if ctxErr := stopped(ctx, "importing"); ctxErr != nil {
+					return result, ctxErr
+				}
+				offline, result.Detail = true, "remote unreachable: "+redact.String(err.Error())
+				break
 			}
-			offline, result.Detail = true, "remote unreachable: "+redact.String(err.Error())
-			break
 		}
 		branch = remoteBranch(local, repo, head)
 		if remoteExists(local, repo, branch) {
@@ -237,5 +248,8 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		result.Detail = "transport processed; " + result.SemanticPending
 	}
 	result.UnpushedCommits = unpushed(local, repo, branch)
+	if !p.convert && guardErr == nil {
+		s.rememberUnchanged(local, repo, before, result)
+	}
 	return result, nil
 }

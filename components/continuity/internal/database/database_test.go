@@ -14,7 +14,7 @@ import (
 )
 
 // latestMigration is the newest migration this build embeds.
-const latestMigration = "080_history_block_index.sql"
+const latestMigration = "081_history_sync_generation.sql"
 
 func migrationsBefore(to string) []string {
 	names := []string{}

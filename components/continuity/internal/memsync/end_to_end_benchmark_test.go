@@ -83,3 +83,36 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 		}
 	}
 }
+
+// Compare the same steady-state workflow with and without a persisted
+// completion proof. Proof deletion is outside the measured full-cycle time.
+func BenchmarkHistorySyncUnchangedGate(b *testing.B) {
+	ctx := context.Background()
+	for _, cached := range []bool{false, true} {
+		b.Run(fmt.Sprintf("proof_%t", cached), func(b *testing.B) {
+			m := newMachine(b, "gate-benchmark", bareRemote(b))
+			for i := 0; i < 5669; i++ {
+				m.decide(b, fmt.Sprintf("record-%04d", i), "Observation")
+			}
+			for i := 0; i < 4; i++ {
+				if _, err := m.syncer.Sync(ctx); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if !cached {
+					b.StopTimer()
+					if _, err := m.db.Exec(`DELETE FROM history_sync_proofs`); err != nil {
+						b.Fatal(err)
+					}
+					b.StartTimer()
+				}
+				result, err := m.syncer.Sync(ctx)
+				if err != nil || result.Unchanged != cached {
+					b.Fatalf("unexpected cycle: %+v %v", result, err)
+				}
+			}
+		})
+	}
+}
