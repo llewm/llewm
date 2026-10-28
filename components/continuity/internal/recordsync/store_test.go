@@ -7,6 +7,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -70,6 +71,16 @@ func TestArchiveValidatedHintsPreserveIntegrity(t *testing.T) {
 	allowed, all, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known})
 	if err != nil || len(allowed) != 1 || len(all) != 2 || allowed[0].Envelope.EnvelopeSHA256 != object.Envelope.EnvelopeSHA256 {
 		t.Fatalf("hint changed provenance or missed new data: %d %d %v", len(allowed), len(all), err)
+	}
+	for _, route := range []struct {
+		endpoint string
+		relay    bool
+	}{{"folder:target", false}, {"folder:other", false}, {"folder:target", true}} {
+		wantAllowed, wantAll, wantErr := archive.objects(ctx, route.endpoint, route.relay)
+		gotAllowed, gotAll, gotErr := archive.objectsWithBlocks(ctx, route.endpoint, route.relay, []Block{known})
+		if wantErr != nil || gotErr != nil || !reflect.DeepEqual(wantAllowed, gotAllowed) || !reflect.DeepEqual(wantAll, gotAll) {
+			t.Fatalf("cached scan differs for %+v: %v %v", route, wantErr, gotErr)
+		}
 	}
 	path := filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))
 	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
