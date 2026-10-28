@@ -47,6 +47,37 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 	}
 }
 
+func TestFolderSyncRepairsStagedInventoryFromArchive(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	marker, err := Create(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, target := receiver(t, directory, marker.StoreID), receiver(t, directory, marker.StoreID)
+	if err := source.Convert(ctx); err != nil {
+		t.Fatal(err)
+	}
+	objects := exportCheckpoint(t, source)
+	if err := source.Archive.CaptureLocal(objects); err != nil {
+		t.Fatal(err)
+	}
+	index := recordsync.Index{DB: source.DB, ProjectID: source.ProjectID, Lineage: testLineage}
+	staged, err := index.PlanPublication(ctx, source.Archive, source.Endpoint.ID(), false)
+	if err != nil || len(staged) == 0 {
+		t.Fatalf("stage publication: %d %v", len(staged), err)
+	}
+	if _, err := source.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=? AND envelope_hash=?`, source.ProjectID, staged[0].Hash, staged[0].Objects[0].Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := source.Sync(ctx); err != nil || result.PublishedRecords != len(objects) {
+		t.Fatalf("source did not recover staged block: %+v %v", result, err)
+	}
+	if result, err := target.Sync(ctx); err != nil || result.ImportedRecords != len(objects) {
+		t.Fatalf("peer did not recover published history: %+v %v", result, err)
+	}
+}
+
 func TestFolderConversionWaitsForAllReplicatedBlocks(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()

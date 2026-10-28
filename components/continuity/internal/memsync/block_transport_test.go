@@ -65,6 +65,35 @@ func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
 	}
 }
 
+func TestGitSyncRepairsStagedInventoryFromArchive(t *testing.T) {
+	ctx := context.Background()
+	remote := bareRemote(t)
+	source, peer := newMachine(t, "archive-repair-source", remote), newMachine(t, "archive-repair-peer", remote)
+	archive := archiveMachine(t, &source)
+	source.syncer.Archive = &archive
+	source.decide(t, "archive-repair", "Recover staged history")
+	export, err := portable.EncodeMemoryExport(ctx, source.db, source.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.CaptureLocal(export.Envelopes); err != nil {
+		t.Fatal(err)
+	}
+	index := recordsync.Index{DB: source.db, ProjectID: source.project, Lineage: testLineage}
+	staged, err := index.PlanPublication(ctx, archive, source.syncer.Endpoint(), false)
+	if err != nil || len(staged) == 0 {
+		t.Fatalf("stage publication: %d %v", len(staged), err)
+	}
+	if _, err := source.db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=? AND envelope_hash=?`, source.project, staged[0].Hash, staged[0].Objects[0].Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
+	}
+	source.sync(t, OutcomeSynced)
+	result := peer.sync(t, OutcomeSynced)
+	if result.ImportedRecords == 0 {
+		t.Fatal("peer did not receive repaired staged history")
+	}
+}
+
 func TestTrackedV3ConversionPreservesAllObservations(t *testing.T) {
 	ctx := context.Background()
 	m := newMachine(t, "convert-blocks", bareRemote(t))

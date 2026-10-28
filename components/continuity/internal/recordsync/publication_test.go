@@ -211,7 +211,8 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := archive.Put(fixture(t), "local"); err != nil {
+	object := fixture(t)
+	if _, err := archive.Put(object, "local"); err != nil {
 		t.Fatal(err)
 	}
 	index := Index{DB: db, ProjectID: project, Lineage: lineage}
@@ -220,6 +221,9 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 		t.Fatalf("initial plan: %+v %v", blocks, err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := index.PlanPublication(ctx, archive, "folder:destination", false); !errors.Is(err, ErrIndexRebuild) {
@@ -328,6 +332,88 @@ func TestStaleOtherEndpointDoesNotBlockPublication(t *testing.T) {
 	}
 	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); err != nil {
 		t.Fatalf("repaired endpoint still blocked: %v", err)
+	}
+}
+
+func TestPublicationRepairsDamagedStagedBlockFromArchive(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "archive-repair")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := fixture(t)
+	second, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "archive-second", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, object := range []portable.EncodedEnvelope{first, second} {
+		if _, err := archive.Put(object, "local"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {block}, "git:b": {block}}); err != nil {
+		t.Fatal(err)
+	}
+	damage := func() {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=? AND envelope_hash=?`, project, block.Hash, first.Envelope.EnvelopeSHA256); err != nil {
+			t.Fatal(err)
+		}
+	}
+	damage()
+	planned, err := index.PlanPublication(ctx, archive, "folder:a", false)
+	if err != nil || len(planned) != 1 || planned[0].Hash != block.Hash {
+		t.Fatalf("archive repair failed: %#v %v", planned, err)
+	}
+	var memberships int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, project, block.Hash).Scan(&memberships); err != nil || memberships != 2 {
+		t.Fatalf("repair lost endpoint membership: %d %v", memberships, err)
+	}
+	damage()
+	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(first.Envelope))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("missing archive object was accepted: %v", err)
+	}
+	var damaged string
+	if err := db.QueryRowContext(ctx, `SELECT envelope_json FROM history_index_records WHERE project_id=? AND block_hash=? AND envelope_hash=?`, project, block.Hash, first.Envelope.EnvelopeSHA256).Scan(&damaged); err != nil || damaged != "{}" {
+		t.Fatalf("failed repair changed inventory: %q %v", damaged, err)
+	}
+}
+
+func TestArchiveRepairDoesNotAuthorizeRelay(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "archive-repair-authorization")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := fixture(t)
+	if _, err := archive.Put(object, "folder:b"); err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{object})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {block}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, project, block.Hash); err != nil {
+		t.Fatal(err)
+	}
+	planned, err := index.PlanPublication(ctx, archive, "folder:a", false)
+	if err != nil || len(planned) != 0 {
+		t.Fatalf("repair authorized relay: %#v %v", planned, err)
+	}
+	if _, err := index.blockObjects(ctx, []Block{block}); err != nil {
+		t.Fatalf("archive-backed block was not repaired: %v", err)
 	}
 }
 

@@ -101,7 +101,20 @@ func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive,
 		return blocks, err
 	}
 	if repairErr := s.repairStored(ctx, endpoint); repairErr != nil {
-		return nil, repairErr
+		// The archive retains exact validated observations even when a cached
+		// body was damaged. Rebuild only the already-staged endpoint blocks;
+		// normal publication planning below still enforces origin authorization.
+		_, objects, archiveErr := archive.objects(ctx, endpoint, true)
+		if archiveErr != nil {
+			return nil, errors.Join(repairErr, archiveErr)
+		}
+		byHash := make(map[string]portable.EncodedEnvelope, len(objects))
+		for _, object := range objects {
+			byHash[object.Envelope.EnvelopeSHA256] = object
+		}
+		if archiveErr = s.repairStoredWithArchive(ctx, endpoint, byHash); archiveErr != nil {
+			return nil, errors.Join(repairErr, archiveErr)
+		}
 	}
 	return s.planPublication(ctx, archive, endpoint, relay, inventory)
 }

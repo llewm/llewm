@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
@@ -144,6 +145,12 @@ func (s Index) RepairStored(ctx context.Context) error {
 // repairStored limits reconstruction to an endpoint when supplied. Unrelated
 // damaged blocks must not prevent a destination from repairing its own plan.
 func (s Index) repairStored(ctx context.Context, endpoint string) error {
+	return s.repairStoredWithArchive(ctx, endpoint, nil)
+}
+
+// repairStoredWithArchive can replace a damaged cached body only with the
+// exact verified archive object named by its existing envelope hash.
+func (s Index) repairStoredWithArchive(ctx context.Context, endpoint string, archive map[string]portable.EncodedEnvelope) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -152,22 +159,28 @@ func (s Index) repairStored(ctx context.Context, endpoint string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT b.block_hash,r.envelope_json FROM history_index_blocks b LEFT JOIN history_index_records r ON r.project_id=b.project_id AND r.block_hash=b.block_hash WHERE b.project_id=? AND (?='' OR EXISTS (SELECT 1 FROM history_index_publications p WHERE p.project_id=b.project_id AND p.block_hash=b.block_hash AND p.endpoint_hash=?)) ORDER BY b.block_hash,r.envelope_json`, s.ProjectID, endpoint, Hash(endpoint))
+	rows, err := tx.QueryContext(ctx, `SELECT b.block_hash,r.envelope_hash,r.envelope_json FROM history_index_blocks b LEFT JOIN history_index_records r ON r.project_id=b.project_id AND r.block_hash=b.block_hash WHERE b.project_id=? AND (?='' OR EXISTS (SELECT 1 FROM history_index_publications p WHERE p.project_id=b.project_id AND p.block_hash=b.block_hash AND p.endpoint_hash=?)) ORDER BY b.block_hash,r.envelope_json`, s.ProjectID, endpoint, Hash(endpoint))
 	if err != nil {
 		return err
 	}
 	type candidate struct {
-		hash string
-		body bytes.Buffer
+		hash  string
+		items []string
+		size  int
 	}
 	var candidates []candidate
 	count, size := 0, 0
 	for rows.Next() {
 		var hash string
-		var body sql.NullString
-		if err := rows.Scan(&hash, &body); err != nil {
+		var envelopeHash, body sql.NullString
+		if err := rows.Scan(&hash, &envelopeHash, &body); err != nil {
 			rows.Close()
 			return err
+		}
+		if envelopeHash.Valid {
+			if object, ok := archive[envelopeHash.String]; ok {
+				body = sql.NullString{String: string(object.Bytes), Valid: true}
+			}
 		}
 		if !body.Valid {
 			rows.Close()
@@ -180,16 +193,15 @@ func (s Index) repairStored(ctx context.Context, endpoint string) error {
 			return fmt.Errorf("%w: stored inventory exceeds bounds", ErrIndexRebuild)
 		}
 		if len(candidates) == 0 || candidates[len(candidates)-1].hash != hash {
-			candidates = append(candidates, candidate{hash: hash})
-			candidates[len(candidates)-1].body.WriteString(blockHeader)
+			candidates = append(candidates, candidate{hash: hash, size: len(blockHeader)})
 		}
 		entry := &candidates[len(candidates)-1]
-		if entry.body.Len()+len(body.String)+1 > MaxBlockBytes {
+		entry.size += len(body.String) + 1
+		if entry.size > MaxBlockBytes {
 			rows.Close()
 			return fmt.Errorf("%w: block %s exceeds bounds", ErrIndexRebuild, hash)
 		}
-		entry.body.WriteString(body.String)
-		entry.body.WriteByte('\n')
+		entry.items = append(entry.items, body.String)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -198,7 +210,15 @@ func (s Index) repairStored(ctx context.Context, endpoint string) error {
 	}
 	verified := make([]Block, 0, len(candidates))
 	for _, candidate := range candidates {
-		block, err := DecodeBlock(s.Lineage, candidate.hash, candidate.body.Bytes())
+		sort.Strings(candidate.items)
+		var body bytes.Buffer
+		body.Grow(candidate.size)
+		body.WriteString(blockHeader)
+		for _, item := range candidate.items {
+			body.WriteString(item)
+			body.WriteByte('\n')
+		}
+		block, err := DecodeBlock(s.Lineage, candidate.hash, body.Bytes())
 		if err != nil {
 			return fmt.Errorf("%w: block %s needs its transport copy", ErrIndexRebuild, candidate.hash)
 		}
