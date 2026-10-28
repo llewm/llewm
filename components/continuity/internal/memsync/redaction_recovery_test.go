@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
@@ -189,6 +190,38 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
 		t.Fatalf("recovery import differs: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
 	}
+	// After the initial import, one full unchanged replay can establish a proof;
+	// the following replay must preserve the reference importer's result.
+	for i := 0; i < 2; i++ {
+		want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
+		got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, blocks)
+		if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+			t.Fatalf("recovery replay %d differs: full=%+v %v indexed=%+v %v", i, want, wantErr, got, gotErr)
+		}
+	}
+	var proofs int
+	if err := indexed.db.QueryRow(`SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:%' AND local_state_hash<>''`, indexed.project).Scan(&proofs); err != nil || proofs != 1 {
+		t.Fatalf("unchanged recovery proof missing: %d %v", proofs, err)
+	}
+	var previousState string
+	if err := indexed.db.QueryRow(`SELECT local_state_hash FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:%'`, indexed.project).Scan(&previousState); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []machine{reference, indexed} {
+		service := worknarrative.Service{DB: m.db, Now: func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }}
+		if _, err := service.Append(ctx, worknarrative.Record{ID: "local-change", ProjectID: m.project, Title: "Local change", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Changed local state", Authority: "caller_asserted"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
+	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, blocks)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("changed-state replay differs: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
+	}
+	var nextState string
+	if err := indexed.db.QueryRow(`SELECT local_state_hash FROM history_index_valid_sets WHERE project_id=? AND set_hash LIKE 'recovery:%'`, indexed.project).Scan(&nextState); err != nil || nextState == previousState {
+		t.Fatalf("changed local state did not invalidate the proof: %v", err)
+	}
 	wantExport, err := portable.EncodeMemoryExport(ctx, reference.db, reference.project)
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +244,48 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 		if !bytes.Equal(body, gotRecords[hash]) {
 			t.Fatalf("recovery record %s differs", hash)
 		}
+	}
+	// Simulate a lost local correction: an old proof must not suppress its
+	// recovery from the immutable input history.
+	var correction string
+	if err := indexed.db.QueryRow(`SELECT id FROM redaction_recoveries WHERE project_id=? ORDER BY id LIMIT 1`, indexed.project).Scan(&correction); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []machine{reference, indexed} {
+		// Disposable fixtures only: simulate damage despite the normal
+		// append-only trigger, which prevents this mutation in live stores.
+		if _, err := m.db.Exec(`DROP TRIGGER redaction_recoveries_no_delete`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := m.db.Exec(`DELETE FROM redaction_recoveries WHERE project_id=? AND id=?`, m.project, correction); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
+	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, blocks)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got || want.ImportedRecords == 0 {
+		t.Fatalf("missing correction was skipped: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
+	}
+	// An unrelated valid variant of a recovered identity must still reach the
+	// full importer and surface its fork or collision.
+	variant := localHistoryMachine(t, "recovery-variant")
+	if _, err := (worknarrative.Service{DB: variant.db}).Append(ctx, worknarrative.Record{ID: "original", ProjectID: variant.project, Title: "Different observation", Trigger: "manual", Creator: "codex", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Unrelated content", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	variantExport, err := portable.EncodeMemoryExport(ctx, variant.db, variant.project)
+	if err != nil || len(variantExport.Envelopes) != 1 {
+		t.Fatalf("variant export: %d %v", len(variantExport.Envelopes), err)
+	}
+	variantBlock, err := recordsync.EncodeBlock(testLineage, variantExport.Envelopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflictObjects := append(append([]portable.EncodedEnvelope{}, objects...), variantExport.Envelopes...)
+	conflictBlocks := append(append([]recordsync.Block{}, blocks...), variantBlock)
+	want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, conflictObjects)
+	got, gotErr = (recordsync.Index{DB: indexed.db, ProjectID: indexed.project, Lineage: testLineage}).ImportBlocks(ctx, conflictBlocks)
+	if wantErr != nil || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got || want.Forks+want.Collisions == 0 {
+		t.Fatalf("unrecovered variant was skipped: full=%+v %v indexed=%+v %v", want, wantErr, got, gotErr)
 	}
 	for _, m := range []machine{a, b, fresh} {
 		procedure, err := (procedures.Service{DB: m.db}).Get(ctx, m.project, "exact", 1)

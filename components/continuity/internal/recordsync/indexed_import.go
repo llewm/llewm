@@ -110,7 +110,7 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 			return result, err
 		}
 	}
-	var mixedHash, beforeState string
+	var mixedHash, beforeState, recoveryHash, recoveryState string
 	if !eligible {
 		if candidate, ok := mixedReplaySet(objects); ok {
 			mixedHash = candidate
@@ -128,6 +128,21 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 				}
 			}
 		}
+		if mixedHash == "" {
+			if candidate, ok := recoveryReplaySet(objects); ok {
+				recoveryHash = candidate
+				var seen int
+				if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_valid_sets WHERE project_id=? AND set_hash=? AND index_version=?`, s.ProjectID, candidate, IndexVersion).Scan(&seen); err == nil && seen != 0 {
+					state, proof, snapshotErr := s.recoveryReplaySnapshot(ctx, candidate, objects, "")
+					if snapshotErr == nil {
+						if proof {
+							return ImportResult{}, nil
+						}
+						recoveryState = state
+					}
+				}
+			}
+		}
 	}
 	result, err := (Importer{DB: s.DB, ProjectID: s.ProjectID, Now: s.Now}).Import(ctx, objects)
 	if err == nil && eligible && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
@@ -141,6 +156,15 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 			// A candidate is not a proof. It avoids an expensive pre-snapshot
 			// for a new set, and requires a later unchanged full replay.
 			_, err = s.DB.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,'') ON CONFLICT(project_id,set_hash) DO NOTHING`, s.ProjectID, mixedHash, IndexVersion)
+		}
+	} else if err == nil && recoveryHash != "" && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
+		if recoveryState != "" && result.ImportedRecords == 0 {
+			// A successful unchanged full replay is required before this exact
+			// recovered set may use the proof. Recheck state under the lock.
+			_, _, err = s.recoveryReplaySnapshot(ctx, recoveryHash, objects, recoveryState)
+		} else {
+			// A new candidate is not a proof and requires an unchanged replay.
+			_, err = s.DB.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,'') ON CONFLICT(project_id,set_hash) DO NOTHING`, s.ProjectID, recoveryHash, IndexVersion)
 		}
 	}
 	return result, err
