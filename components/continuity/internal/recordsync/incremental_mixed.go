@@ -14,7 +14,7 @@ import (
 var errMixedProofChanged = errors.New("mixed replay proof changed")
 
 // tryMixedAdditions handles independent decisions and narratives, and a new
-// narrative with its supersession edge to a previously proven narrative.
+// narratives with supersession edges to proven or newly added narratives.
 // All other changes use the full importer.
 func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []portable.EncodedEnvelope) (ImportResult, bool, error) {
 	var prior, priorState string
@@ -89,7 +89,7 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 				return ImportResult{}, false, nil
 			}
 			self = self || ref.ID == e.RecordID
-			parent = parent || (ref.ID != e.RecordID && oldNarratives[ref.ID])
+			parent = parent || (ref.ID != e.RecordID && (oldNarratives[ref.ID] || newNarratives[ref.ID]))
 		}
 		if !self || !parent {
 			return ImportResult{}, false, nil

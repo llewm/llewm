@@ -143,6 +143,25 @@ func TestMixedSupersessionAdditionsMatchFullImport(t *testing.T) {
 			t.Fatalf("%s: missing proof: %v", item.id, err)
 		}
 	}
+	// A single import can extend the proven chain by multiple linked records.
+	appendRecord("batch-first", "last")
+	appendRecord("batch-second", "batch-first")
+	batch, err := portable.EncodeMemoryExport(ctx, source, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchHash, ok := mixedReplaySet(batch.Envelopes)
+	if !ok {
+		t.Fatal("ineligible batch fixture")
+	}
+	wantBatch, wantBatchErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, batch.Envelopes)
+	gotBatch, used, gotBatchErr := index.tryMixedAdditions(ctx, batchHash, batch.Envelopes)
+	if !used || fmt.Sprint(wantBatchErr) != fmt.Sprint(gotBatchErr) || wantBatch != gotBatch {
+		t.Fatalf("batch: full=%+v %v incremental=%+v used=%t %v", wantBatch, wantBatchErr, gotBatch, used, gotBatchErr)
+	}
+	if _, proof, err := index.mixedReplaySnapshot(ctx, batchHash, batch.Envelopes, ""); err != nil || !proof {
+		t.Fatalf("batch: missing proof: %v", err)
+	}
 	// Merge a sibling from a second origin to produce a supersession fork.
 	export, err := portable.EncodeMemoryExport(ctx, source, sourceID)
 	if err != nil {
