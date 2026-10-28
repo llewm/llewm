@@ -7,9 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
 func warmUnchanged(t *testing.T, m machine) {
@@ -151,5 +154,32 @@ func TestUnchangedSyncDetectsArchiveEditsAndRouteChanges(t *testing.T) {
 	}
 	if got, err := m.syncer.Sync(ctx); err == nil || got.Unchanged {
 		t.Fatalf("archive corruption skipped: %+v %v", got, err)
+	}
+}
+
+func TestUnchangedSyncIgnoresUnreferencedAttribution(t *testing.T) {
+	ctx := context.Background()
+	m := newMachine(t, "raw-attribution", bareRemote(t))
+	m.decide(t, "first", "Observation")
+	warmUnchanged(t, m)
+	at := time.Now().UTC()
+	if _, err := (attribution.Service{DB: m.db}).AppendInvocation(ctx, attribution.Invocation{ID: "raw-tool", ProjectID: m.project, ActorType: "agent", IdentitySource: "caller_asserted", OccurredAt: at, ReceivedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	if !m.sync(t, OutcomeSynced).Unchanged {
+		t.Fatal("unreferenced attribution invalidated completion")
+	}
+	if _, err := (worknarrative.Service{DB: m.db}).Append(ctx, worknarrative.Record{ID: "linked", ProjectID: m.project, Title: "Linked", Trigger: "manual", Creator: "test", CreatorInvocationID: "raw-tool", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.sync(t, OutcomeSynced); got.Unchanged || got.ExportedRecords < 2 {
+		t.Fatalf("new attribution dependency skipped: %+v", got)
+	}
+	warmUnchanged(t, m)
+	if _, err := m.db.Exec(`UPDATE actor_invocations SET model='changed' WHERE id='raw-tool'`); err != nil {
+		t.Fatal(err)
+	}
+	if m.sync(t, OutcomeSynced).Unchanged {
+		t.Fatal("referenced attribution edit skipped")
 	}
 }

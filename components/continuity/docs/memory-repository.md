@@ -103,6 +103,10 @@ change a durable token whenever canonical records, export dependencies, or the
 derived inventory change. Sync-attempt logs, raw telemetry, and other excluded
 bookkeeping do not invalidate the token. Tracking is conservative across the
 whole database: a relevant change in another project may cause a full cycle.
+Migration 082 narrows attribution tracking: raw invocation activity invalidates
+only when the invocation is already retained or referenced by indexed history.
+Adding a referring record invalidates independently. The generation also records
+the last invalidating trigger name for device-local diagnosis.
 
 After a successful, stable cycle with no pending semantic or delivery work,
 later cycles can reuse its proof. They still verify the configured remote,
