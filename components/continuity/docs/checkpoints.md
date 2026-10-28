@@ -263,6 +263,16 @@ Multiple matching markers require user selection. A later task checkpoint withou
 the marker, task completion, or a closed task makes the old marker ineligible.
 Markers do not establish client restart, task completion, or authority to act.
 
+Saving an explicit restart handoff releases that session's task lease and yields
+its presence while keeping the task and next action in progress. The fresh
+session can acquire a new token on the same task immediately. An ordinary
+`SessionEnd` hook releases the ending session's leases on this instance, including
+leases on other scopes; a `Stop` hook only yields presence and keeps leases
+because the session can continue on the next prompt. Lifecycle releases are
+recorded locally without waiting for the network; normal lease synchronization
+publishes them to other machines. A process killed before either boundary still
+relies on lease expiry.
+
 `status`, `bootstrap`, and `next` accept one optional selector: `--checkpoint-id`,
 `--task-id`, or `--session`. MCP `continuity_bootstrap` and `continuity_work`
 accept the corresponding `checkpoint_id`, `task_id`, or `session_id`. Exact

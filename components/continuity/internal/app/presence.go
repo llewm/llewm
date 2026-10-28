@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/pin"
 	"github.com/llewm/llewm/components/continuity/internal/presence"
 	"github.com/llewm/llewm/components/continuity/internal/project"
@@ -33,7 +35,36 @@ func (a *App) ObservePresence(ctx context.Context, client, sessionID, invocation
 		TaskID: taskID, RoadmapNodeID: roadmapNodeID, State: state, Authority: "machine_observed",
 		CheckoutPath: checkoutPath, WorktreePath: worktreePath, Branch: branch, At: at,
 	})
+	if strings.EqualFold(eventType, "sessionend") {
+		err = errors.Join(err, a.releaseSessionLeases(ctx, sessionID))
+	}
 	return err
+}
+
+// releaseSessionLeases closes only this session's grants on this instance.
+// Lifecycle hooks must finish without a network round trip; ordinary lease
+// synchronization later publishes the append-only releases to the remote.
+// Stop/yield is a turn boundary, so it deliberately keeps ownership.
+func (a *App) releaseSessionLeases(ctx context.Context, sessionID string) error {
+	local := a.Leases
+	local.Remote = nil
+	values, err := local.List(ctx, a.ProjectID, true)
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, value := range values {
+		if value.SessionID != sessionID || value.State == lease.Released {
+			continue
+		}
+		_, err := local.Release(ctx, lease.Request{ProjectID: a.ProjectID, ScopeKind: value.ScopeKind, ScopeID: value.ScopeID, Holder: value.Holder, SessionID: sessionID, Token: value.Token})
+		// A remote instance or newer grant can share the session ID. Release
+		// validates instance, holder and fencing token in its transaction.
+		if err != nil && !errors.Is(err, lease.ErrNotHeld) {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }
 
 // ObserveTaskPresence updates the session's exact task after a checkpoint,

@@ -190,15 +190,25 @@ func (a *App) saveCheckpointWithReconciliation(ctx context.Context, candidate ch
 		)
 	}
 	created, err := a.Checkpoints.CreateWithReconciliation(ctx, candidate, reconciliation)
-	if err == nil && coordinateSession && candidate.SessionID != "" && candidate.Fence.Claim.Token == 0 {
-		created.SessionLease = a.sessionLease(ctx, candidate.TaskID, candidate.SessionID, candidate.Status == "completed")
+	if err == nil && coordinateSession && candidate.SessionID != "" && (candidate.Fence.Claim.Token == 0 || candidate.RestartResume != nil) {
+		releaseReason := ""
+		if candidate.Status == "completed" {
+			releaseReason = "the task is completed"
+		} else if candidate.RestartResume != nil {
+			releaseReason = "the session is handing off for restart"
+		}
+		created.SessionLease = a.sessionLease(ctx, candidate.TaskID, candidate.SessionID, releaseReason)
 	}
 	if err == nil && a.AfterCheckpoint != nil {
 		a.AfterCheckpoint()
 	}
 	if err == nil && coordinateSession && candidate.SessionID != "" {
 		client := a.sessionClient(ctx, candidate.SessionID)
-		_ = a.ObserveTaskPresence(ctx, client, candidate.SessionID, candidate.TaskID, candidate.Status, time.Now().UTC())
+		presenceStatus := candidate.Status
+		if candidate.RestartResume != nil {
+			presenceStatus = "paused"
+		}
+		_ = a.ObserveTaskPresence(ctx, client, candidate.SessionID, candidate.TaskID, presenceStatus, time.Now().UTC())
 	}
 	return created, err
 }
@@ -209,23 +219,24 @@ const SessionLeaseTTL = 4 * time.Hour
 
 // sessionLease keeps an advisory lease on the task for the checkpoint's
 // session: taken or renewed on an unfinished checkpoint, released on a
-// completed one. It is best-effort and local (a later sync publishes it), so a
-// save never waits on the network or fails over a lease. Another session's
+// completed one or an explicit restart handoff. It is best-effort and local
+// (a later sync publishes it), so a save never waits on the network or fails
+// over a lease. Another session's
 // lease is reported, not taken over.
-func (a *App) sessionLease(ctx context.Context, taskID, sessionID string, completed bool) string {
+func (a *App) sessionLease(ctx context.Context, taskID, sessionID, releaseReason string) string {
 	local := a.Leases
 	local.Remote = nil
 	holder := a.sessionClient(ctx, sessionID)
 	scope := "task:" + taskID
-	if completed {
+	if releaseReason != "" {
 		value, err := lease.CurrentLease(ctx, a.DB, a.ProjectID, "task", taskID, time.Now().UTC())
-		if err != nil || value == nil || value.State != lease.Held || value.SessionID != sessionID {
+		if err != nil || value == nil || value.State == lease.Released || value.SessionID != sessionID {
 			return ""
 		}
 		if _, err := local.Release(ctx, lease.Request{ProjectID: a.ProjectID, ScopeKind: "task", ScopeID: taskID, Holder: value.Holder, SessionID: sessionID, Token: value.Token}); err != nil {
 			return "automatic release of " + scope + " failed: " + err.Error()
 		}
-		return "released " + scope + ": the task is completed"
+		return "released " + scope + ": " + releaseReason
 	}
 	result, err := local.Acquire(ctx, lease.Request{ProjectID: a.ProjectID, ScopeKind: "task", ScopeID: taskID, Holder: holder, SessionID: sessionID, TTL: SessionLeaseTTL})
 	var conflict *lease.ConflictError
