@@ -37,6 +37,9 @@ func newPortableTrackPlanRecords() portableTrackPlanRecords {
 
 func loadTrackPlanSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
 	result := make([]EnvelopeSpec, 0)
+	// Plan revisions often repeat unchanged items. Reuse only deterministic
+	// text transformations within this export; never persist the input cache.
+	text := cachedTrackText(projectID, projectRoot)
 	planRows, err := source.QueryContext(ctx, `SELECT id,revision FROM track_plan_revisions WHERE project_id=? ORDER BY id,revision`, projectID)
 	if err != nil {
 		return nil, err
@@ -53,7 +56,7 @@ func loadTrackPlanSpecs(ctx context.Context, source queryer, projectID, projectR
 			planRows.Close()
 			return nil, err
 		}
-		spec, err := trackPlanSpec(lineageID, projectID, projectRoot, value)
+		spec, err := trackPlanSpecWithText(lineageID, projectID, projectRoot, value, text)
 		if err != nil {
 			planRows.Close()
 			return nil, err
@@ -147,6 +150,19 @@ func loadTrackPlan(ctx context.Context, source queryer, projectID, id string, re
 }
 
 func trackPlanSpec(lineageID, projectID, projectRoot string, value trackplan.Plan) (EnvelopeSpec, error) {
+	return trackPlanSpecWithText(lineageID, projectID, projectRoot, value, func(value string) string {
+		return portableTrackText(value, projectID, projectRoot)
+	})
+}
+
+func trackPlanSpecWithText(lineageID, projectID, projectRoot string, value trackplan.Plan, text func(string) string) (EnvelopeSpec, error) {
+	stringsWithText := func(values []string) []string {
+		result := make([]string, len(values))
+		for index, value := range values {
+			result[index] = text(value)
+		}
+		return result
+	}
 	if !portableCheckpointIdentifier(value.ID, projectID, projectRoot) || !portableCheckpointIdentifier(value.RoadmapNodeID, projectID, projectRoot) {
 		return EnvelopeSpec{}, fmt.Errorf("track plan %q contains a non-portable identity", value.ID)
 	}
@@ -165,14 +181,14 @@ func trackPlanSpec(lineageID, projectID, projectRoot string, value trackplan.Pla
 				return EnvelopeSpec{}, fmt.Errorf("track plan %q contains a non-portable item reference", value.ID)
 			}
 		}
-		items[index].ProgressNote = portableTrackText(items[index].ProgressNote, projectID, projectRoot)
-		items[index].AcceptanceCriteria = portableTrackText(items[index].AcceptanceCriteria, projectID, projectRoot)
-		items[index].Title = portableTrackText(items[index].Title, projectID, projectRoot)
-		items[index].Detail = portableTrackText(items[index].Detail, projectID, projectRoot)
-		items[index].EvidenceRefs = portableTrackStrings(items[index].EvidenceRefs, projectID, projectRoot)
-		items[index].WorkItemIDs = portableTrackStrings(items[index].WorkItemIDs, projectID, projectRoot)
+		items[index].ProgressNote = text(items[index].ProgressNote)
+		items[index].AcceptanceCriteria = text(items[index].AcceptanceCriteria)
+		items[index].Title = text(items[index].Title)
+		items[index].Detail = text(items[index].Detail)
+		items[index].EvidenceRefs = stringsWithText(items[index].EvidenceRefs)
+		items[index].WorkItemIDs = stringsWithText(items[index].WorkItemIDs)
 	}
-	payload := trackPlanPayload{Change: value.Change, RoadmapNodeID: value.RoadmapNodeID, TaskID: portableTrackText(value.TaskID, projectID, projectRoot), Title: portableTrackText(value.Title, projectID, projectRoot), Summary: portableTrackText(value.Summary, projectID, projectRoot), Status: value.Status, Creator: portableTrackText(value.Creator, projectID, projectRoot), Model: portableTrackText(value.Model, projectID, projectRoot), WorkItemIDs: portableTrackStrings(value.WorkItemIDs, projectID, projectRoot), Items: items, OperationalSchemaVersion: value.SchemaVersion}
+	payload := trackPlanPayload{Change: value.Change, RoadmapNodeID: value.RoadmapNodeID, TaskID: text(value.TaskID), Title: text(value.Title), Summary: text(value.Summary), Status: value.Status, Creator: text(value.Creator), Model: text(value.Model), WorkItemIDs: stringsWithText(value.WorkItemIDs), Items: items, OperationalSchemaVersion: value.SchemaVersion}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return EnvelopeSpec{}, err
@@ -295,12 +311,18 @@ func trackPlanRefs(payload trackPlanPayload) []Reference {
 func portableTrackText(value, projectID, projectRoot string) string {
 	return portableCheckpointText(value, projectID, projectRoot)
 }
-func portableTrackStrings(values []string, projectID, projectRoot string) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = portableTrackText(value, projectID, projectRoot)
+func cachedTrackText(projectID, projectRoot string) func(string) string {
+	cache := make(map[string]string)
+	return func(value string) string {
+		if cached, ok := cache[value]; ok {
+			return cached
+		}
+		converted := portableTrackText(value, projectID, projectRoot)
+		if len(cache) < 1024 && len(value) <= 16<<10 {
+			cache[value] = converted
+		}
+		return converted
 	}
-	return result
 }
 func validTrackPlanText(value string, required bool) bool {
 	return (!required || value != "") && len(value) <= trackPlanTextMaxBytes && strings.TrimSpace(value) == value && strings.IndexByte(value, 0) < 0 && redactSafe(value)

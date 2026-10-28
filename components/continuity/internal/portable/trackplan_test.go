@@ -44,6 +44,28 @@ func TestTrackPlanRecordsRoundTripReplayCollisionAndDependencies(t *testing.T) {
 	if _, err := service.AppendPlan(ctx, second); err != nil {
 		t.Fatal(err)
 	}
+	cached, err := loadTrackPlanSpecs(ctx, sourceDB, sourceProject, sourceRoot, lineage)
+	if err != nil || len(cached) != 2 {
+		t.Fatalf("load plan revisions: %d %v", len(cached), err)
+	}
+	for _, spec := range cached {
+		value, err := loadTrackPlan(ctx, sourceDB, sourceProject, spec.RecordID, spec.RecordRevision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		uncached, err := trackPlanSpec(lineage, sourceProject, sourceRoot, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := EncodeEnvelope(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := EncodeEnvelope(uncached)
+		if err != nil || !bytes.Equal(got.Bytes, want.Bytes) {
+			t.Fatalf("cached conversion changed revision %d: %v", spec.RecordRevision, err)
+		}
+	}
 
 	loaded, err := LoadOperationalRecords(ctx, sourceDB, sourceProject)
 	if err != nil {
@@ -155,5 +177,32 @@ func TestLegacyTrackPlanPayloadRetainsItsHash(t *testing.T) {
 	}
 	if !bytes.Equal(original.Payload, current.Payload) {
 		t.Fatal("legacy plan payload changed")
+	}
+}
+
+func BenchmarkTrackPlanRepeatedRevisions(b *testing.B) {
+	const project = "project-benchmark"
+	const root = "/project"
+	const lineage = "lineage:55555555555555555555555555555555"
+	value := trackplan.Plan{ProjectID: project, ID: "plan", Revision: 1, RoadmapNodeID: "track", Title: "Repeated plan", Summary: strings.TrimSpace(strings.Repeat("Review the work under /project. ", 40)), Status: "active", Creator: "person", Authority: "caller_asserted", RecordedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), SchemaVersion: 1, Items: []trackplan.Item{{ID: "one", Title: "One", Detail: strings.TrimSpace(strings.Repeat("Check /project and retain evidence. ", 40)), Status: "active"}}}
+	for _, mode := range []string{"uncached", "cached"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				text := cachedTrackText(project, root)
+				for revision := 1; revision <= 20; revision++ {
+					value.Revision = revision
+					var err error
+					if mode == "cached" {
+						_, err = trackPlanSpecWithText(lineage, project, root, value, text)
+					} else {
+						_, err = trackPlanSpec(lineage, project, root, value)
+					}
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
 	}
 }
