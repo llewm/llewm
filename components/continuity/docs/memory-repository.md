@@ -149,6 +149,12 @@ and stale-write resolutions remain canonical exported records and invalidate the
 history proof. Receiving or publishing a coordination lease alone must not force
 export or semantic replay on the next cycle.
 
+Migration 085 also excludes semantic replay sets, tips, and their membership.
+These disposable caches are rechecked against canonical state before semantic
+reuse; refreshing or losing them does not change transport inputs. Block,
+record, reference, and endpoint publication inventories remain tracked so damage
+and pending delivery still invalidate completed transport proofs.
+
 Curated exports include a referenced creator invocation and its transitive
 parent invocations, loaded in bounded batches. Unrelated invocation activity
 is excluded. This preserves the attribution dependencies needed by a fresh

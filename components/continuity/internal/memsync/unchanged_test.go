@@ -90,6 +90,68 @@ func warmUnchanged(t *testing.T, m machine) {
 	t.Fatal("steady state never used completion proof")
 }
 
+func TestUnchangedSyncIgnoresReplayProofRefresh(t *testing.T) {
+	m := newMachine(t, "replay-proofs", bareRemote(t))
+	m.decide(t, "first", "Observation")
+	warmUnchanged(t, m)
+	// All replay-cache mutations, including cascading membership removal,
+	// leave transport inputs unchanged. They are checked on semantic reuse.
+	for _, table := range []string{"history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
+		for _, query := range []string{
+			`INSERT INTO ` + table + `(project_id,set_hash,index_version) VALUES(?,'test-set',1) ON CONFLICT DO NOTHING`,
+			`UPDATE ` + table + ` SET set_hash='changed-set',index_version=0 WHERE project_id=? AND set_hash='test-set'`,
+			`DELETE FROM ` + table + ` WHERE project_id=?`,
+		} {
+			if _, err := m.db.Exec(query, m.project); err != nil {
+				t.Fatal(err)
+			}
+			if !m.sync(t, OutcomeSynced).Unchanged {
+				t.Fatalf("replay cache forced full processing: %s", query)
+			}
+		}
+	}
+	for _, kind := range []string{"narrative", "mixed"} {
+		if _, err := m.db.Exec(`INSERT INTO history_index_`+kind+`_tip(project_id,set_hash,index_version) VALUES(?,'test-set',1)`, m.project); err != nil {
+			t.Fatal(err)
+		}
+		for _, query := range []string{
+			`INSERT INTO history_index_` + kind + `_members(project_id,envelope_hash) VALUES(?,'test-envelope')`,
+			`UPDATE history_index_` + kind + `_members SET envelope_hash='changed-envelope' WHERE project_id=?`,
+			`DELETE FROM history_index_` + kind + `_members WHERE project_id=?`,
+		} {
+			if _, err := m.db.Exec(query, m.project); err != nil {
+				t.Fatal(err)
+			}
+			if !m.sync(t, OutcomeSynced).Unchanged {
+				t.Fatalf("replay membership forced full processing: %s", query)
+			}
+		}
+	}
+	// A missing completion proof forces a full replay. That replay refreshes
+	// the discarded semantic caches and must be able to bless its own inputs.
+	if _, err := m.db.Exec(`DELETE FROM history_sync_proofs`); err != nil {
+		t.Fatal(err)
+	}
+	if m.sync(t, OutcomeSynced).Unchanged {
+		t.Fatal("missing completion proof accepted")
+	}
+	if !m.sync(t, OutcomeSynced).Unchanged {
+		t.Fatal("semantic proof refresh invalidated its own completion proof")
+	}
+	// Canonical writes and inventory damage still require full processing.
+	m.decide(t, "second", "Another observation")
+	if got := m.sync(t, OutcomeSynced); got.Unchanged || got.ExportedRecords == 0 {
+		t.Fatalf("canonical addition skipped: %+v", got)
+	}
+	warmUnchanged(t, m)
+	if _, err := m.db.Exec(`UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, m.project); err != nil {
+		t.Fatal(err)
+	}
+	if m.sync(t, OutcomeSynced).Unchanged {
+		t.Fatal("damaged record inventory skipped")
+	}
+}
+
 func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
 	ctx := context.Background()
 	remote := bareRemote(t)

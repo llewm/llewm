@@ -21,6 +21,11 @@ func TestSyncGenerationCoversSchema(t *testing.T) {
 	for _, name := range []string{"lease_grants", "lease_events", "lease_remote_events"} {
 		excluded[name] = true
 	}
+	// Replay proofs are rechecked against canonical state on use. Transport
+	// inventory and publication membership remain tracked for damage/delivery.
+	for _, name := range []string{"history_index_valid_sets", "history_index_narrative_tip", "history_index_narrative_members", "history_index_mixed_tip", "history_index_mixed_members"} {
+		excluded[name] = true
+	}
 	for _, name := range strings.Fields(`bootstrap_deliveries contract_index_entries events head_observations commit_authors presence_events sessions sync_attempts usage_requests usage_sources usage_tool_calls usage_tool_results roadmap_sync_files roadmap_sync_runs portable_import_receipts history_sync_generation history_sync_proofs schema_migrations`) {
 		excluded[name] = true
 	}
