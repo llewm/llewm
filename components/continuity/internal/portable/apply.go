@@ -91,6 +91,22 @@ func ApplyOperationalImport(ctx context.Context, db *sql.DB, projectID string, m
 // applyOperationalImport applies the bundle and then runs within, when set, in
 // the same transaction, so a caller's own writes commit or roll back with it.
 func applyOperationalImport(ctx context.Context, db *sql.DB, projectID string, manifestBytes, recordsBytes []byte, appliedAt time.Time, within func(context.Context, *sql.Tx) error) (ImportApplyResult, error) {
+	return applyOperationalImportWithPlan(ctx, db, projectID, manifestBytes, recordsBytes, appliedAt, within, nil)
+}
+
+type reusableImportPlan struct {
+	plan         ImportPlan
+	dataVersion  int64
+	projectID    string
+	manifestHash [32]byte
+	recordsHash  [32]byte
+}
+
+func newReusableImportPlan(plan ImportPlan, dataVersion int64, projectID string, manifest, records []byte) *reusableImportPlan {
+	return &reusableImportPlan{plan: plan, dataVersion: dataVersion, projectID: projectID, manifestHash: sha256.Sum256(manifest), recordsHash: sha256.Sum256(records)}
+}
+
+func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, projectID string, manifestBytes, recordsBytes []byte, appliedAt time.Time, within func(context.Context, *sql.Tx) error, previous *reusableImportPlan) (ImportApplyResult, error) {
 	bundle, err := ValidateBundle(manifestBytes, recordsBytes)
 	if err != nil {
 		plan := invalidImportPlan(projectID, err)
@@ -106,9 +122,15 @@ func applyOperationalImport(ctx context.Context, db *sql.DB, projectID string, m
 		return ImportApplyResult{}, err
 	}
 	defer tx.Rollback()
-	plan, err := planValidatedOperationalImport(ctx, tx, projectID, bundle)
-	if err != nil {
-		return ImportApplyResult{}, err
+	var plan ImportPlan
+	var dataVersion int64
+	if previous != nil && previous.projectID == projectID && previous.manifestHash == sha256.Sum256(manifestBytes) && previous.recordsHash == sha256.Sum256(recordsBytes) && tx.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&dataVersion) == nil && dataVersion == previous.dataVersion {
+		plan = previous.plan
+	} else {
+		plan, err = planValidatedOperationalImport(ctx, tx, projectID, bundle)
+		if err != nil {
+			return ImportApplyResult{}, err
+		}
 	}
 	result := ImportApplyResult{Plan: plan}
 	if !plan.ApplyAllowed {

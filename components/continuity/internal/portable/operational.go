@@ -526,6 +526,14 @@ type ImportPlan struct {
 }
 
 func PlanOperationalImport(ctx context.Context, db *sql.DB, projectID string, manifestBytes, recordsBytes []byte) (ImportPlan, error) {
+	return planOperationalImport(ctx, db, projectID, manifestBytes, recordsBytes)
+}
+
+type transactionStarter interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+func planOperationalImport(ctx context.Context, db transactionStarter, projectID string, manifestBytes, recordsBytes []byte) (ImportPlan, error) {
 	bundle, err := ValidateBundle(manifestBytes, recordsBytes)
 	if err != nil {
 		return invalidImportPlan(projectID, err), nil

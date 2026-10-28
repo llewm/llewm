@@ -1,6 +1,7 @@
 package portable
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -70,6 +71,106 @@ func operationalProject(t testing.TB, name string) (context.Context, *sql.DB, st
 		t.Fatal(err)
 	}
 	return ctx, db, projectID
+}
+
+func TestImportPlanRechecksAfterConcurrentCommit(t *testing.T) {
+	ctx, source, sourceProject := operationalProject(t, "plan-source")
+	lineage := "lineage:99999999999999999999999999999999"
+	if _, err := (Service{DB: source}).Initialize(ctx, sourceProject, lineage); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := (attribution.Service{DB: source}).AppendInvocation(ctx, attribution.Invocation{ID: "shared", ProjectID: sourceProject, ActorType: "agent", Model: "original", IdentitySource: "caller_asserted", OccurredAt: at, ReceivedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (worknarrative.Service{DB: source, Now: func() time.Time { return at }}).Append(ctx, worknarrative.Record{ID: "plan-narrative", ProjectID: sourceProject, Title: "Plan", Trigger: "manual", Creator: "test", CreatorInvocationID: "shared", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Evidence", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadOperationalRecords(ctx, source, sourceProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := BuildBundle(BundleSpec{ExportID: "export:plan-proof", LineageID: lineage, SourceInstanceID: loaded.Identity.InstanceID, CreatedAt: at, SourceDatabaseSchema: "016_portable_import_receipts.sql", SelectionProfile: "curated-v1", RedactionProfile: RedactionProfile{ID: "default", Version: 1, SHA256: strings.Repeat("d", 64)}, Omissions: []Omission{}}, loaded.Records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetCtx, target, targetProject := operationalProject(t, "plan-target")
+	if _, err := (Service{DB: target}).Initialize(targetCtx, targetProject, lineage); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := target.Conn(targetCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var version int64
+	if err := conn.QueryRowContext(targetCtx, `PRAGMA data_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planOperationalImport(targetCtx, conn, targetProject, bundle.ManifestBytes, bundle.RecordsBytes)
+	if err != nil || !plan.ApplyAllowed || plan.Counts[PlanAppend] != 2 {
+		t.Fatalf("initial plan: %+v %v", plan, err)
+	}
+	// An unchanged connection may reuse the reviewed plan and append the same
+	// records as an ordinary apply to a separate project.
+	cleanCtx, clean, cleanProject := operationalProject(t, "plan-clean")
+	if _, err := (Service{DB: clean}).Initialize(cleanCtx, cleanProject, lineage); err != nil {
+		t.Fatal(err)
+	}
+	cleanConn, err := clean.Conn(cleanCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanConn.Close()
+	var cleanVersion int64
+	if err := cleanConn.QueryRowContext(cleanCtx, `PRAGMA data_version`).Scan(&cleanVersion); err != nil {
+		t.Fatal(err)
+	}
+	cleanPlan, err := planOperationalImport(cleanCtx, cleanConn, cleanProject, bundle.ManifestBytes, bundle.RecordsBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The marker is informational and proves this particular plan, rather
+	// than a silent second full planning pass, was used on the unchanged path.
+	cleanPlan.Items[0].Reason = "verified-preflight-plan"
+	cleanResult, err := applyOperationalImportWithPlan(cleanCtx, cleanConn, cleanProject, bundle.ManifestBytes, bundle.RecordsBytes, at, nil, newReusableImportPlan(cleanPlan, cleanVersion, cleanProject, bundle.ManifestBytes, bundle.RecordsBytes))
+	if err != nil || cleanResult.Receipt == nil || cleanResult.Receipt.AppendedRecords != 2 {
+		t.Fatalf("unchanged plan apply: %+v %v", cleanResult, err)
+	}
+	if cleanResult.Plan.Items[0].Reason != "verified-preflight-plan" {
+		t.Fatal("unchanged preflight was not reused")
+	}
+	refCtx, reference, refProject := operationalProject(t, "plan-reference")
+	if _, err := (Service{DB: reference}).Initialize(refCtx, refProject, lineage); err != nil {
+		t.Fatal(err)
+	}
+	refResult, err := ApplyOperationalImport(refCtx, reference, refProject, bundle.ManifestBytes, bundle.RecordsBytes, at)
+	if err != nil || refResult.Receipt == nil || refResult.Receipt.AppendedRecords != cleanResult.Receipt.AppendedRecords {
+		t.Fatalf("reference apply differs: %+v %v", refResult, err)
+	}
+	cleanExport, err := EncodeMemoryExport(cleanCtx, clean, cleanProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refExport, err := EncodeMemoryExport(refCtx, reference, refProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleanExport.Envelopes) != len(refExport.Envelopes) {
+		t.Fatalf("imported record counts differ: %d %d", len(cleanExport.Envelopes), len(refExport.Envelopes))
+	}
+	for i := range cleanExport.Envelopes {
+		if !bytes.Equal(cleanExport.Envelopes[i].Bytes, refExport.Envelopes[i].Bytes) {
+			t.Fatalf("imported record %d differs", i)
+		}
+	}
+	if _, err := (attribution.Service{DB: target}).AppendInvocation(targetCtx, attribution.Invocation{ID: "shared", ProjectID: targetProject, ActorType: "agent", Model: "conflicting", IdentitySource: "caller_asserted", OccurredAt: at, ReceivedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := applyOperationalImportWithPlan(targetCtx, conn, targetProject, bundle.ManifestBytes, bundle.RecordsBytes, at, nil, newReusableImportPlan(plan, version, targetProject, bundle.ManifestBytes, bundle.RecordsBytes))
+	if err == nil || result.Plan.ApplyAllowed || result.Plan.Counts[PlanCollision] != 1 || result.Receipt != nil {
+		t.Fatalf("stale plan applied: %+v %v", result, err)
+	}
 }
 
 func TestOperationalRecordsAndDryRunImportPlan(t *testing.T) {

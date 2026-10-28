@@ -209,12 +209,20 @@ func ImportMemoryRecords(ctx context.Context, db *sql.DB, projectID string, spec
 // (within) in the import transaction. within runs only when records are
 // appended.
 func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string, specs []EnvelopeSpec, at time.Time, within func(context.Context, *sql.Tx) error) (ImportPlan, *ImportReceipt, error) {
-	identity, err := identityFrom(ctx, db, projectID)
+	// SQLite's data_version is meaningful only on the same connection. Keep
+	// this connection through planning and writer acquisition; if any other
+	// connection commits, apply must replan under the writer transaction.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return ImportPlan{}, nil, err
+	}
+	defer conn.Close()
+	identity, err := identityFrom(ctx, conn, projectID)
 	if err != nil {
 		return ImportPlan{}, nil, err
 	}
 	var schema string
-	if err := db.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&schema); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&schema); err != nil {
 		return ImportPlan{}, nil, err
 	}
 	if at.IsZero() {
@@ -228,11 +236,17 @@ func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string
 	if err != nil {
 		return ImportPlan{}, nil, err
 	}
-	plan, err := PlanOperationalImport(ctx, db, projectID, bundle.ManifestBytes, bundle.RecordsBytes)
+	var dataVersion int64
+	versionErr := conn.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&dataVersion)
+	plan, err := planOperationalImport(ctx, conn, projectID, bundle.ManifestBytes, bundle.RecordsBytes)
 	if err != nil || !plan.ApplyAllowed || plan.Counts[PlanAppend] == 0 {
 		return plan, nil, err
 	}
-	applied, err := applyOperationalImport(ctx, db, projectID, bundle.ManifestBytes, bundle.RecordsBytes, at, within)
+	var previous *reusableImportPlan
+	if versionErr == nil {
+		previous = newReusableImportPlan(plan, dataVersion, projectID, bundle.ManifestBytes, bundle.RecordsBytes)
+	}
+	applied, err := applyOperationalImportWithPlan(ctx, conn, projectID, bundle.ManifestBytes, bundle.RecordsBytes, at, within, previous)
 	return applied.Plan, applied.Receipt, err
 }
 
