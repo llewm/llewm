@@ -13,6 +13,41 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
 
+var errPublicationChanged = errors.New("publication membership changed during archive scan")
+
+type publicationReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+// publicationFingerprint detects a concurrent plan or rebuild between the
+// archive snapshot and the writer transaction. Membership is append-only in a
+// plan; a rebuild may replace it, so hash the entire ordered set.
+func (s Index) publicationFingerprint(ctx context.Context, reader publicationReader, endpoint string) (string, error) {
+	rows, err := reader.QueryContext(ctx, `SELECT block_hash FROM history_index_publications WHERE project_id=? AND endpoint_hash=? ORDER BY block_hash`, s.ProjectID, Hash(endpoint))
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	h := sha256.New()
+	count := 0
+	for rows.Next() {
+		var block string
+		if err := rows.Scan(&block); err != nil {
+			return "", err
+		}
+		count++
+		if count > portable.MaxRecordCount {
+			return "", fmt.Errorf("publication membership exceeds bounds")
+		}
+		h.Write([]byte(block))
+		h.Write([]byte{0})
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // ObservePublication validates the derived inventory, records each envelope's
 // destination provenance, and then records publication membership. Inventory
 // rows are not semantic import receipts; callers import only after this succeeds.
@@ -96,46 +131,66 @@ func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive
 }
 
 func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope) ([]Block, error) {
-	blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory)
-	if !errors.Is(err, ErrIndexRebuild) {
-		return blocks, err
+	repaired := false
+	for attempt := 0; attempt < 3; attempt++ {
+		blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+			return archive.objects(ctx, endpoint, relay)
+		})
+		if errors.Is(err, errPublicationChanged) {
+			continue
+		}
+		if !errors.Is(err, ErrIndexRebuild) || repaired {
+			return blocks, err
+		}
+		if repairErr := s.repairStored(ctx, endpoint); repairErr != nil {
+			// The archive retains exact validated observations even when a cached
+			// body was damaged. Rebuild only the already-staged endpoint blocks;
+			// normal publication planning below still enforces origin authorization.
+			_, objects, archiveErr := archive.objects(ctx, endpoint, true)
+			if archiveErr != nil {
+				return nil, errors.Join(repairErr, archiveErr)
+			}
+			byHash := make(map[string]portable.EncodedEnvelope, len(objects))
+			for _, object := range objects {
+				byHash[object.Envelope.EnvelopeSHA256] = object
+			}
+			if archiveErr = s.repairStoredWithArchive(ctx, endpoint, byHash); archiveErr != nil {
+				return nil, errors.Join(repairErr, archiveErr)
+			}
+		}
+		repaired = true
 	}
-	if repairErr := s.repairStored(ctx, endpoint); repairErr != nil {
-		// The archive retains exact validated observations even when a cached
-		// body was damaged. Rebuild only the already-staged endpoint blocks;
-		// normal publication planning below still enforces origin authorization.
-		_, objects, archiveErr := archive.objects(ctx, endpoint, true)
-		if archiveErr != nil {
-			return nil, errors.Join(repairErr, archiveErr)
-		}
-		byHash := make(map[string]portable.EncodedEnvelope, len(objects))
-		for _, object := range objects {
-			byHash[object.Envelope.EnvelopeSHA256] = object
-		}
-		if archiveErr = s.repairStoredWithArchive(ctx, endpoint, byHash); archiveErr != nil {
-			return nil, errors.Join(repairErr, archiveErr)
-		}
-	}
-	return s.planPublication(ctx, archive, endpoint, relay, inventory)
+	return nil, fmt.Errorf("publication changed repeatedly: %w", errPublicationChanged)
 }
 
-func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope) ([]Block, error) {
+func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, scan func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error)) ([]Block, error) {
 	if endpoint == "" || archive.Lineage != s.Lineage {
 		return nil, fmt.Errorf("publication endpoint and matching lineage are required")
+	}
+	before, err := s.publicationFingerprint(ctx, s.DB, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	allowed, all, err := scan()
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	// Acquire the writer lock before scanning the archive, so plans with the
-	// same authorization do not stage from stale, out-of-order snapshots.
+	// Reject a snapshot taken before a concurrent plan or rebuild changed the
+	// endpoint membership, and retry outside the writer transaction.
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
 		return nil, err
 	}
-	allowed, all, err := archive.objects(ctx, endpoint, relay)
+	after, err := s.publicationFingerprint(ctx, tx, endpoint)
 	if err != nil {
 		return nil, err
+	}
+	if before != after {
+		return nil, errPublicationChanged
 	}
 	byHash := make(map[string]portable.EncodedEnvelope, len(allowed))
 	for _, object := range allowed {

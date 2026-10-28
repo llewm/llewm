@@ -205,6 +205,55 @@ func TestConcurrentPublicationPlansDoNotDuplicateMembership(t *testing.T) {
 	}
 }
 
+func TestPublicationScansWithoutWriterLockAndRejectsStaleSnapshot(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "publication-scan-contention")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := fixture(t)
+	if _, err := archive.Put(first, "local"); err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	ready, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := index.planPublication(ctx, archive, "folder:target", false, nil, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+			allowed, all, err := archive.objects(ctx, "folder:target", false)
+			close(ready)
+			<-release
+			return allowed, all, err
+		})
+		done <- err
+	}()
+	<-ready
+	// Another plan can commit while the first is scanning, and must cause the
+	// older snapshot to be rejected rather than stage a conflicting block.
+	second, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "later", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	if _, err := archive.Put(second, "local"); err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	planCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	_, err = index.PlanPublication(planCtx, archive, "folder:target", false)
+	cancel()
+	close(release)
+	if err != nil {
+		t.Fatalf("publication blocked behind archive scan: %v", err)
+	}
+	if err := <-done; !errors.Is(err, errPublicationChanged) {
+		t.Fatalf("stale snapshot accepted: %v", err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:target", false); err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+}
+
 func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "publication-corrupt")
 	archive, err := OpenArchive(t.TempDir(), lineage)
