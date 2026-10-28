@@ -331,6 +331,9 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 	invocationText := cachedPortableText(projectRoot)
 	for _, invocation := range invocations {
 		found[invocation.ID] = struct{}{}
+		if invocation.ParentInvocationID != "" {
+			invocationIDs[invocation.ParentInvocationID] = struct{}{}
+		}
 		spec, err := invocationSpec(lineageID, invocationText, invocation)
 		if err != nil {
 			return nil, nil, err
@@ -356,6 +359,54 @@ func formatOptionalPortableTime(value *time.Time) string {
 }
 
 func loadInvocations(ctx context.Context, source queryer, projectID string, ids map[string]struct{}, all bool) ([]attribution.Invocation, error) {
+	if all {
+		return loadInvocationBatch(ctx, source, projectID, ids, true)
+	}
+	pending := map[string]struct{}{}
+	for id := range ids {
+		pending[id] = struct{}{}
+	}
+	seen := map[string]bool{}
+	var result []attribution.Invocation
+	for len(pending) > 0 {
+		ordered := make([]string, 0, len(pending))
+		for id := range pending {
+			ordered = append(ordered, id)
+		}
+		sort.Strings(ordered)
+		if len(ordered) > 512 {
+			ordered = ordered[:512]
+		}
+		if len(seen)+len(ordered) > MaxRecordCount {
+			return nil, fmt.Errorf("invocation dependency count exceeds bounds")
+		}
+		batch := map[string]struct{}{}
+		for _, id := range ordered {
+			delete(pending, id)
+			seen[id] = true
+			batch[id] = struct{}{}
+		}
+		values, err := loadInvocationBatch(ctx, source, projectID, batch, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, value := range values {
+			result = append(result, value)
+			if value.ParentInvocationID != "" && !seen[value.ParentInvocationID] {
+				pending[value.ParentInvocationID] = struct{}{}
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].OccurredAt.Equal(result[j].OccurredAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].OccurredAt.Before(result[j].OccurredAt)
+	})
+	return result, nil
+}
+
+func loadInvocationBatch(ctx context.Context, source queryer, projectID string, ids map[string]struct{}, all bool) ([]attribution.Invocation, error) {
 	args := []any{projectID}
 	query := `SELECT id,session_id,parent_invocation_id,actor_type,client,client_version,provider,model,identity_source,occurred_at,received_at,schema_version,effort_requested_raw,effort_requested_normalized,effort_requested_source,effort_requested_authority,effort_effective_raw,effort_effective_normalized,effort_effective_source,effort_effective_authority FROM actor_invocations WHERE project_id=?`
 	if !all {
