@@ -244,7 +244,8 @@ func (s Index) Clear(ctx context.Context) error {
 // Rebuild replaces the derived inventory and endpoint membership atomically.
 // The caller must supply complete, verified inventories for every endpoint
 // whose publication membership must survive. An unavailable or incomplete
-// endpoint must stop the coordinator before it calls Rebuild.
+// endpoint must stop the coordinator before it calls Rebuild. Staged intent
+// absent from a supplied endpoint is retained only if its stored block validates.
 func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) error {
 	verified := make(map[string]Block)
 	count, size, memberships := 0, 0, 0
@@ -282,7 +283,7 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 	}
 	defer tx.Rollback()
 	// Publication rows also represent staged writes that may not yet exist at
-	// their destinations. Refuse a snapshot that would discard any of them.
+	// their destinations. Preserve them only with independently verified bytes.
 	// Take the writer lock before checking, so a concurrent plan cannot add
 	// intent between this check and the replacement.
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
@@ -300,21 +301,69 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 	if err != nil {
 		return err
 	}
+	type membership struct{ endpoint, block string }
+	var missing []membership
 	for rows.Next() {
 		var endpoint, block string
 		if err := rows.Scan(&endpoint, &block); err != nil {
 			rows.Close()
 			return err
 		}
-		if !provided[endpoint][block] {
+		if provided[endpoint] == nil {
 			rows.Close()
-			return fmt.Errorf("%w: rebuild omits existing publication intent", ErrIndexRebuild)
+			return fmt.Errorf("%w: rebuild omits an endpoint with publication intent", ErrIndexRebuild)
+		}
+		if !provided[endpoint][block] {
+			missing = append(missing, membership{endpoint, block})
 		}
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return err
+	}
+	for _, member := range missing {
+		memberships++
+		if memberships > portable.MaxRecordCount {
+			return fmt.Errorf("%w: rebuild memberships exceed bounds", ErrIndexRebuild)
+		}
+		if _, ok := verified[member.block]; !ok {
+			stored, err := tx.QueryContext(ctx, `SELECT envelope_json FROM history_index_records WHERE project_id=? AND block_hash=? ORDER BY envelope_json`, s.ProjectID, member.block)
+			if err != nil {
+				return err
+			}
+			var body bytes.Buffer
+			body.WriteString(blockHeader)
+			for stored.Next() {
+				var envelope string
+				if err := stored.Scan(&envelope); err != nil {
+					stored.Close()
+					return err
+				}
+				if body.Len()+len(envelope)+1 > MaxBlockBytes {
+					stored.Close()
+					return fmt.Errorf("%w: staged block exceeds bounds", ErrIndexRebuild)
+				}
+				body.WriteString(envelope)
+				body.WriteByte('\n')
+			}
+			err = stored.Err()
+			stored.Close()
+			if err != nil {
+				return err
+			}
+			block, err := DecodeBlock(s.Lineage, member.block, body.Bytes())
+			if err != nil {
+				return fmt.Errorf("%w: staged block %s needs its transport copy", ErrIndexRebuild, member.block)
+			}
+			count += len(block.Objects)
+			size += len(block.Bytes) - len(blockHeader)
+			if count > portable.MaxRecordCount || size > portable.MaxRecordsBytes {
+				return fmt.Errorf("%w: rebuild inventory exceeds bounds", ErrIndexRebuild)
+			}
+			verified[member.block] = block
+		}
+		provided[member.endpoint][member.block] = true
 	}
 	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
@@ -326,9 +375,9 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 			return err
 		}
 	}
-	for endpoint, blocks := range inventories {
-		for _, block := range blocks {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?)`, s.ProjectID, Hash(endpoint), block.Hash); err != nil {
+	for endpoint, blocks := range provided {
+		for block := range blocks {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?)`, s.ProjectID, endpoint, block); err != nil {
 				return err
 			}
 		}

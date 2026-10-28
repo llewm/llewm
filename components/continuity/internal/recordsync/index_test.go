@@ -298,17 +298,22 @@ func TestRebuildRestoresEndpointMembershipAtomically(t *testing.T) {
 		}
 	}
 	check()
-	// A valid destination scan can omit staged publication intent, or an
-	// entire endpoint. Neither is a complete recovery inventory.
-	for _, incomplete := range []map[string][]Block{
-		{"folder:a": {block}},
-		{"folder:a": {block}, "git:b": {}},
-	} {
-		if err := index.Rebuild(ctx, incomplete); !errors.Is(err, ErrIndexRebuild) {
-			t.Fatalf("incomplete publication inventory accepted: %v", err)
-		}
-		check()
+	// A whole endpoint remains required; staged intent can be reconstructed.
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {block}}); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("missing endpoint accepted: %v", err)
 	}
+	check()
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {}, "git:b": {}}); err != nil {
+		t.Fatalf("valid staged block not preserved: %v", err)
+	}
+	check()
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {}, "git:b": {}}); !errors.Is(err, ErrIndexRebuild) {
+		t.Fatalf("damaged staged block accepted: %v", err)
+	}
+	check()
 	bad := block
 	bad.Hash = Hash("wrong")
 	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {bad}}); err == nil {
