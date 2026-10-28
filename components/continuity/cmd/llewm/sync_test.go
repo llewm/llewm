@@ -194,21 +194,26 @@ func TestAutomaticSyncTriggers(t *testing.T) {
 		t.Fatalf("status without a sync line:\n%s", status)
 	}
 
-	// Machine B: session start syncs before building the bootstrap.
+	// Machine B: startup queues sync and reports that its bootstrap is local.
 	testProject(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	runCLI(t, "", "init")
 	runCLI(t, "", "sync", "init", "--lineage", identity.LineageID)
 	runCLI(t, "", "sync", "init", "--remote", remote)
+	started = nil
 	hook := runCLI(t, `{"session_id":"session-b","hook_event_name":"SessionStart","source":"startup"}`, "hook", "claude-code")
-	if !strings.Contains(hook, "Wire the daemon") || !strings.Contains(hook, "Sync: last synced just now") {
-		t.Fatalf("session start did not sync first:\n%s", hook)
+	if len(started) != 1 || !strings.Contains(hook, "bootstrap uses last imported history") || strings.Contains(hook, "Wire the daemon") {
+		t.Fatalf("session start did not queue sync with local bootstrap: %v\n%s", started, hook)
 	}
-	// A session start with records to push leaves the push to a background sync.
+	runCLI(t, "", "sync")
+	if bootstrap := runCLI(t, "", "bootstrap"); !strings.Contains(bootstrap, "Wire the daemon") {
+		t.Fatalf("completed sync did not import checkpoint:\n%s", bootstrap)
+	}
+	// A session start with records to push also queues a background sync.
 	runCLI(t, "", "checkpoint", "create", "--task-id", "machine-b", "--task", "Machine B work", "--next", "Push it")
 	started = nil
 	hook = runCLI(t, `{"session_id":"session-b2","hook_event_name":"SessionStart","source":"startup"}`, "hook", "claude-code")
-	if len(started) != 1 || !strings.Contains(hook, "fetched and imported; a background sync pushes") {
+	if len(started) != 1 || !strings.Contains(hook, "bootstrap uses last imported history") {
 		t.Fatalf("session start with a pending push: started %v\n%s", started, hook)
 	}
 
@@ -244,7 +249,7 @@ func TestSyncSettingsNameEveryDeviation(t *testing.T) {
 		}
 	}
 	got := strings.Join(syncSettings(ctx, config.Sync{Remote: "r", Manual: true, SessionTimeoutSeconds: 30, SSHKey: "/k", Askpass: "/a"}, clone), "; ")
-	want := "automatic sync off (manual = true); session sync limit 10s; SSH key /k; askpass /a; PLAINTEXT credentials in " + memsync.PlaintextCredentialFile(clone)
+	want := "automatic sync off (manual = true); session_timeout_seconds ignored: startup sync runs in background; SSH key /k; askpass /a; PLAINTEXT credentials in " + memsync.PlaintextCredentialFile(clone)
 	if got != want {
 		t.Fatalf("settings:\n got %s\nwant %s", got, want)
 	}

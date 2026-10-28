@@ -71,6 +71,9 @@ func TestMemoryAheadOfCodeIsReported(t *testing.T) {
 	runCLI(t, "", "init")
 	runCLI(t, "", "sync", "init", "--lineage", identity.LineageID)
 	runCLI(t, "", "sync", "init", "--remote", remote)
+	// The startup sync is detached; simulate its completion before checking
+	// how a later bootstrap reports the imported checkpoint.
+	runCLI(t, "", "sync")
 	hook := runCLI(t, `{"session_id":"session-b","hook_event_name":"SessionStart","source":"startup"}`, "hook", "claude-code")
 	if !strings.Contains(hook, "Build the feature") || !strings.Contains(hook, "Memory is ahead of code") || !strings.Contains(hook, ahead[:12]) || !strings.Contains(hook, "Pull first") {
 		t.Fatalf("session start did not warn that memory is ahead of code:\n%s", hook)

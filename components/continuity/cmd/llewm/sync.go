@@ -444,7 +444,7 @@ func syncSettings(ctx context.Context, settings config.Sync, clone string) []str
 		values = append(values, "automatic sync off (manual = true)")
 	}
 	if settings.SessionTimeoutSeconds > 0 {
-		values = append(values, fmt.Sprintf("session sync limit %s", settings.SessionTimeout()))
+		values = append(values, "session_timeout_seconds ignored: startup sync runs in background")
 	}
 	if settings.Clone != "" {
 		values = append(values, "clone "+settings.Clone)
@@ -510,28 +510,17 @@ func sessionStartSync(ctx context.Context, application *app.App) string {
 	if !settings.Configured() {
 		return ""
 	}
-	if settings.Automatic() && len(settings.Folders) > 0 {
-		// Cloud placeholders and remote filesystem drivers can block even metadata
-		// I/O. Never scan a shared folder synchronously in a session-start hook.
-		if executable, err := os.Executable(); err == nil {
-			_ = startBackgroundSync(executable, application.Root)
-		}
-		value, err := projectSyncStatus(ctx, application)
-		if err != nil {
-			return "History sync requested in background; current import status unavailable"
-		}
-		return value.Line(time.Now().UTC()) + " · background sync requested; bootstrap uses last imported history"
-	}
 	if settings.Automatic() {
-		// Git-only session sync keeps the existing network budget.
-		bounded, cancel := context.WithTimeout(ctx, settings.SessionTimeout())
-		result, _ := runHistorySync(bounded, application, true, false)
-		cancel()
-		if result.Git != nil && result.Git.Outcome == memsync.OutcomeDeferred {
-			if executable, err := os.Executable(); err == nil {
-				_ = startBackgroundSync(executable, application.Root)
-			}
+		// Even local export and archive I/O can exceed the hook deadline. Keep
+		// the entire sync outside the startup path, for every endpoint type.
+		executable, err := os.Executable()
+		if err != nil {
+			return "History sync could not start; bootstrap uses last imported history"
 		}
+		if err := startBackgroundSync(executable, application.Root); err != nil {
+			return "History sync could not start; bootstrap uses last imported history"
+		}
+		return "History sync requested in background; bootstrap uses last imported history"
 	}
 	value, err := projectSyncStatus(ctx, application)
 	if err != nil {

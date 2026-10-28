@@ -48,7 +48,7 @@ review: when sync authentication, the memory repository layout, or the commit po
 - Continuity never changes global or system Git configuration, and a secret never
   enters project configuration, the database, the memory repository, the remote
   URL, logs, or error text.
-- The session-start sync is bounded (at most 10 s) and never blocks the session;
+- Session-start sync runs in the background; the bootstrap uses last imported history;
   offline work is committed locally and pushed later; conflicting record versions
   are reported, never merged silently.
 
@@ -201,15 +201,17 @@ format-1 records or manufacture replacements from incomplete local state.
 Internal behavior should not change by accident. Rules fall into three kinds:
 
 - **Invariants** cannot be configured: no prompts during automatic syncs, hooks and signing
-  off, the environment isolation and remote check above, bounded session syncs,
+  off, the environment isolation and remote check above, background session syncs,
   and no secrets in the repository.
 - **Deliberate settings** are named `[sync]` keys and `sync init` flags, validated
-  and clamped (`manual`, `session_timeout_seconds`, `ssh_key`, `askpass`, the clone's
+  and clamped (`manual`, `ssh_key`, `askpass`, the clone's
   credential helper).
   Each one that differs from the default is named on the `Sync:` line in
-  `llewm sync status` and the session bootstrap (`settings: ...`, with a
+  `llewm sync status` (`settings: ...`, with a
   `PLAINTEXT credentials` warning for the last-resort helper), and in the `settings`
   field of `sync status --output json`.
+- The former `session_timeout_seconds` setting no longer affects startup sync;
+  status reports it as ignored when it is present.
 - **The user's own environment** is respected on purpose because it is how the
   machine reaches the network: credential helpers and programs, the SSH agent and
   `GIT_SSH_COMMAND`, proxies, `GIT_CONFIG_GLOBAL`, and tracing such as `GIT_TRACE`.
@@ -307,11 +309,9 @@ Invariants for every option:
 
 ## Timing and failure
 
-- The session-start sync exports, fetches, and imports, then leaves its push to a
-  detached background sync (recorded as `deferred`). It waits on the remote at
-  most `[sync] session_timeout_seconds` (8 s by default, at most 10 s); a fetch
-  that does not finish in time is also handed to the background. Pushes after
-  checkpoints run detached.
+- Session start queues a detached sync and builds its bootstrap from the last
+  imported history. A checkpoint from another device may therefore need a later
+  bootstrap after the sync finishes. Pushes after checkpoints also run detached.
 - Only waiting on the remote is ever cut short. Local Git and database steps
   (export, commit, rebase, import, recording the attempt) always finish, so an
   interrupted sync never leaves a lock file, a rebase in progress, or a

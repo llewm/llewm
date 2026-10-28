@@ -1521,8 +1521,6 @@ func hookCommand() *cobra.Command {
 				// Best-effort: attribution never blocks a hook.
 				application.ObserveHeads(cmd.Context(), event.Client, event.SessionID, strings.ToLower(event.EventType), envelope.ToolName, envelope.ToolInput)
 				if strings.EqualFold(event.EventType, "sessionstart") {
-					// Sync first so records from other machines shape this bootstrap.
-					syncLine := sessionStartSync(cmd.Context(), application)
 					// A resumed session keeps its session ID, so its live task presence comes first.
 					packet, err := application.Bootstrap.BuildForSession(cmd.Context(), application.ProjectID, application.Root, application.Config.Project.Name, checkpoint.Selection{}, event.SessionID)
 					if err != nil {
@@ -1531,6 +1529,9 @@ func hookCommand() *cobra.Command {
 					markdown := bootstrap.Markdown(packet)
 					// Best-effort: a failed record only means continuity_bootstrap repeats the packet.
 					_ = bootstrap.RecordDelivery(cmd.Context(), application.DB, bootstrap.Delivery{ProjectID: application.ProjectID, Client: event.Client, SessionID: event.SessionID, DeliveredAt: time.Now(), CheckpointID: packet.CheckpointID(), PacketSHA256: bootstrap.PacketHash(markdown)})
+					// Start sync only after the packet is built and recorded, avoiding
+					// contention between a new sync writer and bootstrap reads.
+					syncLine := sessionStartSync(cmd.Context(), application)
 					if event.SessionID != "" {
 						// After the delivery hash, like the sync line: the session is not packet state.
 						markdown += "\nThis session: `" + event.SessionID + "`. Pass it as session_id when checkpointing, so a resumed or compacted session keeps its task.\n"

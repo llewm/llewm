@@ -24,7 +24,7 @@ func TestCheckpointFamilyRoundTripsWithImmutableActionHistory(t *testing.T) {
 	first, err := service.CreateWithActions(ctx, checkpoint.Checkpoint{
 		ID: "checkpoint-first", ProjectID: sourceProject, SessionID: "session-checkpoint", TaskID: "portable-checkpoints",
 		RestartResume: &checkpoint.RestartResume{InstanceID: identity.InstanceID, Client: "codex"},
-		Task: "Portable checkpoints", Status: "in_progress", Summary: "Root " + root + " project " + sourceProject + " token=checkpoint-secret",
+		Task:          "Portable checkpoints", Status: "in_progress", Summary: "Root " + root + " project " + sourceProject + " token=checkpoint-secret",
 		NextAction: "Recover the checkpoint graph", Completed: []string{"Mapped checkpoint fields"},
 		Attempts: []checkpoint.Attempt{{Description: "Use mutable state", Outcome: "Rejected", Reason: "History must remain immutable"}},
 		Changes:  []string{"components/continuity/internal/portable/checkpoint.go"}, Verified: []string{"Fixture created"},
