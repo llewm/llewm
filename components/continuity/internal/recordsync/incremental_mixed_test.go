@@ -1,6 +1,7 @@
 package recordsync
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -75,6 +76,22 @@ func TestMixedImportCyclesMatchReference(t *testing.T) {
 			got, gotErr := index.ImportBlocks(ctx, blocks)
 			if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
 				t.Fatalf("cycle %d replay %d: full=%+v %v indexed=%+v %v", cycle, replay, want, wantErr, got, gotErr)
+			}
+			wantRecords, err := portable.LocalEnvelopes(ctx, full, fullID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotRecords, err := portable.LocalEnvelopes(ctx, indexed, indexedID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(wantRecords) != len(gotRecords) {
+				t.Fatal("semantic record counts differ")
+			}
+			for key, object := range wantRecords {
+				if !bytes.Equal(object.Bytes, gotRecords[key].Bytes) {
+					t.Fatalf("cycle %d replay %d: semantic record %s differs", cycle, replay, key)
+				}
 			}
 		}
 	}

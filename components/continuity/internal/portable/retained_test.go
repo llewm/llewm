@@ -2,6 +2,7 @@ package portable
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,42 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/procedures"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
+
+func TestUnchangedExportDoesNotAcquireWriterLock(t *testing.T) {
+	ctx, db, id := operationalProject(t, "read-only-export")
+	if _, err := (Service{DB: db}).Initialize(ctx, id, "lineage:abababababababababababababababab"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (worknarrative.Service{DB: db}).Append(ctx, worknarrative.Record{ID: "retained", ProjectID: id, Title: "Retained", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := EncodeMemoryExport(ctx, db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Rollback()
+	if _, err := writer.ExecContext(ctx, `UPDATE projects SET name=name WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	readCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	second, err := EncodeMemoryExport(readCtx, db, id)
+	if err != nil {
+		t.Fatalf("unchanged export blocked by writer: %v", err)
+	}
+	if len(first.Envelopes) != len(second.Envelopes) {
+		t.Fatal("record count changed")
+	}
+	for i := range first.Envelopes {
+		if !bytes.Equal(first.Envelopes[i].Bytes, second.Envelopes[i].Bytes) {
+			t.Fatal("export bytes changed")
+		}
+	}
+}
 
 // Source prose deliberately mentions the destination's root and ID. Those are
 // ordinary foreign text on the source, but used to be substituted on re-export.

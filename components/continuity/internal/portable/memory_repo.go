@@ -61,7 +61,11 @@ type MemoryExport struct {
 
 // EncodeMemoryExport encodes every curated record of the project.
 func EncodeMemoryExport(ctx context.Context, db *sql.DB, projectID string) (MemoryExport, error) {
-	tx, err := db.BeginTx(ctx, nil)
+	return encodeMemoryExport(ctx, db, projectID, true)
+}
+
+func encodeMemoryExport(ctx context.Context, db *sql.DB, projectID string, readOnly bool) (MemoryExport, error) {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
 	if err != nil {
 		return MemoryExport{}, err
 	}
@@ -82,13 +86,44 @@ func EncodeMemoryExport(ctx context.Context, db *sql.DB, projectID string) (Memo
 	if err != nil {
 		return MemoryExport{}, err
 	}
+	// Retention is append-only. Avoid even a no-op INSERT for identities
+	// already present: SQLite would acquire a writer lock on unchanged exports.
+	rows, err := tx.QueryContext(ctx, `SELECT record_type,record_id,record_revision FROM portable_envelopes WHERE project_id=?`, projectID)
+	if err != nil {
+		return MemoryExport{}, err
+	}
+	retained := make(map[string]bool)
+	for rows.Next() {
+		var kind, id string
+		var revision int
+		if err := rows.Scan(&kind, &id, &revision); err != nil {
+			rows.Close()
+			return MemoryExport{}, err
+		}
+		retained[RecordKey(kind, id, revision)] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return MemoryExport{}, err
+	}
 	for _, spec := range specs {
 		encoded, err := EncodeEnvelope(spec)
 		if err != nil {
 			return MemoryExport{}, fmt.Errorf("encode %s %s: %w", spec.RecordType, spec.RecordID, err)
 		}
-		if err := retainEnvelope(ctx, tx, projectID, "export", encoded); err != nil {
-			return MemoryExport{}, err
+		if !retained[RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)] {
+			if readOnly {
+				// Rebuild the complete snapshot under the writer lock rather
+				// than trying to upgrade a potentially stale read transaction.
+				if err := tx.Rollback(); err != nil {
+					return MemoryExport{}, err
+				}
+				return encodeMemoryExport(ctx, db, projectID, false)
+			}
+			if err := retainEnvelope(ctx, tx, projectID, "export", encoded); err != nil {
+				return MemoryExport{}, err
+			}
 		}
 		result.Envelopes = append(result.Envelopes, encoded)
 	}
