@@ -31,6 +31,38 @@ func projectArchive(application *app.App) (recordsync.Archive, error) {
 	return recordsync.OpenArchive(filepath.Join(config.StateDir(application.Root), "history"), identity.LineageID)
 }
 
+func rebuildHistoryInventory(ctx context.Context, application *app.App, archive recordsync.Archive) error {
+	settings := application.Config.Sync
+	folderInventories := func(ctx context.Context) (map[string][]recordsync.Block, error) {
+		inventories := make(map[string][]recordsync.Block, len(settings.Folders))
+		for _, endpoint := range settings.Folders {
+			clone, _ := settings.MemoryClone()
+			if err := foldersync.Separate(endpoint.Directory, config.StateDir(application.Root), application.Config.Storage.Database, application.Config.Backups.Dir, filepath.Join(application.Root, ".git"), clone); err != nil {
+				return nil, err
+			}
+			inventory, err := (foldersync.Syncer{DB: application.DB, ProjectID: application.ProjectID, Archive: archive, Endpoint: endpoint}).Inventory(ctx)
+			if err != nil {
+				return nil, err
+			}
+			inventories[endpoint.ID()] = inventory
+		}
+		return inventories, nil
+	}
+	if settings.Remote != "" {
+		syncer, err := projectSyncer(application)
+		if err != nil {
+			return err
+		}
+		syncer.Archive = &archive
+		return syncer.RebuildInventory(ctx, folderInventories)
+	}
+	inventories, err := folderInventories(ctx)
+	if err != nil {
+		return err
+	}
+	return (recordsync.Index{DB: application.DB, ProjectID: application.ProjectID, Lineage: archive.Lineage}).Rebuild(ctx, inventories)
+}
+
 type historyResult struct {
 	Git     *memsync.Result     `json:"git,omitempty"`
 	Folders []foldersync.Result `json:"folders"`
@@ -81,10 +113,9 @@ func runHistorySync(ctx context.Context, application *app.App, session, prompt b
 		}
 	}
 	pass()
-	// A folder-only project can rebuild the disposable inventory once every
-	// configured folder supplies a complete, independently validated snapshot.
-	// Git-backed projects need the Git clone lock across that same operation.
-	if settings.Remote == "" && len(failures) > 0 {
+	// Rebuild only after every configured endpoint supplies a complete,
+	// independently validated snapshot. Git keeps its clone lock throughout.
+	if len(failures) > 0 {
 		indexOnly := true
 		for _, failure := range failures {
 			if !errors.Is(failure, recordsync.ErrIndexRebuild) {
@@ -93,25 +124,9 @@ func runHistorySync(ctx context.Context, application *app.App, session, prompt b
 			}
 		}
 		if indexOnly {
-			inventories := make(map[string][]recordsync.Block, len(settings.Folders))
-			var rebuildErr error
-			for _, endpoint := range settings.Folders {
-				clone, _ := settings.MemoryClone()
-				if rebuildErr = foldersync.Separate(endpoint.Directory, config.StateDir(application.Root), application.Config.Storage.Database, application.Config.Backups.Dir, filepath.Join(application.Root, ".git"), clone); rebuildErr != nil {
-					break
-				}
-				inventory, err := (foldersync.Syncer{DB: application.DB, ProjectID: application.ProjectID, Archive: archive, Endpoint: endpoint}).Inventory(ctx)
-				if err != nil {
-					rebuildErr = err
-					break
-				}
-				inventories[endpoint.ID()] = inventory
-			}
-			if rebuildErr == nil {
-				rebuildErr = (recordsync.Index{DB: application.DB, ProjectID: application.ProjectID, Lineage: archive.Lineage}).Rebuild(ctx, inventories)
-			}
+			rebuildErr := rebuildHistoryInventory(ctx, application, archive)
 			if rebuildErr != nil {
-				failures = append(failures, fmt.Errorf("folder inventory rebuild: %w", rebuildErr))
+				failures = append(failures, fmt.Errorf("history inventory rebuild: %w", rebuildErr))
 			} else {
 				failures = nil
 				pass()
@@ -131,6 +146,20 @@ func runHistorySync(ctx context.Context, application *app.App, session, prompt b
 				value, err = syncer.Session(ctx, settings.SessionTimeout())
 			} else {
 				value, err = syncer.Sync(ctx)
+			}
+			if errors.Is(err, recordsync.ErrIndexRebuild) && len(failures) == 0 {
+				if rebuildErr := rebuildHistoryInventory(ctx, application, archive); rebuildErr != nil {
+					err = errors.Join(err, fmt.Errorf("history inventory rebuild: %w", rebuildErr))
+				} else {
+					previous := value
+					if session {
+						value, err = syncer.Session(ctx, settings.SessionTimeout())
+					} else {
+						value, err = syncer.Sync(ctx)
+					}
+					value.ExportedRecords += previous.ExportedRecords
+					value.ImportedRecords += previous.ImportedRecords
+				}
 			}
 			result.Git = &value
 			if err != nil {

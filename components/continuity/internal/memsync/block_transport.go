@@ -44,6 +44,11 @@ func (s Syncer) trackedV3Snapshot(ctx context.Context, repo git, lineage string)
 
 // trackedBlocks never discovers untracked files in the working tree.
 func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]recordsync.Block, error) {
+	return s.readTrackedBlocks(ctx, repo, lineage, true)
+}
+
+// readTrackedBlocks can bypass the derived index when reconstructing it.
+func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string, indexed bool) ([]recordsync.Block, error) {
 	directory, err := recordsync.BlockDirectory(lineage)
 	if err != nil {
 		return nil, err
@@ -64,7 +69,12 @@ func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		block, err := index.ReadBlock(ctx, root, filepath.FromSlash(path))
+		var block recordsync.Block
+		if indexed {
+			block, err = index.ReadBlock(ctx, root, filepath.FromSlash(path))
+		} else {
+			block, err = recordsync.ReadBlock(root, lineage, filepath.FromSlash(path))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("invalid tracked history block: %w", err)
 		}
@@ -76,6 +86,58 @@ func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]
 		blocks = append(blocks, block)
 	}
 	return blocks, nil
+}
+
+// RebuildInventory holds the clone lock from the Git snapshot through the
+// atomic index replacement. The callback must validate every other configured
+// endpoint independently and must not acquire the Git clone lock.
+func (s Syncer) RebuildInventory(ctx context.Context, other func(context.Context) (map[string][]recordsync.Block, error)) error {
+	if s.Archive == nil {
+		return fmt.Errorf("matching history archive is required")
+	}
+	repo, err := s.repository(ctx)
+	if err != nil {
+		return err
+	}
+	lock, err := lockFile(filepath.Join(s.Clone, ".git", "continuity-sync.lock"))
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	identity, err := (portable.Service{DB: s.DB}).Get(ctx, s.ProjectID)
+	if err != nil {
+		return err
+	}
+	if identity == nil || identity.LineageID != s.Archive.Lineage {
+		return fmt.Errorf("Git route differs from selected project's lineage")
+	}
+	var old Result
+	if err := retireFormerFormat(ctx, repo, s.Clone, *identity, false, &old); err != nil {
+		return err
+	}
+	legacy, err := s.trackedV3Snapshot(ctx, repo, identity.LineageID)
+	if err != nil {
+		return err
+	}
+	if len(legacy.Objects) != 0 {
+		return fmt.Errorf("format-3 observations require explicit conversion before inventory rebuild")
+	}
+	blocks, err := s.readTrackedBlocks(ctx, repo, identity.LineageID, false)
+	if err != nil {
+		return err
+	}
+	inventories, err := other(ctx)
+	if err != nil {
+		return err
+	}
+	if inventories == nil {
+		inventories = make(map[string][]recordsync.Block)
+	}
+	if _, exists := inventories[s.Endpoint()]; exists {
+		return fmt.Errorf("duplicate Git inventory endpoint")
+	}
+	inventories[s.Endpoint()] = blocks
+	return (recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID, Now: s.Now}).Rebuild(ctx, inventories)
 }
 
 // trackedBlockObservations resolves exact envelope hashes from tracked blocks;

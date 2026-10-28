@@ -3,6 +3,7 @@ package memsync
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -268,6 +269,44 @@ func TestBlockCycleConvergesAcrossGitPeers(t *testing.T) {
 	}
 	if result, err := a.syncer.cycleBlocks(ctx, plan{push: true}); err != nil || result.ImportedRecords != 1 {
 		t.Fatalf("A import: %+v %v", result, err)
+	}
+}
+
+func TestRebuildInventoryUsesTrackedGitAndPreservesOtherIntent(t *testing.T) {
+	ctx := context.Background()
+	remote := bareRemote(t)
+	a := newMachine(t, "coordinated-rebuild", remote)
+	archive := archiveMachine(t, &a)
+	a.syncer.Archive = &archive
+	a.decide(t, "coordinated", "Recover tracked inventory")
+	if _, err := a.syncer.cycleBlocks(ctx, plan{push: true}); err != nil {
+		t.Fatal(err)
+	}
+	index := recordsync.Index{DB: a.db, ProjectID: a.project, Lineage: testLineage}
+	staged, err := index.PlanPublication(ctx, archive, "folder:other", false)
+	if err != nil || len(staged) != 1 {
+		t.Fatalf("stage other endpoint: %d %v", len(staged), err)
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, a.project, staged[0].Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.syncer.RebuildInventory(ctx, func(context.Context) (map[string][]recordsync.Block, error) {
+		return nil, fmt.Errorf("folder unavailable")
+	}); err == nil {
+		t.Fatal("unavailable endpoint permitted rebuilding")
+	}
+	var body string
+	if err := a.db.QueryRowContext(ctx, `SELECT envelope_json FROM history_index_records WHERE project_id=? AND block_hash=? LIMIT 1`, a.project, staged[0].Hash).Scan(&body); err != nil || body != "{}" {
+		t.Fatalf("failed rebuild changed inventory: %q %v", body, err)
+	}
+	if err := a.syncer.RebuildInventory(ctx, func(context.Context) (map[string][]recordsync.Block, error) {
+		return map[string][]recordsync.Block{"folder:other": {}}, nil
+	}); err != nil {
+		t.Fatalf("rebuild from tracked Git: %v", err)
+	}
+	var members int
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, a.project, staged[0].Hash).Scan(&members); err != nil || members != 2 {
+		t.Fatalf("lost publication memberships: %d %v", members, err)
 	}
 }
 

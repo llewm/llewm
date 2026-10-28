@@ -9,11 +9,89 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGitFolderCoordinatorRecoversTrackedStagedBlock(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	root := testProject(t)
+	runCLI(t, "", "init")
+	remote := filepath.Join(t.TempDir(), "memory.git")
+	if output, err := exec.Command("git", "init", "--quiet", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("initialize remote: %v %s", err, output)
+	}
+	runCLI(t, "", "sync", "init", "--remote", remote)
+	var status struct {
+		Identity portable.Identity `json:"identity"`
+	}
+	decodeCLI(t, runCLI(t, "", "sync", "status", "--output", "json"), &status)
+	var endpoint foldersync.Endpoint
+	decodeCLI(t, runCLI(t, "", "sync", "folder", "add", "first", "--directory", t.TempDir(), "--create", "--confirm-lineage", status.Identity.LineageID), &endpoint)
+	runCLI(t, "", "sync", "folder", "convert", "first", "--writers-stopped")
+	application, err := app.Open(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+	archive, err := projectArchive(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: status.Identity.LineageID, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "git-folder-fixture", RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Index: []byte(`{"title":"Tracked decision","status":"accepted"}`), Payload: []byte(`{"title":"Tracked decision","rationale":"Preserve staged intent","disposition":"accepted","actor":"owner","actor_type":"human","review_source":"","links":[],"operational_schema_version":1}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.Put(object, "local"); err != nil {
+		t.Fatal(err)
+	}
+	index := recordsync.Index{DB: application.DB, ProjectID: application.ProjectID, Lineage: status.Identity.LineageID}
+	staged, err := index.PlanPublication(ctx, archive, endpoint.ID(), false)
+	if err != nil || len(staged) != 1 {
+		t.Fatalf("stage folder intent: %d %v", len(staged), err)
+	}
+	syncer, err := projectSyncer(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitRoot, err := recordsync.OpenRoot(syncer.Clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recordsync.PublishBlock(gitRoot, status.Identity.LineageID, staged[0]); err != nil {
+		gitRoot.Close()
+		t.Fatal(err)
+	}
+	gitRoot.Close()
+	blockDir, err := recordsync.BlockDirectory(status.Identity.LineageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", filepath.Join(blockDir, staged[0].Hash+".block")}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture block"}} {
+		command := exec.Command("git", args...)
+		command.Dir = syncer.Clone
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git fixture: %v %s", err, output)
+		}
+	}
+	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runHistorySync(ctx, application, false, false); err != nil {
+		t.Fatalf("coordinated rebuild: %v", err)
+	}
+	var members int
+	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash).Scan(&members); err != nil || members != 2 {
+		t.Fatalf("publication memberships: %d %v", members, err)
+	}
+}
 
 func TestFolderOnlyCoordinatorRecoversFromAnotherEndpoint(t *testing.T) {
 	ctx := context.Background()
