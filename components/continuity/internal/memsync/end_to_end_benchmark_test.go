@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime/pprof"
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
@@ -13,6 +14,8 @@ import (
 
 // These disposable local fixtures time a complete warmed cycle, including
 // export, archive discovery, block publication, import and Git operations.
+// Filter CPU profiles with -tagfocus=sync_phase=measured to omit fixture setup,
+// warm-up and the canonical writes between measured cycles.
 func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 	ctx := context.Background()
 	for _, size := range []int{500, 5669} {
@@ -74,9 +77,11 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 							m.decide(b, fmt.Sprintf("new-%06d", i), "New observation")
 							b.StartTimer()
 						}
-						if err := cycle(); err != nil {
-							b.Fatal(err)
-						}
+						pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(context.Context) {
+							if err := cycle(); err != nil {
+								b.Fatal(err)
+							}
+						})
 					}
 				})
 			}

@@ -1,6 +1,7 @@
 package recordsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -104,6 +105,7 @@ func TestBlockInventoryRejectsDamagedIdentityAndReferences(t *testing.T) {
 	index := Index{DB: db, ProjectID: project, Lineage: lineage}
 	for _, mutation := range []string{
 		`UPDATE history_index_records SET record_id='wrong'`,
+		`UPDATE history_index_records SET envelope_json=replace(envelope_json,'"payload":{}','"payload":{"changed":true}')`,
 		`DELETE FROM history_index_refs`,
 		`INSERT INTO history_index_refs(project_id,block_hash,envelope_hash,ref_kind,ref_id) SELECT project_id,block_hash,envelope_hash,'decision','extra' FROM history_index_records`,
 	} {
@@ -112,6 +114,10 @@ func TestBlockInventoryRejectsDamagedIdentityAndReferences(t *testing.T) {
 		}
 		if err := index.AddBlock(ctx, block); err != nil {
 			t.Fatal(err)
+		}
+		objects, err := index.blockObjects(ctx, []Block{block, block})
+		if err != nil || len(objects) != 1 || !bytes.Equal(objects[0].Bytes, object.Bytes) || len(objects[0].Envelope.Refs) != 1 || objects[0].Envelope.Refs[0] != object.Envelope.Refs[0] || !bytes.Equal(objects[0].Envelope.Payload, object.Envelope.Payload) {
+			t.Fatalf("valid overlapping inventory differs: %+v %v", objects, err)
 		}
 		if _, err := db.ExecContext(ctx, mutation); err != nil {
 			t.Fatal(err)

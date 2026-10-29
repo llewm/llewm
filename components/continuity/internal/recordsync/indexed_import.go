@@ -380,7 +380,7 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 		if err != nil {
 			return nil, err
 		}
-		var bodies [][]byte
+		var cached []portable.EncodedEnvelope
 		type refKey struct{ hash, kind, id string }
 		expectedRefs := make(map[refKey]bool)
 		for rows.Next() {
@@ -398,7 +398,7 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 			for _, ref := range envelope.Refs {
 				expectedRefs[refKey{hash, ref.Kind, ref.ID}] = true
 			}
-			bodies = append(bodies, []byte(body))
+			cached = append(cached, portable.EncodedEnvelope{Envelope: envelope, Bytes: []byte(body)})
 		}
 		err = rows.Err()
 		rows.Close()
@@ -407,8 +407,8 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 		}
 		var reconstructed bytes.Buffer
 		reconstructed.WriteString(blockHeader)
-		for _, body := range bodies {
-			reconstructed.Write(body)
+		for _, object := range cached {
+			reconstructed.Write(object.Bytes)
 			reconstructed.WriteByte('\n')
 		}
 		if !bytes.Equal(reconstructed.Bytes(), block.Bytes) {
@@ -438,18 +438,16 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 		if len(expectedRefs) != 0 {
 			return nil, fmt.Errorf("%w: missing inventory reference", ErrIndexRebuild)
 		}
-		for _, body := range bodies {
+		// Reuse the parsed envelopes only after their exact bytes and all
+		// reference rows have matched the validated block inventory.
+		for _, object := range cached {
 			count++
 			if count > portable.MaxRecordCount {
 				return nil, fmt.Errorf("history block records exceed count bound")
 			}
-			var envelope portable.Envelope
-			if err := json.Unmarshal(body, &envelope); err != nil || envelope.LineageID != s.Lineage {
-				return nil, fmt.Errorf("%w: invalid cached envelope", ErrIndexRebuild)
-			}
-			if !objectHashes[envelope.EnvelopeSHA256] {
-				objects = append(objects, portable.EncodedEnvelope{Envelope: envelope, Bytes: body})
-				objectHashes[envelope.EnvelopeSHA256] = true
+			if !objectHashes[object.Envelope.EnvelopeSHA256] {
+				objects = append(objects, object)
+				objectHashes[object.Envelope.EnvelopeSHA256] = true
 			}
 		}
 	}
