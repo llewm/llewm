@@ -162,6 +162,12 @@ and writer-lock acquisition; any intervening commit invalidates reuse through
 `data_version` and takes the reference fallback. Membership, canonical bytes,
 references, recovery state and fork checks still apply. Appends continue to
 verify fresh post-write state; this snapshot is never reused across imports.
+Already-present additions may also include plan revisions, resources and notes,
+and checkpoint records, contexts, branches, actions and transitions. The canonical
+planner validates every addition and its dependencies. Any append in a batch
+containing these families rolls back and uses the complete importer. An old
+record referring to an added ID still forces fallback, including a resource
+revision referenced by an older note; these guards are deliberately conservative.
 
 Local import snapshots preserve stable block membership for both published
 records and records received through other destinations. Residual records use

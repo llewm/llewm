@@ -9,9 +9,11 @@ import (
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
+	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/resource"
 	"github.com/llewm/llewm/components/continuity/internal/trackplan"
 )
 
@@ -95,6 +97,16 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 // Repeated, text-heavy plan revisions exercise the export/validation/redaction
 // costs absent from decision-only fixtures. All history here is synthetic.
 func BenchmarkHistorySyncPlanHistory(b *testing.B) {
+	benchmarkHistorySyncPlanHistory(b, false)
+}
+
+// A realistic local arrival includes a plan revision, resource observation,
+// checkpoint context and action history, rather than only a decision.
+func BenchmarkHistorySyncMixedHistory(b *testing.B) {
+	benchmarkHistorySyncPlanHistory(b, true)
+}
+
+func benchmarkHistorySyncPlanHistory(b *testing.B, mixed bool) {
 	ctx := context.Background()
 	for _, size := range []int{500, 5669} {
 		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
@@ -116,13 +128,28 @@ func BenchmarkHistorySyncPlanHistory(b *testing.B) {
 				m.sync(b, OutcomeSynced)
 			}
 			b.ResetTimer()
+			previousCheckpoint := ""
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
-				m.decide(b, fmt.Sprintf("arrival-%d", i), "New observation")
+				if mixed {
+					if _, err := service.AppendPlan(ctx, trackplan.Plan{ProjectID: m.project, ID: "history-plan", RoadmapNodeID: "history", Title: "Synthetic plan history", Summary: "Mixed arrival", Status: "active", Creator: "benchmark", Items: items}); err != nil {
+						b.Fatal(err)
+					}
+					if _, err := (resource.Service{DB: m.db}).Record(ctx, resource.Resource{ProjectID: m.project, ID: "fixture-host", Kind: "host", Title: "Synthetic host", Summary: fmt.Sprintf("Observation %d", i), Creator: "benchmark"}); err != nil {
+						b.Fatal(err)
+					}
+					saved, err := (checkpoint.Service{DB: m.db}).CreateWithActions(ctx, checkpoint.Checkpoint{ProjectID: m.project, TaskID: "mixed-history", PredecessorCheckpointID: previousCheckpoint, Task: "Synthetic qualification", Status: "in_progress", Summary: "Mixed arrival", NextAction: "Continue qualification"})
+					if err != nil {
+						b.Fatal(err)
+					}
+					previousCheckpoint = saved.Checkpoint.ID
+				} else {
+					m.decide(b, fmt.Sprintf("arrival-%d", i), "New observation")
+				}
 				b.StartTimer()
 				pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(context.Context) {
 					result := m.sync(b, OutcomeSynced)
-					if result.Unchanged || result.ExportedRecords != 1 || result.ImportedRecords != 0 {
+					if result.Unchanged || result.ExportedRecords < 1 || (!mixed && result.ExportedRecords != 1) || result.ImportedRecords != 0 {
 						b.Fatalf("unexpected plan-history cycle: %+v", result)
 					}
 				})

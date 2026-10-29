@@ -15,6 +15,8 @@ var errMixedProofChanged = errors.New("mixed replay proof changed")
 
 // tryMixedAdditions handles independent decisions, first topic revisions and narratives, task- or
 // commit-anchored narratives, and supersession edges to proven or new narratives.
+// Plans, resources and checkpoint families are accepted only when already local;
+// their canonical planner still checks all new records and dependencies.
 // All other changes use the full importer.
 func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []portable.EncodedEnvelope) (ImportResult, bool, error) {
 	var prior, priorState string
@@ -53,6 +55,7 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 	oldNarratives := make(map[string]bool)
 	newNarratives := make(map[string]bool)
 	var edges []portable.EncodedEnvelope
+	presentOnly := false
 	for _, object := range objects {
 		if members[object.Envelope.EnvelopeSHA256] {
 			old = append(old, object)
@@ -62,11 +65,15 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 			continue
 		}
 		e := object.Envelope
-		if e.RecordType == "work_narrative_supersession" {
+		switch e.RecordType {
+		case "track_plan", "resource", "resource_note", "checkpoint", "checkpoint_context", "checkpoint_branches", "checkpoint_action", "checkpoint_action_transition":
+			presentOnly = true
+		case "work_narrative_supersession":
 			edges = append(edges, object)
-		} else if e.RecordType != "decision" && e.RecordType != "work_narrative" && !(e.RecordType == "topic_revision" && e.RecordRevision == 1) {
-			return ImportResult{}, false, nil
-		} else {
+		default:
+			if e.RecordType != "decision" && e.RecordType != "work_narrative" && !(e.RecordType == "topic_revision" && e.RecordRevision == 1) {
+				return ImportResult{}, false, nil
+			}
 			for _, ref := range e.Refs {
 				if e.RecordType != "work_narrative" || (ref.Kind != "task" && ref.Kind != "commit") {
 					return ImportResult{}, false, nil
@@ -192,8 +199,15 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 		now = s.Now().UTC()
 	}
 	plan, receipt, err := portable.ImportMemoryRecordsWithin(ctx, s.DB, s.ProjectID, specs, now, portable.ImportMemoryHooks{
-		Appended: func(ctx context.Context, tx *sql.Tx) error { return update(ctx, tx, nil) },
-		Present:  update,
+		Appended: func(ctx context.Context, tx *sql.Tx) error {
+			if presentOnly {
+				// Roll back before falling back to the complete importer. The
+				// broader family has only been qualified for present additions.
+				return errMixedProofChanged
+			}
+			return update(ctx, tx, nil)
+		},
+		Present: update,
 	})
 	if errors.Is(err, errMixedProofChanged) || errors.Is(err, portable.ErrImportSnapshotChanged) {
 		return ImportResult{}, false, nil
