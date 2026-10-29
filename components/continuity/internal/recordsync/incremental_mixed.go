@@ -15,8 +15,8 @@ var errMixedProofChanged = errors.New("mixed replay proof changed")
 
 // tryMixedAdditions handles independent decisions, first topic revisions and narratives, task- or
 // commit-anchored narratives, and supersession edges to proven or new narratives.
-// Plans, resources and checkpoint families are accepted only when already local;
-// their canonical planner still checks all new records and dependencies.
+// Plans, resources and checkpoint families use the canonical addition planner
+// and a fresh post-write snapshot for appends.
 // All other changes use the full importer.
 func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []portable.EncodedEnvelope) (ImportResult, bool, error) {
 	var prior, priorState string
@@ -55,7 +55,6 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 	oldNarratives := make(map[string]bool)
 	newNarratives := make(map[string]bool)
 	var edges []portable.EncodedEnvelope
-	presentOnly := false
 	for _, object := range objects {
 		if members[object.Envelope.EnvelopeSHA256] {
 			old = append(old, object)
@@ -67,7 +66,7 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 		e := object.Envelope
 		switch e.RecordType {
 		case "track_plan", "resource", "resource_note", "checkpoint", "checkpoint_context", "checkpoint_branches", "checkpoint_action", "checkpoint_action_transition":
-			presentOnly = true
+			// Canonical planning validates all additions and their dependencies.
 		case "work_narrative_supersession":
 			edges = append(edges, object)
 		default:
@@ -200,11 +199,6 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 	}
 	plan, receipt, err := portable.ImportMemoryRecordsWithin(ctx, s.DB, s.ProjectID, specs, now, portable.ImportMemoryHooks{
 		Appended: func(ctx context.Context, tx *sql.Tx) error {
-			if presentOnly {
-				// Roll back before falling back to the complete importer. The
-				// broader family has only been qualified for present additions.
-				return errMixedProofChanged
-			}
 			return update(ctx, tx, nil)
 		},
 		Present: update,

@@ -97,20 +97,30 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 // Repeated, text-heavy plan revisions exercise the export/validation/redaction
 // costs absent from decision-only fixtures. All history here is synthetic.
 func BenchmarkHistorySyncPlanHistory(b *testing.B) {
-	benchmarkHistorySyncPlanHistory(b, false)
+	benchmarkHistorySyncPlanHistory(b, false, false)
 }
 
 // A realistic local arrival includes a plan revision, resource observation,
 // checkpoint context and action history, rather than only a decision.
 func BenchmarkHistorySyncMixedHistory(b *testing.B) {
-	benchmarkHistorySyncPlanHistory(b, true)
+	benchmarkHistorySyncPlanHistory(b, true, false)
 }
 
-func benchmarkHistorySyncPlanHistory(b *testing.B, mixed bool) {
+// Remote arrivals measure the receiving Git cycle, including semantic appends.
+func BenchmarkHistorySyncRemoteMixedHistory(b *testing.B) {
+	benchmarkHistorySyncPlanHistory(b, true, true)
+}
+
+func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 	ctx := context.Background()
 	for _, size := range []int{500, 5669} {
 		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
-			m := newMachine(b, "plan-history", bareRemote(b))
+			origin := bareRemote(b)
+			m := newMachine(b, "plan-history", origin)
+			receiver := m
+			if remote {
+				receiver = newMachine(b, "remote-plan-history", origin)
+			}
 			for i := 0; i < size; i++ {
 				m.decide(b, fmt.Sprintf("decision-%04d", i), "Observation")
 			}
@@ -126,6 +136,9 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed bool) {
 			}
 			for i := 0; i < 2; i++ {
 				m.sync(b, OutcomeSynced)
+				if remote {
+					receiver.sync(b, OutcomeSynced)
+				}
 			}
 			b.ResetTimer()
 			previousCheckpoint := ""
@@ -146,9 +159,18 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed bool) {
 				} else {
 					m.decide(b, fmt.Sprintf("arrival-%d", i), "New observation")
 				}
+				if remote {
+					m.sync(b, OutcomeSynced)
+				}
 				b.StartTimer()
 				pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(context.Context) {
-					result := m.sync(b, OutcomeSynced)
+					result := receiver.sync(b, OutcomeSynced)
+					if remote {
+						if result.Unchanged || result.ImportedRecords < 1 || result.ExportedRecords != 0 {
+							b.Fatalf("unexpected remote cycle: %+v", result)
+						}
+						return
+					}
 					if result.Unchanged || result.ExportedRecords < 1 || (!mixed && result.ExportedRecords != 1) || result.ImportedRecords != 0 {
 						b.Fatalf("unexpected plan-history cycle: %+v", result)
 					}
