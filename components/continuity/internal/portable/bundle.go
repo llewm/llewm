@@ -221,7 +221,7 @@ func EncodeEnvelope(spec EnvelopeSpec) (EncodedEnvelope, error) {
 	const placeholder = "0000000000000000000000000000000000000000000000000000000000000000"
 	const hashMember = `,"envelope_sha256":"` + placeholder + `"`
 	value.EnvelopeSHA256 = placeholder
-	encoded, err := canonicalMarshal(value)
+	encoded, err := marshalCanonicalEnvelope(value)
 	if err != nil {
 		return EncodedEnvelope{}, err
 	}

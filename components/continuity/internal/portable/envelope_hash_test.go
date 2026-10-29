@@ -3,6 +3,7 @@ package portable
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -61,5 +62,41 @@ func TestEnvelopeHashPreservesCanonicalSizeLimit(t *testing.T) {
 	}
 	if _, err := EncodeEnvelope(spec); err == nil || !strings.Contains(err.Error(), "canonical JSON exceeds") {
 		t.Fatalf("expected canonical size rejection, got %v", err)
+	}
+}
+
+func TestEnvelopeEncodingPreservesIntegerRange(t *testing.T) {
+	spec := EnvelopeSpec{
+		LineageID: "lineage:0123456789abcdef0123456789abcdef", RecordType: "work_narrative", RecordSchemaVersion: 1,
+		RecordID: "revision", Authority: "observed", RecordedAt: time.Unix(1234567890, 0), Payload: json.RawMessage(`{"nested":[-0,true,null,{"😀":"<>&"}]}`),
+	}
+	for _, revision := range []int64{0, 1, 1<<53 - 1, 1 << 53} {
+		t.Run(strconv.FormatInt(revision, 10), func(t *testing.T) {
+			if int64(int(revision)) != revision {
+				t.Skip("revision does not fit this platform's int")
+			}
+			spec.RecordRevision = int(revision)
+			encoded, err := EncodeEnvelope(spec)
+			if revision == 1<<53 {
+				if err == nil || !strings.Contains(err.Error(), "interoperable range") {
+					t.Fatalf("expected integer range rejection, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			reference := encoded.Envelope
+			reference.EnvelopeSHA256 = ""
+			withoutHash, err := canonicalMarshal(reference)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reference.EnvelopeSHA256 = hashHex(withoutHash)
+			want, err := canonicalMarshal(reference)
+			if err != nil || !bytes.Equal(want, encoded.Bytes) {
+				t.Fatalf("encoding differs from generic reference: %v", err)
+			}
+		})
 	}
 }
