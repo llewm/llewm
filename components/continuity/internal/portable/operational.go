@@ -78,7 +78,7 @@ func LoadOperationalRecords(ctx context.Context, db *sql.DB, projectID string) (
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&databaseSchema); err != nil {
 		return OperationalRecordSet{}, err
 	}
-	records, missing, err := loadOperationalSpecs(ctx, tx, projectID, projectRoot, identity.LineageID, false)
+	records, missing, err := loadOperationalSpecs(ctx, tx, projectID, projectRoot, identity.LineageID, false, nil)
 	if err != nil {
 		return OperationalRecordSet{}, err
 	}
@@ -139,7 +139,7 @@ func projectRootFrom(ctx context.Context, source queryer, projectID string) (str
 // through the export helpers without changing their signatures.
 const rootSeparator = "\x00"
 
-func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string, allInvocations bool) ([]EnvelopeSpec, []Reference, error) {
+func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string, allInvocations bool, validated snapshotEncodings) ([]EnvelopeSpec, []Reference, error) {
 	checkpointSpecs, err := loadCheckpointSpecs(ctx, source, projectID, projectRoot, lineageID)
 	if err != nil {
 		return nil, nil, err
@@ -347,7 +347,7 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 		}
 	}
 	sort.Slice(missing, func(i, j int) bool { return lessUTF16(missing[i].ID, missing[j].ID) })
-	records, err = retainedSpecs(ctx, source, projectID, lineageID, records)
+	records, err = retainedSpecs(ctx, source, projectID, lineageID, records, validated)
 	return records, missing, err
 }
 
@@ -636,13 +636,14 @@ func planValidatedOperationalImport(ctx context.Context, source queryer, project
 	if err != nil {
 		return ImportPlan{}, err
 	}
-	localSpecs, _, err := loadOperationalSpecs(ctx, source, projectID, projectRoot, identity.LineageID, true)
+	validated := make(snapshotEncodings)
+	localSpecs, _, err := loadOperationalSpecs(ctx, source, projectID, projectRoot, identity.LineageID, true, validated)
 	if err != nil {
 		return ImportPlan{}, err
 	}
 	local := make(map[string]EncodedEnvelope, len(localSpecs))
 	for _, spec := range localSpecs {
-		encoded, err := EncodeEnvelope(spec)
+		encoded, err := validated.encode(spec)
 		if err != nil {
 			return ImportPlan{}, err
 		}

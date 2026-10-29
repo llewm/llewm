@@ -21,13 +21,14 @@ func LocalEnvelopesForImport(ctx context.Context, tx *sql.Tx, projectID string) 
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&schema); err != nil {
 		return nil, err
 	}
-	specs, _, err := loadOperationalSpecs(ctx, tx, projectID, root, identity.LineageID, true)
+	validated := make(snapshotEncodings)
+	specs, _, err := loadOperationalSpecs(ctx, tx, projectID, root, identity.LineageID, true, validated)
 	if err != nil {
 		return nil, err
 	}
 	result := make(map[string]EncodedEnvelope, len(specs))
 	for _, spec := range specs {
-		encoded, err := EncodeEnvelope(spec)
+		encoded, err := validated.encode(spec)
 		if err != nil {
 			return nil, err
 		}

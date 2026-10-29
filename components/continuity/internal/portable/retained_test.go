@@ -254,3 +254,68 @@ func TestRetainedNarrativeMatchesReconstructedRecords(t *testing.T) {
 		}
 	}
 }
+
+// A snapshot reuse hit must still prove canonical bytes, both hashes, supported
+// fields and the SQLite identity. Retention alone is never a validation proof.
+func TestSnapshotEncodingReuseRejectsInvalidRetention(t *testing.T) {
+	for _, mutation := range []string{"envelope hash", "content hash", "payload", "noncanonical", "duplicate key", "unknown field", "lineage", "identity"} {
+		t.Run(mutation, func(t *testing.T) {
+			ctx, db, id := operationalProject(t, "invalid-retained")
+			lineage := "lineage:abababababababababababababababab"
+			if _, err := (Service{DB: db}).Initialize(ctx, id, lineage); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := (worknarrative.Service{DB: db}).Append(ctx, worknarrative.Record{ID: "record", ProjectID: id, Title: "Record", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}}); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := LoadOperationalRecords(ctx, db, id)
+			if err != nil || len(loaded.Records) != 1 {
+				t.Fatalf("load: %v, %d records", err, len(loaded.Records))
+			}
+			spec := loaded.Records[0]
+			encoded, err := EncodeEnvelope(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := string(encoded.Bytes)
+			columnID := spec.RecordID
+			switch mutation {
+			case "envelope hash":
+				body = strings.Replace(body, encoded.Envelope.EnvelopeSHA256, strings.Repeat("0", 64), 1)
+			case "content hash":
+				body = strings.Replace(body, encoded.Envelope.ContentSHA256, strings.Repeat("0", 64), 1)
+			case "payload":
+				body = strings.Replace(body, "Observation", "Altered", 1)
+			case "noncanonical":
+				body = " " + body
+			case "duplicate key":
+				body = strings.Replace(body, "{", `{"authority":"mixed",`, 1)
+			case "unknown field":
+				body = strings.Replace(body, "{", `{"unexpected":true,`, 1)
+			case "lineage":
+				spec.LineageID = "lineage:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+				other, err := EncodeEnvelope(spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = string(other.Bytes)
+			case "identity":
+				columnID = "different"
+			}
+			if _, err := db.ExecContext(ctx, `INSERT INTO portable_envelopes(project_id,record_type,record_id,record_revision,envelope_json,origin) VALUES(?,?,?,?,?,'export')`, id, spec.RecordType, columnID, spec.RecordRevision, body); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := EncodeMemoryExport(ctx, db, id); err == nil {
+				t.Fatal("export accepted invalid retained envelope")
+			}
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err := LocalEnvelopesForImport(ctx, tx, id); err == nil {
+				t.Fatal("import comparison accepted invalid retained envelope")
+			}
+		})
+	}
+}

@@ -82,7 +82,8 @@ func encodeMemoryExport(ctx context.Context, db *sql.DB, projectID string, readO
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&result.DatabaseSchema); err != nil {
 		return MemoryExport{}, err
 	}
-	specs, _, err := loadOperationalSpecs(ctx, tx, projectID, root, identity.LineageID, false)
+	validated := make(snapshotEncodings)
+	specs, _, err := loadOperationalSpecs(ctx, tx, projectID, root, identity.LineageID, false, validated)
 	if err != nil {
 		return MemoryExport{}, err
 	}
@@ -108,7 +109,7 @@ func encodeMemoryExport(ctx context.Context, db *sql.DB, projectID string, readO
 		return MemoryExport{}, err
 	}
 	for _, spec := range specs {
-		encoded, err := EncodeEnvelope(spec)
+		encoded, err := validated.encode(spec)
 		if err != nil {
 			return MemoryExport{}, fmt.Errorf("encode %s %s: %w", spec.RecordType, spec.RecordID, err)
 		}
@@ -142,28 +143,38 @@ func DecodeMemoryFile(relativePath string, body []byte) (EnvelopeSpec, error) {
 	if err != nil {
 		return EnvelopeSpec{}, err
 	}
-	var envelope Envelope
-	decoder := json.NewDecoder(bytes.NewReader(line))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&envelope); err != nil {
-		return EnvelopeSpec{}, fmt.Errorf("memory record %s: %w", relativePath, err)
-	}
-	recorded, err := parsePortableTime(envelope.RecordedAt)
+	spec, encoded, err := decodeMemoryEnvelope(line)
 	if err != nil {
 		return EnvelopeSpec{}, fmt.Errorf("memory record %s: %w", relativePath, err)
-	}
-	spec := EnvelopeSpec{LineageID: envelope.LineageID, RecordType: envelope.RecordType, RecordSchemaVersion: envelope.RecordSchemaVersion, RecordID: envelope.RecordID, RecordRevision: envelope.RecordRevision, RecordedAt: recorded, Authority: envelope.Authority, Index: envelope.Index, Refs: envelope.Refs, Payload: envelope.Payload}
-	encoded, err := EncodeEnvelope(spec)
-	if err != nil {
-		return EnvelopeSpec{}, fmt.Errorf("memory record %s: %w", relativePath, err)
-	}
-	if !bytes.Equal(encoded.Bytes, line) {
-		return EnvelopeSpec{}, fmt.Errorf("memory record %s is not a canonical envelope", relativePath)
 	}
 	if filepath.ToSlash(MemoryRecordPath(encoded.Envelope)) != filepath.ToSlash(relativePath) {
 		return EnvelopeSpec{}, fmt.Errorf("memory record %s is stored at the wrong path", relativePath)
 	}
 	return spec, nil
+}
+
+// decodeMemoryEnvelope retains the encoding produced by full canonical and hash
+// validation, so snapshot consumers do not need to encode the same record again.
+func decodeMemoryEnvelope(line []byte) (EnvelopeSpec, EncodedEnvelope, error) {
+	var envelope Envelope
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil {
+		return EnvelopeSpec{}, EncodedEnvelope{}, err
+	}
+	recorded, err := parsePortableTime(envelope.RecordedAt)
+	if err != nil {
+		return EnvelopeSpec{}, EncodedEnvelope{}, err
+	}
+	spec := EnvelopeSpec{LineageID: envelope.LineageID, RecordType: envelope.RecordType, RecordSchemaVersion: envelope.RecordSchemaVersion, RecordID: envelope.RecordID, RecordRevision: envelope.RecordRevision, RecordedAt: recorded, Authority: envelope.Authority, Index: envelope.Index, Refs: envelope.Refs, Payload: envelope.Payload}
+	encoded, err := EncodeEnvelope(spec)
+	if err != nil {
+		return EnvelopeSpec{}, EncodedEnvelope{}, err
+	}
+	if !bytes.Equal(encoded.Bytes, line) {
+		return EnvelopeSpec{}, EncodedEnvelope{}, fmt.Errorf("not a canonical envelope")
+	}
+	return spec, encoded, nil
 }
 
 // DecodeStoredMemoryEnvelope reads immutable historical fork observations.
@@ -186,11 +197,8 @@ func DecodeStoredMemoryEnvelope(line []byte) (EnvelopeSpec, error) {
 
 // DecodeMemoryEnvelope is the current-format network/import reader.
 func DecodeMemoryEnvelope(line []byte) (EnvelopeSpec, error) {
-	var envelope Envelope
-	if err := json.Unmarshal(line, &envelope); err != nil {
-		return EnvelopeSpec{}, err
-	}
-	return DecodeMemoryFile(MemoryRecordPath(envelope), append(append([]byte(nil), line...), '\n'))
+	spec, _, err := decodeMemoryEnvelope(line)
+	return spec, err
 }
 
 // LocalEnvelopes returns the project's own encoded records keyed by
