@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
+	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/updatecheck"
 	"github.com/spf13/cobra"
 )
@@ -51,6 +52,79 @@ func updateCommand() *cobra.Command {
 	check.Flags().StringVar(&artifact, "artifact", "", "downloaded platform bundle to verify against manifest")
 	check.Flags().StringVar(&target, "target", runtime.GOOS+"/"+runtime.GOARCH, "binary platform in manifest")
 	check.Flags().StringVar(&output, "output", "text", "text or json")
-	parent.AddCommand(check)
+	parent.AddCommand(check, updateConfigureCommand(), updateStatusCommand())
 	return parent
+}
+
+func updateConfigureCommand() *cobra.Command {
+	c := updatecheck.DefaultAutomaticConfig()
+	cmd := &cobra.Command{Use: "configure", Short: "Configure engineer-wide opt-in session-start update checks", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		dir, err := config.GlobalDir()
+		if err != nil {
+			return err
+		}
+		previous, err := updatecheck.LoadAutomaticConfig(dir)
+		if err != nil {
+			return err
+		}
+		if !cmd.Flags().Changed("enabled") {
+			c.Enabled = previous.Enabled
+		}
+		if !cmd.Flags().Changed("source-root") {
+			c.SourceRoot = previous.SourceRoot
+		}
+		if !cmd.Flags().Changed("fetch") {
+			c.Fetch = previous.Fetch
+		}
+		if !cmd.Flags().Changed("remote") {
+			c.Remote = previous.Remote
+		}
+		if !cmd.Flags().Changed("branch") {
+			c.Branch = previous.Branch
+		}
+		if !cmd.Flags().Changed("interval") {
+			c.Interval = previous.Interval
+		}
+		if !cmd.Flags().Changed("timeout") {
+			c.Timeout = previous.Timeout
+		}
+		if err := updatecheck.SaveAutomaticConfig(dir, c); err != nil {
+			return err
+		}
+		return writeJSON(cmd.OutOrStdout(), c)
+	}}
+	cmd.Flags().BoolVar(&c.Enabled, "enabled", false, "enable session-start checks; false disables them")
+	cmd.Flags().StringVar(&c.SourceRoot, "source-root", "", "absolute Llewm checkout, independent of active project")
+	cmd.Flags().BoolVar(&c.Fetch, "fetch", false, "contact the selected configured remote branch")
+	cmd.Flags().StringVar(&c.Remote, "remote", c.Remote, "configured source remote")
+	cmd.Flags().StringVar(&c.Branch, "branch", c.Branch, "source branch for fetch")
+	cmd.Flags().StringVar(&c.Interval, "interval", c.Interval, "minimum time between checks (1m to 720h)")
+	cmd.Flags().StringVar(&c.Timeout, "timeout", c.Timeout, "check timeout (100ms to 10s)")
+	return cmd
+}
+
+func updateStatusCommand() *cobra.Command {
+	return &cobra.Command{Use: "status", Short: "Read automatic-check settings without checking or contacting a remote", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		dir, err := config.GlobalDir()
+		if err != nil {
+			return err
+		}
+		c, err := updatecheck.LoadAutomaticConfig(dir)
+		if err != nil {
+			return err
+		}
+		return writeJSON(cmd.OutOrStdout(), c)
+	}}
+}
+
+func sessionStartUpdate(ctx context.Context) string {
+	dir, err := config.GlobalDir()
+	if err != nil {
+		return "Llewm automatic update check unavailable: global configuration could not be resolved."
+	}
+	r, err := updatecheck.Automatic(ctx, dir, buildinfo.Current(), time.Now())
+	if err != nil {
+		return "Llewm automatic update check unavailable: inspect llewm update status and global update-check configuration."
+	}
+	return r.Line()
 }

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/gitenv"
@@ -59,13 +60,26 @@ var remotePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 // Source compares against checkout HEAD, or with fetch against the exact fetched
 // branch tip. Fetch only updates Git objects/FETCH_HEAD; it never merges or resets.
 func Source(ctx context.Context, installed buildinfo.Info, root, remote, branch string, fetch bool) (Report, error) {
+	return source(ctx, installed, root, remote, branch, fetch, true)
+}
+
+func source(ctx context.Context, installed buildinfo.Info, root, remote, branch string, fetch, interactive bool) (Report, error) {
 	r := Report{Method: "source", Installed: installed, PublisherAuthentication: "not_verified"}
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return r, err
 	}
 	run := func(args ...string) (string, error) {
-		out, err := gitenv.Command(ctx, append([]string{"-C", root}, args...)...).Output()
+		prefix := []string{"-C", root}
+		if !interactive {
+			prefix = append(prefix, "-c", "core.askPass=", "-c", "credential.interactive=false")
+		}
+		command := gitenv.Command(ctx, append(prefix, args...)...)
+		command.WaitDelay = time.Second
+		if !interactive {
+			command.Env = append(command.Env, "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
+		}
+		out, err := command.Output()
 		if err != nil {
 			return "", fmt.Errorf("git %s failed: %w", args[0], err)
 		}

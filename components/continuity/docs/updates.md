@@ -40,6 +40,40 @@ installation resource for the current host. Reuse that evidence on later updates
 if it is absent, ask for the source location once rather than hunting for it.
 The check command itself needs no initialized project database or model.
 
+## Automatic availability reports
+
+Checks are disabled by default. Opt in once per engineer installation, using an
+explicit Llewm source checkout (not the project currently using Llewm):
+
+```sh
+llewm update configure --enabled --source-root /absolute/path/to/llewm --interval 24h
+llewm update configure --fetch --remote origin --branch main
+llewm update status
+llewm update configure --enabled=false
+```
+
+The first command compares local checkout HEAD. The second additionally opts in
+to fetching the selected configured remote branch. Settings not supplied to
+`configure` are preserved. Settings live in `update-check.json` under the global
+Continuity configuration directory, alongside engineer guidance; they are not
+synced project policy. `status` reads settings without performing a check.
+
+Full-mode Codex and Claude Code SessionStart hooks check when the interval has
+elapsed and append a timestamped result to the session context. Cached results,
+including failures, are reused across projects until the next check is due.
+Changing settings or installed build identity invalidates the cache. Simultaneous
+session starts may perform duplicate checks; results are published atomically.
+Nothing runs on a timer while no sessions start, in audit-only mode, or from
+read-only MCP/bootstrap calls. Hook/plugin adoption still needs its usual setup.
+
+The interval accepts `1m` through `720h`; `--timeout` accepts `100ms` through `10s`
+and defaults to `3s`. Automatic Git checks disable interactive credential prompts;
+timeouts and offline failures report `unavailable` without failing bootstrap
+delivery. Checks never apply updates. A local checkout comparison does not
+establish the latest upstream version; use explicit fetch for that remote/branch.
+Binary manifests remain available through manual `update check`; there is no
+automatic release feed yet.
+
 The agent prepares a separate clean checkout of the exact selected commit,
 preserves dirty user work, runs required checks, builds into a separate candidate
 path, and verifies the candidate identity before touching the installed binary.
@@ -112,5 +146,6 @@ Invoking the update skill authorizes the requested update within the user's
 stated scope; it does not create a standing grant for future updates, change plan
 delegation, or authorize publication. Existing explicit grants can cover routine
 agent-led updates and migrations. Other users need no knowledge of this project's
-private development/test-box procedures. Installation checks run only on explicit
-request; recurring checks/automatic application require their own opt-in design.
+private development/test-box procedures. Availability checks run manually or
+through the opt-in session-start setting above. Applying updates still requires
+authorization.

@@ -1539,6 +1539,9 @@ func hookCommand() *cobra.Command {
 					if syncLine != "" {
 						markdown += "\n" + syncLine + "\n"
 					}
+					if line := sessionStartUpdate(cmd.Context()); line != "" {
+						markdown += "\n" + line + "\n"
+					}
 					if line := worknarrative.UnnarratedLine(application.UnnarratedCommits(cmd.Context())); line != "" {
 						markdown += "\n" + line + "\n"
 					}
