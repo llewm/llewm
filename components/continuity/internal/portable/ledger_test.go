@@ -1,6 +1,7 @@
 package portable
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,25 @@ func TestLedgerDecisionsAndTopicsRoundTrip(t *testing.T) {
 	if strings.Contains(string(bundle.RecordsBytes), projectID) {
 		t.Fatal("ledger export leaked the source project ID")
 	}
+	// Retention may avoid reconstruction, but must preserve every family and
+	// its references, including topic revisions and decision supersessions.
+	retained, err := EncodeMemoryExport(ctx, db, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stable, err := EncodeMemoryExport(ctx, db, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, spec := range loaded.Records {
+		want, err := EncodeEnvelope(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(want.Bytes, retained.Envelopes[i].Bytes) || !bytes.Equal(want.Bytes, stable.Envelopes[i].Bytes) {
+			t.Fatalf("retention changed %s %s", spec.RecordType, spec.RecordID)
+		}
+	}
 
 	targetCtx, targetDB, targetProject := operationalProject(t, "ledger-target")
 	targetIdentity, err := (Service{DB: targetDB}).Initialize(targetCtx, targetProject, lineage)
@@ -104,6 +124,30 @@ func TestLedgerDecisionsAndTopicsRoundTrip(t *testing.T) {
 	replay, err := ApplyOperationalImport(targetCtx, targetDB, targetProject, bundle.ManifestBytes, bundle.RecordsBytes, recorded.Add(4*time.Hour))
 	if err != nil || replay.Receipt == nil || replay.Receipt.AlreadyPresentRecords != len(bundle.Records) || replay.Receipt.AppendedRecords != 0 {
 		t.Fatalf("replay: %#v %v", replay, err)
+	}
+	// New operational identities must still be discovered after older ledger
+	// records have retained envelopes.
+	if _, err := decisions.Append(ctx, decision.Record{ProjectID: projectID, ID: "third", Title: "Third decision", Rationale: "Follow up", Disposition: "accepted", Actor: "owner", ActorType: "human", Authority: "caller_asserted", SupersedesID: "keep-cards-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := topics.Record(ctx, topic.Topic{ProjectID: projectID, ID: "cards", Title: "Cards revised", Status: "accepted", Creator: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	mixed, err := EncodeMemoryExport(ctx, db, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := map[string][]byte{}
+	for _, e := range mixed.Envelopes {
+		byKey[RecordKey(e.Envelope.RecordType, e.Envelope.RecordID, e.Envelope.RecordRevision)] = e.Bytes
+	}
+	if len(mixed.Envelopes) != len(stable.Envelopes)+2 || len(byKey[RecordKey("decision", "third", 0)]) == 0 || len(byKey[RecordKey("topic_revision", "cards", 3)]) == 0 {
+		t.Fatal("mixed export lost new ledger identities")
+	}
+	for _, e := range stable.Envelopes {
+		if !bytes.Equal(e.Bytes, byKey[RecordKey(e.Envelope.RecordType, e.Envelope.RecordID, e.Envelope.RecordRevision)]) {
+			t.Fatal("mixed export changed retained ledger bytes")
+		}
 	}
 }
 

@@ -87,6 +87,37 @@ var topicTargetKinds = []string{"roadmap_node", "narrative", "narrative_claim", 
 func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
 	text := func(value string) string { return portableReviewText(value, projectID, projectRoot) }
 	var specs []EnvelopeSpec
+	// Retained envelopes are authoritative for existing operational identities.
+	// Leave placeholders for retainedSpecs to validate and overlay, rather than
+	// rebuilding, redacting and canonicalizing bytes that it will replace.
+	retained := map[string]bool{}
+	retainedRows, err := source.QueryContext(ctx, `SELECT record_type,record_id,record_revision FROM portable_envelopes WHERE project_id=? AND record_type IN ('decision','topic_revision','topic_alias','topic_link')`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for retainedRows.Next() {
+		var kind, id string
+		var revision int
+		if err := retainedRows.Scan(&kind, &id, &revision); err != nil {
+			retainedRows.Close()
+			return nil, err
+		}
+		retained[RecordKey(kind, id, revision)] = true
+	}
+	if err := retainedRows.Err(); err != nil {
+		retainedRows.Close()
+		return nil, err
+	}
+	if err := retainedRows.Close(); err != nil {
+		return nil, err
+	}
+	appendRetained := func(kind, id string, revision int) bool {
+		if !retained[RecordKey(kind, id, revision)] {
+			return false
+		}
+		specs = append(specs, EnvelopeSpec{RecordType: kind, RecordID: id, RecordRevision: revision})
+		return true
+	}
 	rows, err := source.QueryContext(ctx, `SELECT id,title,rationale,disposition,actor,actor_type,authority,review_source,COALESCE(supersedes_id,''),recorded_at,schema_version FROM decision_records WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, err
@@ -98,6 +129,9 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		if err := rows.Scan(&value.ID, &value.Title, &value.Rationale, &value.Disposition, &value.Actor, &value.ActorType, &value.Authority, &value.ReviewSource, &value.SupersedesID, &recorded, &value.SchemaVersion); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if appendRetained("decision", value.ID, 0) {
+			continue
 		}
 		if value.RecordedAt, err = time.Parse(time.RFC3339Nano, recorded); err != nil {
 			rows.Close()
@@ -144,6 +178,9 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 			rows.Close()
 			return nil, err
 		}
+		if appendRetained("topic_revision", id, revision) {
+			continue
+		}
 		at, err := time.Parse(time.RFC3339Nano, recorded)
 		if err != nil {
 			rows.Close()
@@ -170,6 +207,9 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		if err := rows.Scan(&alias, &topicID, &creator, &recorded); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if appendRetained("topic_alias", alias, 0) {
+			continue
 		}
 		at, err := time.Parse(time.RFC3339Nano, recorded)
 		if err != nil {
@@ -198,6 +238,9 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		var payload topicLinkPayload
 		if err := rows.Scan(&id, &payload.TopicID, &payload.TargetKind, &payload.TargetID, &payload.TargetRevision, &payload.Status, &payload.Creator, &payload.Model, &authority, &payload.AcceptedFrom, &recorded); err != nil {
 			return nil, err
+		}
+		if appendRetained("topic_link", id, 0) {
+			continue
 		}
 		at, err := time.Parse(time.RFC3339Nano, recorded)
 		if err != nil {
