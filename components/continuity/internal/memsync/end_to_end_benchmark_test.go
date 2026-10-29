@@ -89,6 +89,66 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 	}
 }
 
+// Foreign arrivals are retained locally but cannot be relayed to this endpoint.
+// Seed their origin before capture, as an independent transport would, and time
+// the complete Git cycle after each arrival. Fixture writes stay outside both
+// the timer and the measured CPU label.
+func BenchmarkHistorySyncForeignResidual(b *testing.B) {
+	ctx := context.Background()
+	for _, size := range []int{500, 5669} {
+		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
+			m := newMachine(b, "foreign-benchmark", bareRemote(b))
+			archive, err := recordsync.OpenArchive(filepath.Join(b.TempDir(), "archive"), testLineage)
+			if err != nil {
+				b.Fatal(err)
+			}
+			m.syncer.Archive = &archive
+			captureForeign := func() {
+				export, err := portable.EncodeMemoryExport(ctx, m.db, m.project)
+				if err != nil {
+					b.Fatal(err)
+				}
+				for _, object := range export.Envelopes {
+					if _, err := archive.Put(object, "git:independent-fixture"); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			for i := 0; i < size; i++ {
+				m.decide(b, fmt.Sprintf("foreign-%04d", i), "Foreign observation")
+			}
+			captureForeign()
+			for i := 0; i < 2; i++ {
+				m.sync(b, OutcomeSynced)
+			}
+			var before int
+			if err := m.db.QueryRow(`SELECT COUNT(*) FROM history_index_records`).Scan(&before); err != nil {
+				b.Fatal(err)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				m.decide(b, fmt.Sprintf("foreign-new-%06d", i), "Foreign arrival")
+				captureForeign()
+				b.StartTimer()
+				pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(context.Context) {
+					result := m.sync(b, OutcomeSynced)
+					if result.Unchanged || result.ExportedRecords != 0 {
+						b.Fatalf("foreign arrival skipped or relayed: %+v", result)
+					}
+				})
+			}
+			b.StopTimer()
+			var rows, unique int
+			if err := m.db.QueryRow(`SELECT COUNT(*),COUNT(DISTINCT envelope_hash) FROM history_index_records`).Scan(&rows, &unique); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportMetric(float64(rows-before)/float64(b.N), "index_rows/arrival")
+			b.ReportMetric(float64(rows)/float64(unique), "rows/unique")
+		})
+	}
+}
+
 // Compare the same steady-state workflow with and without a persisted
 // completion proof. Proof deletion is outside the measured full-cycle time.
 func BenchmarkHistorySyncUnchangedGate(b *testing.B) {

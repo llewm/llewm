@@ -155,6 +155,15 @@ reuse; refreshing or losing them does not change transport inputs. Block,
 record, reference, and endpoint publication inventories remain tracked so damage
 and pending delivery still invalidate completed transport proofs.
 
+Local import snapshots preserve stable block membership for both published
+records and records received through other destinations. Residual records use
+a device-local `local-snapshot:` membership in the derived publication catalog,
+so one foreign arrival adds a block for the new records instead of repacking
+old history. This membership never grants transport provenance or relay
+permission. Snapshots still validate archive bytes and indexed references;
+damaged inventories follow the existing repair path. Existing duplicate derived
+rows are not pruned by this change.
+
 Curated exports include a referenced creator invocation and its transitive
 parent invocations, loaded in bounded batches. Unrelated invocation activity
 is excluded. This preserves the attribution dependencies needed by a fresh

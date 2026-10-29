@@ -142,16 +142,33 @@ func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive
 			remaining = append(remaining, object)
 		}
 	}
-	extra, err := packValidatedBlocks(s.Lineage, remaining)
-	return blocks, append(all, extra...), err
+	if len(remaining) == 0 {
+		return blocks, all, nil
+	}
+	// Keep residual membership in the same derived catalog, under a local-only
+	// namespace that is never used as transport provenance. A foreign arrival
+	// must not repack every previous foreign record into another synthetic block.
+	// The scan already validated these exact archive bytes. Reuse that snapshot;
+	// the planner checks stored membership against it and packs only additions.
+	extra, err := s.planPublicationWithScanRecovery(ctx, archive, "local-snapshot:"+s.Lineage, true, nil, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+		return remaining, remaining, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return blocks, append(all, extra...), nil
 }
 
 func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, known []Block) ([]Block, error) {
+	return s.planPublicationWithScanRecovery(ctx, archive, endpoint, relay, inventory, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+		return archive.objectsWithBlocks(ctx, endpoint, relay, known)
+	})
+}
+
+func (s Index) planPublicationWithScanRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, scan func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error)) ([]Block, error) {
 	repaired := false
 	for attempt := 0; attempt < 3; attempt++ {
-		blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
-			return archive.objectsWithBlocks(ctx, endpoint, relay, known)
-		})
+		blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory, scan)
 		if errors.Is(err, errPublicationChanged) {
 			continue
 		}
