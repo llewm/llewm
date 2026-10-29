@@ -90,6 +90,28 @@ func warmUnchanged(t *testing.T, m machine) {
 	t.Fatal("steady state never used completion proof")
 }
 
+func TestUnchangedSyncIgnoresOtherProjectHistory(t *testing.T) {
+	m := newMachine(t, "project-isolation", bareRemote(t))
+	m.decide(t, "first", "Observation")
+	warmUnchanged(t, m)
+	if _, err := m.db.Exec(`INSERT INTO projects(id,root,name,created_at) VALUES('other','/other','Other','now')`); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.sync(t, OutcomeSynced); !got.Unchanged {
+		t.Fatalf("unrelated project invalidated history: %+v", got)
+	}
+	if _, err := m.db.Exec(`UPDATE projects SET name='Updated' WHERE id='other'`); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.sync(t, OutcomeSynced); !got.Unchanged {
+		t.Fatalf("unrelated revision invalidated history: %+v", got)
+	}
+	m.decide(t, "second", "Local observation")
+	if got := m.sync(t, OutcomeSynced); got.Unchanged || got.ExportedRecords == 0 {
+		t.Fatalf("local change was skipped: %+v", got)
+	}
+}
+
 func TestUnchangedSyncIgnoresReplayProofRefresh(t *testing.T) {
 	m := newMachine(t, "replay-proofs", bareRemote(t))
 	m.decide(t, "first", "Observation")

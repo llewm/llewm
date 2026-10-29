@@ -26,7 +26,7 @@ func TestSyncGenerationCoversSchema(t *testing.T) {
 	for _, name := range []string{"history_index_valid_sets", "history_index_narrative_tip", "history_index_narrative_members", "history_index_mixed_tip", "history_index_mixed_members"} {
 		excluded[name] = true
 	}
-	for _, name := range strings.Fields(`bootstrap_deliveries contract_index_entries events head_observations commit_authors presence_events sessions sync_attempts usage_requests usage_sources usage_tool_calls usage_tool_results roadmap_sync_files roadmap_sync_runs portable_import_receipts history_sync_generation history_sync_proofs schema_migrations`) {
+	for _, name := range strings.Fields(`bootstrap_deliveries contract_index_entries events head_observations commit_authors presence_events sessions sync_attempts usage_requests usage_sources usage_tool_calls usage_tool_results roadmap_sync_files roadmap_sync_runs portable_import_receipts history_sync_changes history_sync_generation history_sync_proofs schema_migrations`) {
 		excluded[name] = true
 	}
 	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
@@ -56,8 +56,11 @@ func TestSyncGenerationCoversSchema(t *testing.T) {
 		if count != 3 {
 			t.Errorf("table %s needs explicit sync invalidation classification", name)
 		}
-		var updateSQL string
+		var updateSQL, insertSQL string
 		if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE name=?`, "history_sync_"+name+"_update").Scan(&updateSQL); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE name=?`, "history_sync_"+name+"_insert").Scan(&insertSQL); err != nil {
 			t.Fatal(err)
 		}
 		columns, err := db.Query(`PRAGMA table_info("` + name + `")`)
@@ -73,6 +76,9 @@ func TestSyncGenerationCoversSchema(t *testing.T) {
 			}
 			if !strings.Contains(updateSQL, `old."`+column+`" IS NOT new."`+column+`"`) {
 				t.Errorf("%s.%s missing update invalidation", name, column)
+			}
+			if primaryKey != 0 && !strings.Contains(insertSQL, `new."`+column+`"`) {
+				t.Errorf("%s.%s missing journal identity", name, column)
 			}
 		}
 		if err := columns.Err(); err != nil {
@@ -92,12 +98,12 @@ func TestSyncGenerationIsTransactionalAndIgnoresNoopUpdates(t *testing.T) {
 	token := func() string {
 		t.Helper()
 		var value string
-		if err := db.QueryRow(`SELECT token FROM history_sync_generation WHERE id=1`).Scan(&value); err != nil {
+		if err := db.QueryRow(`SELECT token FROM history_sync_generation WHERE project_id='p'`).Scan(&value); err != nil {
 			t.Fatal(err)
 		}
 		return value
 	}
-	before := token()
+	before := ""
 	if _, err := db.Exec(`INSERT INTO projects(id,root,name,created_at) VALUES('p','/p','p','2026-10-28T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}

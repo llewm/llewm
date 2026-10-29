@@ -9,6 +9,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/config"
+	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
@@ -44,8 +45,10 @@ func (s Syncer) guard(ctx context.Context, repo git) (syncGuard, error) {
 	if err != nil {
 		return g, err
 	}
-	if err := s.DB.QueryRowContext(ctx, `SELECT token FROM history_sync_generation WHERE id=1`).Scan(&g.generation); err != nil {
-		return g, err
+	var generationErr error
+	g.generation, generationErr = database.SyncGeneration(ctx, s.DB, s.ProjectID)
+	if generationErr != nil {
+		return g, generationErr
 	}
 	g.tree, err = lineageTree(ctx, repo, "HEAD", identity.LineageID)
 	if err != nil {
@@ -131,5 +134,5 @@ func (s Syncer) rememberUnchanged(ctx context.Context, repo git, before syncGuar
 	}
 	// A concurrent canonical write changes the generation in the same SQLite
 	// transaction. Never bless that write by reading a newer token here.
-	_, _ = s.DB.ExecContext(ctx, `INSERT INTO history_sync_proofs(project_id,route,generation,tree,archive) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM history_sync_generation WHERE id=1 AND token=?) ON CONFLICT(project_id,route) DO UPDATE SET generation=excluded.generation,tree=excluded.tree,archive=excluded.archive`, s.ProjectID, before.route, before.generation, before.tree, before.archive, before.generation)
+	_ = database.RememberSyncProof(ctx, s.DB, s.ProjectID, before.route, before.generation, before.tree, before.archive)
 }

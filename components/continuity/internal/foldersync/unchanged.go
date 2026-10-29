@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
+	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
 
@@ -19,8 +20,10 @@ func (s Syncer) completionGuard(ctx context.Context) (completionGuard, error) {
 	}
 	body, _ := json.Marshal([]any{"folder-v1", build.GitCommit, recordsync.IndexVersion, s.Endpoint.ID(), s.Endpoint.Directory, s.Endpoint.LineageID, s.Endpoint.StoreID, s.Endpoint.Relay, s.Archive.Directory})
 	g.route = recordsync.Hash(string(body))
-	if err := s.DB.QueryRowContext(ctx, `SELECT token FROM history_sync_generation WHERE id=1`).Scan(&g.generation); err != nil {
-		return g, err
+	var generationErr error
+	g.generation, generationErr = database.SyncGeneration(ctx, s.DB, s.ProjectID)
+	if generationErr != nil {
+		return g, generationErr
 	}
 	var err error
 	g.endpoint, err = recordsync.DirectoryChangeStamp(ctx, s.Endpoint.Directory)
@@ -49,5 +52,5 @@ func (s Syncer) rememberCompletion(ctx context.Context, g completionGuard, resul
 	if err != nil || g.generation == "" || after != g {
 		return
 	}
-	_, _ = s.DB.ExecContext(ctx, `INSERT INTO history_sync_proofs(project_id,route,generation,tree,archive) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM history_sync_generation WHERE id=1 AND token=?) ON CONFLICT(project_id,route) DO UPDATE SET generation=excluded.generation,tree=excluded.tree,archive=excluded.archive`, s.ProjectID, g.route, g.generation, g.endpoint, g.archive, g.generation)
+	_ = database.RememberSyncProof(ctx, s.DB, s.ProjectID, g.route, g.generation, g.endpoint, g.archive)
 }

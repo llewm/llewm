@@ -101,8 +101,20 @@ can read every lineage stored there; lineage directories do not enforce access.
 Migration 081 adds device-local completion proofs for Git sync. SQL triggers
 change a durable token whenever canonical records, export dependencies, or the
 derived inventory change. Sync-attempt logs, raw telemetry, and other excluded
-bookkeeping do not invalidate the token. Tracking is conservative across the
-whole database: a relevant change in another project may cause a full cycle.
+bookkeeping do not invalidate the token. Migration 086 replaces the database-wide
+token with project-scoped generations and a device-local change journal. Each
+tracked write records its table, primary-key identity and operation in the same
+transaction; updates retain both old and new identities. Sequence numbers describe
+ingestion order, not event time. Tokens combine the project's generation with a
+global generation for changes whose ownership is global or not yet resolved.
+Changes in another known project no longer invalidate the proof. Missing tokens
+fail closed; journal edits or deletions invalidate proofs globally. The journal
+contains no record bodies and is not portable history or a peer receipt.
+
+This is the change-tracking foundation, not yet incremental export: changed
+cycles still use the full exporter and validated archive discovery. No journal
+cursor, pruning, hierarchical folder manifest or dependency-closure replay is
+enabled by this migration. Existing proofs are discarded during migration.
 Migration 082 narrows attribution tracking: raw invocation activity invalidates
 only when the invocation is already retained or referenced by indexed history.
 Adding a referring record invalidates independently. The generation also records

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
+	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
 
@@ -20,8 +21,10 @@ func (a Archive) captureGuard(ctx context.Context, db *sql.DB, projectID string)
 	}
 	body, _ := json.Marshal([]any{"capture-v1", build.GitCommit, a.Directory, a.Lineage})
 	g.route = Hash(string(body))
-	if err := db.QueryRowContext(ctx, `SELECT token FROM history_sync_generation WHERE id=1`).Scan(&g.generation); err != nil {
-		return g, err
+	var generationErr error
+	g.generation, generationErr = database.SyncGeneration(ctx, db, projectID)
+	if generationErr != nil {
+		return g, generationErr
 	}
 	var err error
 	g.archive, err = a.ChangeStamp(ctx)
@@ -63,7 +66,7 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 	if guardErr == nil && before.generation != "" && captureDependenciesClosed(export.Envelopes) {
 		after, err := a.captureGuard(ctx, db, projectID)
 		if err == nil && after == before {
-			_, _ = db.ExecContext(ctx, `INSERT INTO history_sync_proofs(project_id,route,generation,tree,archive) SELECT ?,?,?,'',? WHERE EXISTS(SELECT 1 FROM history_sync_generation WHERE id=1 AND token=?) ON CONFLICT(project_id,route) DO UPDATE SET generation=excluded.generation,archive=excluded.archive`, projectID, before.route, before.generation, before.archive, before.generation)
+			_ = database.RememberSyncProof(ctx, db, projectID, before.route, before.generation, "", before.archive)
 		}
 	}
 	return false, nil
