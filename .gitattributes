@@ -1,0 +1,2 @@
+# Plugin files must match the executable's embedded bytes on every platform.
+components/continuity/plugins/** text eol=lf
