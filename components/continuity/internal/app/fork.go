@@ -249,9 +249,9 @@ func (a *App) ResolveRevisionFork(ctx context.Context, subject, accept, resolver
 	}
 	spec.RecordRevision, spec.RecordedAt = latest+1, resolution.RecordedAt
 	resolution.Continuation = fork.RevisionSubject(recordType, recordID, spec.RecordRevision)
-	plan, _, err := portable.ImportMemoryRecordsWithin(ctx, a.DB, a.ProjectID, []portable.EnvelopeSpec{spec}, resolution.RecordedAt, func(ctx context.Context, tx *sql.Tx) error {
+	plan, _, err := portable.ImportMemoryRecordsWithin(ctx, a.DB, a.ProjectID, []portable.EnvelopeSpec{spec}, resolution.RecordedAt, portable.ImportMemoryHooks{Appended: func(ctx context.Context, tx *sql.Tx) error {
 		return fork.Insert(ctx, tx, resolution)
-	})
+	}})
 	if err != nil {
 		return RevisionForkResolution{}, err
 	}

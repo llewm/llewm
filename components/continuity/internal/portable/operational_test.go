@@ -107,7 +107,7 @@ func TestImportPlanRechecksAfterConcurrentCommit(t *testing.T) {
 	if err := conn.QueryRowContext(targetCtx, `PRAGMA data_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := planOperationalImport(targetCtx, conn, targetProject, bundle.ManifestBytes, bundle.RecordsBytes)
+	plan, err := planOperationalImport(targetCtx, conn, targetProject, bundle.ManifestBytes, bundle.RecordsBytes, nil)
 	if err != nil || !plan.ApplyAllowed || plan.Counts[PlanAppend] != 2 {
 		t.Fatalf("initial plan: %+v %v", plan, err)
 	}
@@ -126,7 +126,7 @@ func TestImportPlanRechecksAfterConcurrentCommit(t *testing.T) {
 	if err := cleanConn.QueryRowContext(cleanCtx, `PRAGMA data_version`).Scan(&cleanVersion); err != nil {
 		t.Fatal(err)
 	}
-	cleanPlan, err := planOperationalImport(cleanCtx, cleanConn, cleanProject, bundle.ManifestBytes, bundle.RecordsBytes)
+	cleanPlan, err := planOperationalImport(cleanCtx, cleanConn, cleanProject, bundle.ManifestBytes, bundle.RecordsBytes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

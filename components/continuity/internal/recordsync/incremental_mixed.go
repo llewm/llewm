@@ -120,7 +120,7 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 		}
 		specs = append(specs, spec)
 	}
-	update := func(ctx context.Context, tx *sql.Tx) error {
+	update := func(ctx context.Context, tx *sql.Tx, local map[string]portable.EncodedEnvelope) error {
 		var current, state string
 		if err := tx.QueryRowContext(ctx, `SELECT t.set_hash,v.local_state_hash FROM history_index_mixed_tip t JOIN history_index_valid_sets v ON v.project_id=t.project_id AND v.set_hash=t.set_hash AND v.index_version=t.index_version WHERE t.project_id=? AND t.index_version=?`, s.ProjectID, IndexVersion).Scan(&current, &state); err != nil || current != prior || state != priorState {
 			return errMixedProofChanged
@@ -154,9 +154,11 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM redaction_recoveries WHERE project_id=?`, s.ProjectID).Scan(&recoveries); err != nil || recoveries != 0 {
 			return errMixedProofChanged
 		}
-		local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
-		if err != nil {
-			return fmt.Errorf("%w: %v", errMixedProofChanged, err)
+		if local == nil {
+			local, err = portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+			if err != nil {
+				return fmt.Errorf("%w: %v", errMixedProofChanged, err)
+			}
 		}
 		for _, object := range objects {
 			e := object.Envelope
@@ -189,8 +191,11 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 	if s.Now != nil {
 		now = s.Now().UTC()
 	}
-	plan, receipt, err := portable.ImportMemoryRecordsWithin(ctx, s.DB, s.ProjectID, specs, now, update)
-	if errors.Is(err, errMixedProofChanged) {
+	plan, receipt, err := portable.ImportMemoryRecordsWithin(ctx, s.DB, s.ProjectID, specs, now, portable.ImportMemoryHooks{
+		Appended: func(ctx context.Context, tx *sql.Tx) error { return update(ctx, tx, nil) },
+		Present:  update,
+	})
+	if errors.Is(err, errMixedProofChanged) || errors.Is(err, portable.ErrImportSnapshotChanged) {
 		return ImportResult{}, false, nil
 	}
 	if err != nil {
@@ -198,24 +203,6 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 	}
 	if !plan.ApplyAllowed {
 		return ImportResult{}, false, nil
-	}
-	if receipt == nil {
-		tx, err := s.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return ImportResult{}, false, err
-		}
-		defer tx.Rollback()
-		if _, err := tx.ExecContext(ctx, `UPDATE history_index_mixed_tip SET index_version=index_version WHERE project_id=?`, s.ProjectID); err != nil {
-			return ImportResult{}, false, err
-		}
-		if err := update(ctx, tx); errors.Is(err, errMixedProofChanged) {
-			return ImportResult{}, false, nil
-		} else if err != nil {
-			return ImportResult{}, true, fmt.Errorf("%w: %v", ErrSemanticPending, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return ImportResult{}, true, err
-		}
 	}
 	var result ImportResult
 	if receipt != nil {

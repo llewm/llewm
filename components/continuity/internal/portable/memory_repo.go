@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -245,13 +246,21 @@ func RecordVersions(ctx context.Context, db *sql.DB, projectID, recordType, reco
 // applies it when the plan allows and something is new. The bundle is attributed
 // to the importing instance because records may come from many instances.
 func ImportMemoryRecords(ctx context.Context, db *sql.DB, projectID string, specs []EnvelopeSpec, at time.Time) (ImportPlan, *ImportReceipt, error) {
-	return ImportMemoryRecordsWithin(ctx, db, projectID, specs, at, nil)
+	return ImportMemoryRecordsWithin(ctx, db, projectID, specs, at, ImportMemoryHooks{})
 }
 
-// ImportMemoryRecordsWithin is ImportMemoryRecords with the caller's own writes
-// (within) in the import transaction. within runs only when records are
-// appended.
-func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string, specs []EnvelopeSpec, at time.Time, within func(context.Context, *sql.Tx) error) (ImportPlan, *ImportReceipt, error) {
+// ImportMemoryHooks runs caller writes atomically after appends, or verifies an
+// already-present set against the planner's unchanged local snapshot. Present
+// gets a writer lock and fails closed if another connection committed after
+// planning. It must not retain the snapshot beyond the callback.
+type ImportMemoryHooks struct {
+	Appended func(context.Context, *sql.Tx) error
+	Present  func(context.Context, *sql.Tx, map[string]EncodedEnvelope) error
+}
+
+var ErrImportSnapshotChanged = errors.New("import planning snapshot changed")
+
+func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string, specs []EnvelopeSpec, at time.Time, hooks ImportMemoryHooks) (ImportPlan, *ImportReceipt, error) {
 	// SQLite's data_version is meaningful only on the same connection. Keep
 	// this connection through planning and writer acquisition; if any other
 	// connection commits, apply must replan under the writer transaction.
@@ -281,16 +290,51 @@ func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string
 	}
 	var dataVersion int64
 	versionErr := conn.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&dataVersion)
-	plan, err := planOperationalImport(ctx, conn, projectID, bundle.ManifestBytes, bundle.RecordsBytes)
-	if err != nil || !plan.ApplyAllowed || plan.Counts[PlanAppend] == 0 {
+	var snapshot map[string]EncodedEnvelope
+	var capture *map[string]EncodedEnvelope
+	if hooks.Present != nil {
+		capture = &snapshot
+	}
+	plan, err := planOperationalImport(ctx, conn, projectID, bundle.ManifestBytes, bundle.RecordsBytes, capture)
+	if err != nil || !plan.ApplyAllowed {
 		return plan, nil, err
+	}
+	if plan.Counts[PlanAppend] == 0 {
+		if hooks.Present == nil {
+			return plan, nil, nil
+		}
+		if versionErr != nil {
+			return plan, nil, ErrImportSnapshotChanged
+		}
+		return plan, nil, verifyPresentSnapshot(ctx, conn, projectID, dataVersion, snapshot, hooks.Present)
 	}
 	var previous *reusableImportPlan
 	if versionErr == nil {
 		previous = newReusableImportPlan(plan, dataVersion, projectID, bundle.ManifestBytes, bundle.RecordsBytes)
 	}
-	applied, err := applyOperationalImportWithPlan(ctx, conn, projectID, bundle.ManifestBytes, bundle.RecordsBytes, at, within, previous)
+	applied, err := applyOperationalImportWithPlan(ctx, conn, projectID, bundle.ManifestBytes, bundle.RecordsBytes, at, hooks.Appended, previous)
 	return applied.Plan, applied.Receipt, err
+}
+
+func verifyPresentSnapshot(ctx context.Context, conn *sql.Conn, projectID string, version int64, snapshot map[string]EncodedEnvelope, within func(context.Context, *sql.Tx, map[string]EncodedEnvelope) error) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Acquire the writer before checking data_version on this same pinned
+	// connection. No canonical writes occur between planning and this guard.
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET name=name WHERE id=? AND 0`, projectID); err != nil {
+		return err
+	}
+	var current int64
+	if err := tx.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&current); err != nil || current != version {
+		return ErrImportSnapshotChanged
+	}
+	if err := within(ctx, tx, snapshot); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 var transportRecordTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)

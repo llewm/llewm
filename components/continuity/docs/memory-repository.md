@@ -155,6 +155,14 @@ reuse; refreshing or losing them does not change transport inputs. Block,
 record, reference, and endpoint publication inventories remain tracked so damage
 and pending delivery still invalidate completed transport proofs.
 
+For independent additions to a previously proven mixed set, verification can
+reuse the import planner's complete local snapshot when every incoming record
+is already present. The same SQLite connection stays pinned through planning
+and writer-lock acquisition; any intervening commit invalidates reuse through
+`data_version` and takes the reference fallback. Membership, canonical bytes,
+references, recovery state and fork checks still apply. Appends continue to
+verify fresh post-write state; this snapshot is never reused across imports.
+
 Local import snapshots preserve stable block membership for both published
 records and records received through other destinations. Residual records use
 a device-local `local-snapshot:` membership in the derived publication catalog,

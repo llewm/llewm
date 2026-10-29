@@ -127,7 +127,7 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 	if previous != nil && previous.projectID == projectID && previous.manifestHash == sha256.Sum256(manifestBytes) && previous.recordsHash == sha256.Sum256(recordsBytes) && tx.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&dataVersion) == nil && dataVersion == previous.dataVersion {
 		plan = previous.plan
 	} else {
-		plan, err = planValidatedOperationalImport(ctx, tx, projectID, bundle)
+		plan, err = planValidatedOperationalImport(ctx, tx, projectID, bundle, nil)
 		if err != nil {
 			return ImportApplyResult{}, err
 		}

@@ -179,7 +179,7 @@ func (s Index) tryNarrativeAdditions(ctx context.Context, setHash string, object
 	if s.Now != nil {
 		now = s.Now().UTC()
 	}
-	plan, receipt, err := portable.ImportMemoryRecordsWithin(ctx, s.DB, s.ProjectID, specs, now, update)
+	plan, receipt, err := portable.ImportMemoryRecordsWithin(ctx, s.DB, s.ProjectID, specs, now, portable.ImportMemoryHooks{Appended: update})
 	if errors.Is(err, errNarrativeProofChanged) {
 		return ImportResult{}, false, nil
 	}

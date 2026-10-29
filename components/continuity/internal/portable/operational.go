@@ -577,14 +577,14 @@ type ImportPlan struct {
 }
 
 func PlanOperationalImport(ctx context.Context, db *sql.DB, projectID string, manifestBytes, recordsBytes []byte) (ImportPlan, error) {
-	return planOperationalImport(ctx, db, projectID, manifestBytes, recordsBytes)
+	return planOperationalImport(ctx, db, projectID, manifestBytes, recordsBytes, nil)
 }
 
 type transactionStarter interface {
 	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 }
 
-func planOperationalImport(ctx context.Context, db transactionStarter, projectID string, manifestBytes, recordsBytes []byte) (ImportPlan, error) {
+func planOperationalImport(ctx context.Context, db transactionStarter, projectID string, manifestBytes, recordsBytes []byte, snapshot *map[string]EncodedEnvelope) (ImportPlan, error) {
 	bundle, err := ValidateBundle(manifestBytes, recordsBytes)
 	if err != nil {
 		return invalidImportPlan(projectID, err), nil
@@ -598,7 +598,7 @@ func planOperationalImport(ctx context.Context, db transactionStarter, projectID
 		return ImportPlan{}, err
 	}
 	defer tx.Rollback()
-	plan, err := planValidatedOperationalImport(ctx, tx, projectID, bundle)
+	plan, err := planValidatedOperationalImport(ctx, tx, projectID, bundle, snapshot)
 	if err != nil {
 		return ImportPlan{}, err
 	}
@@ -624,7 +624,7 @@ func planAppendKeys(plan ImportPlan) map[string]struct{} {
 	return keys
 }
 
-func planValidatedOperationalImport(ctx context.Context, source queryer, projectID string, bundle Bundle) (ImportPlan, error) {
+func planValidatedOperationalImport(ctx context.Context, source queryer, projectID string, bundle Bundle, snapshot *map[string]EncodedEnvelope) (ImportPlan, error) {
 	identity, err := identityFrom(ctx, source, projectID)
 	if err != nil {
 		return ImportPlan{}, err
@@ -650,6 +650,9 @@ func planValidatedOperationalImport(ctx context.Context, source queryer, project
 		local[recordKey(encoded.Envelope)] = encoded
 	}
 	counts := emptyPlanCounts()
+	if snapshot != nil {
+		*snapshot = local
+	}
 	items := make([]ImportPlanItem, 0, len(bundle.Records))
 	applyAllowed := true
 	for _, incoming := range bundle.Records {
