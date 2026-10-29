@@ -102,9 +102,6 @@ func WriteFile(root *os.Root, path string, body []byte, replace bool) (bool, err
 		return false, fmt.Errorf("unsafe transport path")
 	}
 	parent := filepath.Dir(path)
-	if err := root.MkdirAll(parent, 0700); err != nil {
-		return false, err
-	}
 	if !replace {
 		existing, err := ReadFile(root, path, len(body))
 		if err == nil {
@@ -116,6 +113,11 @@ func WriteFile(root *os.Root, path string, body []byte, replace bool) (bool, err
 		if !errors.Is(err, os.ErrNotExist) {
 			return false, err
 		}
+	}
+	// Existing immutable files need no directory mutation. Keep the bounded,
+	// rooted byte comparison above, including errors for damaged files.
+	if err := root.MkdirAll(parent, 0700); err != nil {
+		return false, err
 	}
 	id, err := NewID()
 	if err != nil {
