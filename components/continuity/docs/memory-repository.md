@@ -118,8 +118,14 @@ consumers replay their unacknowledged changes. Missing or damaged cursors, globa
 changes, archive changes and oversized deltas require complete validation.
 Local capture consumes index-only changes without rebuilding canonical exports;
 Git and folder sync share this capture path. Canonical changes still use the
-complete exporter. Cursor advancement requires a stable archive stamp, so this
-does not yet enable canonical export deltas, hierarchical folder manifests,
+complete exporter. Capture may advance its archive stamp across its own new
+record/provenance files only after accounting for the exact additions, validating
+their bytes, and checking that all pre-existing files retain their metadata
+identities. Unexpected changes, including concurrent foreign provenance, decline
+the optimization. Parent directories may change timestamps and size but must
+retain their device, inode and mode. Tracking starts only before an actual file
+creation; platforms without change-time identities retain complete validation.
+This does not yet enable canonical export deltas, hierarchical folder manifests,
 dependency-closure replay or journal pruning. Existing proofs are discarded by
 migration 086; capture-v2 does not reuse earlier capture proofs.
 Migration 082 narrows attribution tracking: raw invocation activity invalidates

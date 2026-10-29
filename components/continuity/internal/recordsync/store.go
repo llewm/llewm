@@ -98,6 +98,10 @@ func ReadFile(root *os.Root, path string, limit int) ([]byte, error) {
 // an exclusive hard link and never replaces an existing file. A filesystem that
 // cannot provide this operation fails closed instead of weakening publication.
 func WriteFile(root *os.Root, path string, body []byte, replace bool) (bool, error) {
+	return writeFile(root, path, body, replace, nil)
+}
+
+func writeFile(root *os.Root, path string, body []byte, replace bool, beforeCreate func()) (bool, error) {
 	if !filepath.IsLocal(path) {
 		return false, fmt.Errorf("unsafe transport path")
 	}
@@ -116,6 +120,9 @@ func WriteFile(root *os.Root, path string, body []byte, replace bool) (bool, err
 	}
 	// Existing immutable files need no directory mutation. Keep the bounded,
 	// rooted byte comparison above, including errors for damaged files.
+	if beforeCreate != nil {
+		beforeCreate()
+	}
 	if err := root.MkdirAll(parent, 0700); err != nil {
 		return false, err
 	}
@@ -338,15 +345,23 @@ func (a Archive) putValidated(validated portable.EncodedEnvelope, origin string)
 }
 
 func putValidatedRoot(root *os.Root, validated portable.EncodedEnvelope, origin string) (bool, error) {
+	return putValidatedRootObserved(root, validated, origin, nil)
+}
+
+func putValidatedRootObserved(root *os.Root, validated portable.EncodedEnvelope, origin string, beforeCreate func()) (bool, error) {
 	// Record provenance first, so a crash cannot turn a received object into a
 	// locally originated object during the next operational export.
 	marker := filepath.Join("origins", validated.Envelope.EnvelopeSHA256, Hash(origin))
-	if _, err := WriteFile(root, marker, []byte("observed\n"), false); err != nil {
+	if _, err := writeFile(root, marker, []byte("observed\n"), false, beforeCreate); err != nil {
 		return false, err
 	}
-	return WriteFile(root, portable.MemoryRecordPath(validated.Envelope), portable.MemoryFileBytes(validated), false)
+	return writeFile(root, portable.MemoryRecordPath(validated.Envelope), portable.MemoryFileBytes(validated), false, beforeCreate)
 }
 func (a Archive) CaptureLocal(envelopes []portable.EncodedEnvelope) error {
+	return a.captureLocal(envelopes, nil)
+}
+
+func (a Archive) captureLocal(envelopes []portable.EncodedEnvelope, beforeCreate func()) error {
 	root, err := OpenRoot(a.Directory)
 	if err != nil {
 		return err
@@ -355,13 +370,20 @@ func (a Archive) CaptureLocal(envelopes []portable.EncodedEnvelope) error {
 	for _, e := range envelopes {
 		_, err := root.Lstat(filepath.Join("origins", e.Envelope.EnvelopeSHA256))
 		if errors.Is(err, os.ErrNotExist) {
-			if _, err := a.Put(e, "local"); err != nil {
+			validated, err := portable.DecodeTransportEnvelope(e.Bytes)
+			if err != nil {
+				return err
+			}
+			if validated.Envelope.LineageID != a.Lineage {
+				return fmt.Errorf("archive lineage mismatch")
+			}
+			if _, err := putValidatedRootObserved(root, validated, "local", beforeCreate); err != nil {
 				return err
 			}
 		} else if err != nil {
 			return err
 		} else {
-			if _, err := WriteFile(root, portable.MemoryRecordPath(e.Envelope), portable.MemoryFileBytes(e), false); err != nil {
+			if _, err := writeFile(root, portable.MemoryRecordPath(e.Envelope), portable.MemoryFileBytes(e), false, beforeCreate); err != nil {
 				return err
 			}
 		}

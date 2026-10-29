@@ -21,9 +21,23 @@ func (a Archive) ChangeStamp(ctx context.Context) (string, error) {
 // DirectoryChangeStamp also supports endpoint guards. It establishes only
 // local filesystem stability, never provider delivery or peer receipt.
 func DirectoryChangeStamp(ctx context.Context, directory string) (string, error) {
+	stamp, _, err := directoryChangeSnapshot(ctx, directory, false)
+	return stamp, err
+}
+
+type archiveMetadata struct {
+	identity  [8]uint64
+	directory bool
+}
+
+func directoryChangeSnapshot(ctx context.Context, directory string, retain bool) (string, map[string]archiveMetadata, error) {
+	var snapshot map[string]archiveMetadata
+	if retain {
+		snapshot = make(map[string]archiveMetadata)
+	}
 	root, err := OpenRoot(directory)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer root.Close()
 	h := sha256.New()
@@ -58,6 +72,9 @@ func DirectoryChangeStamp(ctx context.Context, directory string) (string, error)
 		if !ok {
 			return fmt.Errorf("archive change identity unavailable")
 		}
+		if retain {
+			snapshot[path] = archiveMetadata{identity: identity, directory: info.IsDir()}
+		}
 		for i, value := range identity {
 			binary.BigEndian.PutUint64(identityBytes[i*8:], value)
 		}
@@ -67,7 +84,7 @@ func DirectoryChangeStamp(ctx context.Context, directory string) (string, error)
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(h.Sum(nil)), snapshot, nil
 }

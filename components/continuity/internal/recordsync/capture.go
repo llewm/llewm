@@ -65,13 +65,34 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 	if export.Identity.LineageID != a.Lineage {
 		return false, fmt.Errorf("project lineage changed during export")
 	}
-	if err := a.CaptureLocal(export.Envelopes); err != nil {
+	var publication *capturePublication
+	var beforeCreate func()
+	eligible := guardErr == nil && before.generation != "" && cursor.Generation == before.generation && captureDependenciesClosed(export.Envelopes)
+	if eligible {
+		// The exporter may itself retain new envelopes. Do not build a
+		// filesystem receipt for a database snapshot it already invalidated.
+		generation, err := database.SyncGeneration(ctx, db, projectID)
+		eligible = err == nil && generation == before.generation
+		if eligible {
+			// Snapshot only before the first actual publication. Revalidating
+			// existing immutable files needs no metadata maps or extra walks.
+			attempted := false
+			beforeCreate = func() {
+				if !attempted {
+					attempted = true
+					publication = a.prepareCapturePublication(ctx, before.archive, export.Envelopes)
+				}
+			}
+		}
+	}
+	if err := a.captureLocal(export.Envelopes, beforeCreate); err != nil {
 		return false, err
 	}
-	if guardErr == nil && before.generation != "" && captureDependenciesClosed(export.Envelopes) {
+	if eligible {
+		published := publication.completedStamp(ctx, a)
 		after, err := a.captureGuard(ctx, db, projectID)
-		if err == nil && after == before && cursor.Generation == before.generation {
-			_, _ = database.RememberSyncCursor(ctx, db, cursor, before.archive)
+		if err == nil && after.route == before.route && after.generation == before.generation && cursor.Generation == before.generation && (after.archive == before.archive || published != "" && after.archive == published) {
+			_, _ = database.RememberSyncCursor(ctx, db, cursor, after.archive)
 		}
 	}
 	return false, nil
