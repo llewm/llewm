@@ -214,6 +214,18 @@ permission. Snapshots still validate archive bytes and indexed references;
 damaged inventories follow the existing repair path. Existing duplicate derived
 rows are not pruned by this change.
 
+Within a locked Git block cycle, tracked-path discovery reuses immutable Git
+tree nodes. The tree is taken from the index, including staged additions and
+deletions, rather than assuming HEAD describes interrupted publication state.
+Unchanged subtrees reuse membership; changed nodes are listed again. Uncertain
+or unmerged indexes and discovery limits fall back to the complete tracked-path
+listing. Paths use NUL delimiters. Every discovered block still undergoes the
+ordinary working-file and content validation, so a tree cache cannot conceal
+missing or corrupt working files. The cache ends with the cycle. This is a
+precursor to durable manifests; the current flat block namespace and complete
+content validation still visit old history. It does not establish fixed-delta
+scaling or replace full recovery.
+
 Curated exports include a referenced creator invocation and its transitive
 parent invocations, loaded in bounded batches. Unrelated invocation activity
 is excluded. This preserves the attribution dependencies needed by a fresh

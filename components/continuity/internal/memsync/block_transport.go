@@ -53,7 +53,7 @@ func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string,
 	if err != nil {
 		return nil, err
 	}
-	listing, err := repo.run(ctx, "ls-files", "--", directory)
+	paths, err := s.trackedBlockPaths(ctx, repo, directory)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string,
 	var blocks []recordsync.Block
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
 	count, total := 0, 0
-	for _, path := range strings.Fields(listing) {
+	for _, path := range paths {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

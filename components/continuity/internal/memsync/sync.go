@@ -264,6 +264,8 @@ type Syncer struct {
 	Leases  *lease.Service
 	Archive *recordsync.Archive
 	Relay   bool
+	// discovery is owned by one locked block cycle, never shared across syncs.
+	discovery *blockTreeDiscovery
 }
 
 // Result describes one sync attempt.

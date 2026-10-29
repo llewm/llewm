@@ -29,6 +29,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		return result, err
 	}
 	defer lock.Close()
+	s.discovery = &blockTreeDiscovery{}
 	before, guardErr := s.guard(local, repo)
 	prefetched := false
 	if !p.convert && guardErr == nil {
