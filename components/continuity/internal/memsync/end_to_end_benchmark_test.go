@@ -7,6 +7,7 @@ import (
 	"runtime/pprof"
 	"testing"
 
+	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
@@ -149,13 +150,24 @@ func BenchmarkHistorySyncForeignResidual(b *testing.B) {
 	}
 }
 
-// Compare the same steady-state workflow with and without a persisted
-// completion proof. Proof deletion is outside the measured full-cycle time.
+// Compare a proof hit with a missing proof and a changed build identity. Only
+// the build identity changes in build_miss; existing derived inventories and
+// semantic replay proofs remain available. Setup and invalidation stay outside
+// both the timer and the measured profile labels. Do not run these sub-benchmarks
+// in parallel: buildinfo.Commit represents the process-wide executable identity.
 func BenchmarkHistorySyncUnchangedGate(b *testing.B) {
 	ctx := context.Background()
-	for _, cached := range []bool{false, true} {
-		b.Run(fmt.Sprintf("proof_%t", cached), func(b *testing.B) {
+	for _, mode := range []string{"hit", "deleted", "build_miss"} {
+		b.Run(mode, func(b *testing.B) {
+			original := buildinfo.Commit
+			b.Cleanup(func() { buildinfo.Commit = original })
+			buildinfo.Commit = "fixture-warm"
 			m := newMachine(b, "gate-benchmark", bareRemote(b))
+			archive, err := recordsync.OpenArchive(filepath.Join(b.TempDir(), "archive"), testLineage)
+			if err != nil {
+				b.Fatal(err)
+			}
+			m.syncer.Archive = &archive
 			for i := 0; i < 5669; i++ {
 				m.decide(b, fmt.Sprintf("record-%04d", i), "Observation")
 			}
@@ -166,17 +178,22 @@ func BenchmarkHistorySyncUnchangedGate(b *testing.B) {
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if !cached {
-					b.StopTimer()
+				b.StopTimer()
+				if mode == "deleted" {
 					if _, err := m.db.Exec(`DELETE FROM history_sync_proofs`); err != nil {
 						b.Fatal(err)
 					}
-					b.StartTimer()
 				}
-				result, err := m.syncer.Sync(ctx)
-				if err != nil || result.Unchanged != cached {
-					b.Fatalf("unexpected cycle: %+v %v", result, err)
+				if mode == "build_miss" {
+					buildinfo.Commit = fmt.Sprintf("fixture-build-%d", i)
 				}
+				b.StartTimer()
+				pprof.Do(ctx, pprof.Labels("sync_phase", "measured", "sync_case", mode), func(context.Context) {
+					result, err := m.syncer.Sync(ctx)
+					if err != nil || result.Outcome != OutcomeSynced || result.Unchanged != (mode == "hit") || result.ImportedRecords != 0 || result.ExportedRecords != 0 {
+						b.Fatalf("unexpected cycle: %+v %v", result, err)
+					}
+				})
 			}
 		})
 	}

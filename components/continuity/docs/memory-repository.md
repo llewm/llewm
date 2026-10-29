@@ -322,6 +322,25 @@ Profiles can reveal function names and file paths; keep them local or review
 them before sharing, and delete them when finished. Automatic background syncs
 are not profiled by this flag.
 
+For a disposable 5,669-record Git fixture, run
+`BenchmarkHistorySyncUnchangedGate` from the Continuity module. Its `hit`,
+`deleted`, and `build_miss` cases distinguish a reusable completion proof from
+a deleted proof and a different executable commit identity. The latter keeps
+existing inventory and semantic replay proofs; it does not simulate a semantic
+code change. Each case checks the expected sync path and zero imported/exported
+records. For example, with an existing home-disk scratch directory:
+
+```sh
+go test ./internal/memsync -run '^$' -bench '^BenchmarkHistorySyncUnchangedGate$' -benchtime=10x -benchmem -cpuprofile=/path/to/scratch/sync.cpu -o /path/to/scratch/memsync.test
+go tool pprof -top -cum -tagfocus=sync_case=build_miss /path/to/scratch/memsync.test /path/to/scratch/sync.cpu
+```
+
+Use `sync_case=hit` or `sync_case=deleted` for the other cases. These labels cover
+only measured cycles, excluding setup, warm-up and proof invalidation; the CPU
+profile also includes Go benchmark calibration cycles. CPU samples exclude
+child Git processes and do not measure wall time. Synthetic fixtures do not
+establish live sync speedups. Delete the scratch profile and binary afterward.
+
 ## Authentication
 
 Syncs run from session hooks and after checkpoints, where nobody can answer a
