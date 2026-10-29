@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime/pprof"
+	"strings"
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/trackplan"
 )
 
 // These disposable local fixtures time a complete warmed cycle, including
@@ -87,6 +89,45 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 				})
 			}
 		}
+	}
+}
+
+// Repeated, text-heavy plan revisions exercise the export/validation/redaction
+// costs absent from decision-only fixtures. All history here is synthetic.
+func BenchmarkHistorySyncPlanHistory(b *testing.B) {
+	ctx := context.Background()
+	for _, size := range []int{500, 5669} {
+		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
+			m := newMachine(b, "plan-history", bareRemote(b))
+			for i := 0; i < size; i++ {
+				m.decide(b, fmt.Sprintf("decision-%04d", i), "Observation")
+			}
+			var items []trackplan.Item
+			for i := 0; i < 6; i++ {
+				items = append(items, trackplan.Item{ID: fmt.Sprintf("item-%d", i), Position: i, Title: "Qualify history", Status: "active", Detail: strings.Repeat("Status: preserve canonical validation, token rotation evidence, repair and attribution. ", 20)})
+			}
+			service := trackplan.Service{DB: m.db}
+			for i := 0; i < 20; i++ {
+				if _, err := service.AppendPlan(ctx, trackplan.Plan{ProjectID: m.project, ID: "history-plan", RoadmapNodeID: "history", Title: "Synthetic plan history", Summary: "Profile repeated historical text", Status: "active", Creator: "benchmark", Items: items}); err != nil {
+					b.Fatal(err)
+				}
+			}
+			for i := 0; i < 2; i++ {
+				m.sync(b, OutcomeSynced)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				m.decide(b, fmt.Sprintf("arrival-%d", i), "New observation")
+				b.StartTimer()
+				pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(context.Context) {
+					result := m.sync(b, OutcomeSynced)
+					if result.Unchanged || result.ExportedRecords != 1 || result.ImportedRecords != 0 {
+						b.Fatalf("unexpected plan-history cycle: %+v", result)
+					}
+				})
+			}
+		})
 	}
 }
 
