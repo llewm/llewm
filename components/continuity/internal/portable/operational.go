@@ -220,12 +220,22 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 		return nil, nil, err
 	}
 	records = append(records, recoverySpecs...)
-	invocationIDs := roadmapInvocations
+	narratives, missing, err := loadNarrativeAndInvocationSpecs(ctx, source, projectID, projectRoot, lineageID, roadmapInvocations, allInvocations)
+	if err != nil {
+		return nil, nil, err
+	}
+	records = append(records, narratives...)
+	records, err = retainedSpecs(ctx, source, projectID, lineageID, records, validated)
+	return records, missing, err
+}
+
+func loadNarrativeAndInvocationSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string, invocationIDs map[string]struct{}, allInvocations bool) ([]EnvelopeSpec, []Reference, error) {
+	var records []EnvelopeSpec
 	// Retained narrative envelopes are immutable. We still read and check the
 	// operational payload and its invocation binding, but need not reconstruct
 	// and redact an envelope that retainedSpecs will replace with those bytes.
 	retainedNarratives := make(map[string]bool)
-	retainedRows, err := source.QueryContext(ctx, `SELECT record_type,record_id FROM portable_envelopes WHERE project_id=? AND record_revision=0 AND record_type IN ('work_narrative','work_narrative_supersession')`, projectID)
+	retainedRows, err := exportRetainedRows(ctx, source, `SELECT record_type,record_id FROM portable_envelopes WHERE project_id=? AND record_revision=0 AND record_type IN ('work_narrative','work_narrative_supersession')`, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -244,7 +254,7 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 	if err := retainedRows.Close(); err != nil {
 		return nil, nil, err
 	}
-	workRows, err := source.QueryContext(ctx, `SELECT payload_json,COALESCE(creator_invocation_id,'') FROM work_narratives WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	workRows, err := exportRows(ctx, source, "work_narratives", `SELECT payload_json,COALESCE(creator_invocation_id,'') FROM work_narratives WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -347,8 +357,7 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 		}
 	}
 	sort.Slice(missing, func(i, j int) bool { return lessUTF16(missing[i].ID, missing[j].ID) })
-	records, err = retainedSpecs(ctx, source, projectID, lineageID, records, validated)
-	return records, missing, err
+	return records, missing, nil
 }
 
 func formatOptionalPortableTime(value *time.Time) string {

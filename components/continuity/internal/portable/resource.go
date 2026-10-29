@@ -44,7 +44,7 @@ func newPortableResources() portableResources {
 }
 
 func loadResourceSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
-	resources, notes, err := resource.All(ctx, source, projectID)
+	resources, notes, err := resource.All(ctx, selectedExportSource(source, "resources", "resource_notes"), projectID)
 	if err != nil {
 		return nil, err
 	}

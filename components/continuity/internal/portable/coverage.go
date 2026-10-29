@@ -38,7 +38,7 @@ func coverageCellIndex(payload coverageCellPayload) envelopeIndex {
 }
 
 func loadCoverageCellSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
-	values, err := coverage.All(ctx, source, projectID)
+	values, err := coverage.All(ctx, selectedExportSource(source, "coverage_cells"), projectID)
 	if err != nil {
 		return nil, err
 	}

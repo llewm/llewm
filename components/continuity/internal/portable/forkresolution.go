@@ -73,7 +73,7 @@ func forkResolutionReferences(payload forkResolutionPayload) []Reference {
 }
 
 func loadForkResolutionSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
-	values, err := fork.All(ctx, source, projectID)
+	values, err := fork.All(ctx, selectedExportSource(source, "fork_resolutions"), projectID)
 	if err != nil {
 		return nil, err
 	}

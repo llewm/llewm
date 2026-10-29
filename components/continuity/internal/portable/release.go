@@ -23,7 +23,7 @@ type releasePayload struct {
 }
 
 func loadReleaseSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
-	rows, err := source.QueryContext(ctx, `SELECT release_id,revision,version,title,status,COALESCE(reviewer,''),published_at,content_sha256,authority,recorded_at,schema_version FROM roadmap_releases WHERE project_id=? ORDER BY release_id,revision`, projectID)
+	rows, err := exportRows(ctx, source, "roadmap_releases", `SELECT release_id,revision,version,title,status,COALESCE(reviewer,''),published_at,content_sha256,authority,recorded_at,schema_version FROM roadmap_releases WHERE project_id=? ORDER BY release_id,revision`, projectID)
 	if err != nil {
 		return nil, err
 	}

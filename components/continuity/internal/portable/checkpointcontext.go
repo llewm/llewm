@@ -33,7 +33,7 @@ func checkpointContextReferences(payload checkpointContextPayload) []Reference {
 }
 
 func loadCheckpointContextSpecs(ctx context.Context, source queryer, projectID, lineageID string) ([]EnvelopeSpec, error) {
-	values, err := checkpoint.AllContexts(ctx, source, projectID)
+	values, err := checkpoint.AllContexts(ctx, selectedExportSource(source, "checkpoint_contexts"), projectID)
 	if err != nil {
 		return nil, err
 	}

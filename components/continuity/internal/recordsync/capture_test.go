@@ -110,7 +110,8 @@ func TestCaptureProjectConsumesOnlyDerivedChanges(t *testing.T) {
 	if err = db.QueryRow(`SELECT COUNT(*) FROM history_sync_changes c JOIN history_sync_cursors p ON c.project_id=p.project_id WHERE c.sequence>p.sequence AND c.project_id=?`, project).Scan(&pending); err != nil || pending != 0 {
 		t.Fatalf("cursor failed to advance: %d %v", pending, err)
 	}
-	// A canonical arrival must still call the full exporter.
+	// A qualified canonical arrival publishes its delta and acknowledges both
+	// that publication and its own retention writes without a second full export.
 	if _, err = (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: "second", Title: "Second", Rationale: "Arrival", Disposition: "accepted", Actor: "test", ActorType: "human", Authority: "caller_asserted"}); err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +127,9 @@ func TestCaptureProjectConsumesOnlyDerivedChanges(t *testing.T) {
 		if err != nil || string(body) != string(portable.MemoryFileBytes(object)) {
 			t.Fatalf("reference differs: %v", err)
 		}
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || !reused {
+		t.Fatalf("canonical delta did not acknowledge retention/publication: %t %v", reused, err)
 	}
 	if _, err = db.Exec(`DELETE FROM history_sync_changes WHERE sequence=(SELECT MIN(sequence) FROM history_sync_changes)`); err != nil {
 		t.Fatal(err)

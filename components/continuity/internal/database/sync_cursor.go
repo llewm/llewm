@@ -25,6 +25,18 @@ type SyncCursor struct {
 	Generation, State string
 }
 
+// SyncSnapshot reads the journal position on the caller's existing transaction.
+// Consumers taking a receipt after their own canonical writes must use the same
+// writer transaction; a later independent snapshot could bless unrelated writes.
+func SyncSnapshot(ctx context.Context, tx *sql.Tx, project, consumer string) (SyncCursor, error) {
+	c := SyncCursor{Project: project, Consumer: consumer}
+	if err := tx.QueryRowContext(ctx, syncGenerationQuery, project).Scan(&c.Generation); err != nil {
+		return c, err
+	}
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM history_sync_changes WHERE project_id=?`, project).Scan(&c.Sequence)
+	return c, err
+}
+
 func (c SyncCursor) checksum() string {
 	body, _ := json.Marshal(c)
 	return fmt.Sprintf("%x", sha256.Sum256(body))

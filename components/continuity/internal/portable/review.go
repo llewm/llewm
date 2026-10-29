@@ -61,7 +61,7 @@ func newPortableReviewRecords() portableReviewRecords {
 
 func loadReviewSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
 	result := make([]EnvelopeSpec, 0)
-	rows, err := source.QueryContext(ctx, `SELECT id,kind,title,body,COALESCE(observed,''),COALESCE(reproduction,''),COALESCE(environment,''),COALESCE(severity,''),COALESCE(task_id,''),COALESCE(checkpoint_id,''),COALESCE(roadmap_node_id,''),creator,COALESCE(model,''),authority,recorded_at,schema_version FROM work_items WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	rows, err := exportRows(ctx, source, "work_items", `SELECT id,kind,title,body,COALESCE(observed,''),COALESCE(reproduction,''),COALESCE(environment,''),COALESCE(severity,''),COALESCE(task_id,''),COALESCE(checkpoint_id,''),COALESCE(roadmap_node_id,''),creator,COALESCE(model,''),authority,recorded_at,schema_version FROM work_items WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func loadReviewSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		result = append(result, spec)
 	}
 
-	dispositionRows, err := source.QueryContext(ctx, `SELECT id,item_id,status,reason,target_refs_json,creator,COALESCE(model,''),authority,recorded_at,schema_version FROM work_item_dispositions WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	dispositionRows, err := exportRows(ctx, source, "work_item_dispositions", `SELECT id,item_id,status,reason,target_refs_json,creator,COALESCE(model,''),authority,recorded_at,schema_version FROM work_item_dispositions WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func loadReviewSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		return nil, err
 	}
 
-	linkRows, err := source.QueryContext(ctx, `SELECT id,item_id,relationship,target_ref,creator,authority,recorded_at,schema_version FROM work_item_links WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	linkRows, err := exportRows(ctx, source, "work_item_links", `SELECT id,item_id,relationship,target_ref,creator,authority,recorded_at,schema_version FROM work_item_links WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, err
 	}

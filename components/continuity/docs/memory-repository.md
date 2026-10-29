@@ -117,16 +117,26 @@ snapshot's generation atomically, after successful materialization. Interrupted
 consumers replay their unacknowledged changes. Missing or damaged cursors, global
 changes, archive changes and oversized deltas require complete validation.
 Local capture consumes index-only changes without rebuilding canonical exports;
-Git and folder sync share this capture path. Canonical changes still use the
-complete exporter. Capture may advance its archive stamp across its own new
+Git and folder sync share this capture path. Qualified append-only canonical
+changes select their operational identities and exact child rows, using the same
+encoders and retained-byte overlay as complete export. Narrative and roadmap
+actor dependencies include their invocation ancestors. The export takes a writer
+snapshot, checks the observed journal position before loading, retains the selected
+envelopes, and returns a receipt including its own retention writes atomically.
+Capture acknowledges this receipt only after durable publication and the final
+database/archive guards. Interrupted retention or publication therefore replays
+through complete export. Updates, deletions, retained-envelope changes, recovery
+graphs, unknown families and more than 128 selected identities in a table retain
+complete validation; journal reads are additionally bounded to 4096 changes.
+Capture may advance its archive stamp across its own new
 record/provenance files only after accounting for the exact additions, validating
 their bytes, and checking that all pre-existing files retain their metadata
 identities. Unexpected changes, including concurrent foreign provenance, decline
 the optimization. Parent directories may change timestamps and size but must
 retain their device, inode and mode. Tracking starts only before an actual file
 creation; platforms without change-time identities retain complete validation.
-This does not yet enable canonical export deltas, hierarchical folder manifests,
-dependency-closure replay or journal pruning. Existing proofs are discarded by
+This does not yet enable hierarchical folder manifests, affected-dependency import
+replay or journal pruning. Existing proofs are discarded by
 migration 086; capture-v2 does not reuse earlier capture proofs.
 Migration 082 narrows attribution tracking: raw invocation activity invalidates
 only when the invocation is already retained or referenced by indexed history.

@@ -89,7 +89,7 @@ func newPortableRoadmapRecords() portableRoadmapRecords {
 func loadRoadmapSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, map[string]struct{}, error) {
 	result := make([]EnvelopeSpec, 0)
 	invocations := make(map[string]struct{})
-	nodeRows, err := source.QueryContext(ctx, `SELECT node_id,revision,title,status,priority,kind,COALESCE(target_date,''),COALESCE(target_release,''),COALESCE(target_horizon,''),evidence_refs_json,source_path,COALESCE(source_ref,''),authority,recorded_at,schema_version FROM roadmap_nodes WHERE project_id=? ORDER BY node_id,revision`, projectID)
+	nodeRows, err := exportRows(ctx, source, "roadmap_nodes", `SELECT node_id,revision,title,status,priority,kind,COALESCE(target_date,''),COALESCE(target_release,''),COALESCE(target_horizon,''),evidence_refs_json,source_path,COALESCE(source_ref,''),authority,recorded_at,schema_version FROM roadmap_nodes WHERE project_id=? ORDER BY node_id,revision`, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,7 +126,7 @@ func loadRoadmapSpecs(ctx context.Context, source queryer, projectID, projectRoo
 		return nil, nil, err
 	}
 
-	bindingRows, err := source.QueryContext(ctx, `SELECT id,node_id,node_revision,path,path_kind,relationship,authority,recorded_at,schema_version FROM roadmap_file_bindings WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	bindingRows, err := exportRows(ctx, source, "roadmap_file_bindings", `SELECT id,node_id,node_revision,path,path_kind,relationship,authority,recorded_at,schema_version FROM roadmap_file_bindings WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -158,7 +158,7 @@ func loadRoadmapSpecs(ctx context.Context, source queryer, projectID, projectRoo
 		return nil, nil, err
 	}
 
-	linkRows, err := source.QueryContext(ctx, `SELECT id,node_id,node_revision,target_node_id,relationship,authority,recorded_at,schema_version FROM roadmap_node_links WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	linkRows, err := exportRows(ctx, source, "roadmap_node_links", `SELECT id,node_id,node_revision,target_node_id,relationship,authority,recorded_at,schema_version FROM roadmap_node_links WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -190,7 +190,7 @@ func loadRoadmapSpecs(ctx context.Context, source queryer, projectID, projectRoo
 		return nil, nil, err
 	}
 
-	routineRows, err := source.QueryContext(ctx, `SELECT routine_id,revision,title,status,commit_threshold,elapsed_seconds_threshold,changed_files_threshold,source,COALESCE(source_ref,''),authority,recorded_at,schema_version FROM roadmap_review_routines WHERE project_id=? ORDER BY routine_id,revision`, projectID)
+	routineRows, err := exportRows(ctx, source, "roadmap_review_routines", `SELECT routine_id,revision,title,status,commit_threshold,elapsed_seconds_threshold,changed_files_threshold,source,COALESCE(source_ref,''),authority,recorded_at,schema_version FROM roadmap_review_routines WHERE project_id=? ORDER BY routine_id,revision`, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -235,7 +235,7 @@ func loadRoadmapSpecs(ctx context.Context, source queryer, projectID, projectRoo
 		return nil, nil, err
 	}
 
-	syncRows, err := source.QueryContext(ctx, `SELECT id,git_commit,COALESCE(client,''),COALESCE(model,''),COALESCE(invocation_id,''),reviewed_nodes_json,reviewed_files_json,authority,git_authority,completed_at,schema_version FROM roadmap_sync_runs WHERE project_id=? ORDER BY completed_at,id`, projectID)
+	syncRows, err := exportRows(ctx, source, "roadmap_sync_runs", `SELECT id,git_commit,COALESCE(client,''),COALESCE(model,''),COALESCE(invocation_id,''),reviewed_nodes_json,reviewed_files_json,authority,git_authority,completed_at,schema_version FROM roadmap_sync_runs WHERE project_id=? ORDER BY completed_at,id`, projectID)
 	if err != nil {
 		return nil, nil, err
 	}

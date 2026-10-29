@@ -28,7 +28,7 @@ func checkpointBranchesReferences(payload checkpointBranchesPayload) []Reference
 }
 
 func loadCheckpointBranchesSpecs(ctx context.Context, source queryer, projectID, lineageID string) ([]EnvelopeSpec, error) {
-	values, err := checkpoint.AllBranches(ctx, source, projectID)
+	values, err := checkpoint.AllBranches(ctx, selectedExportSource(source, "checkpoint_branches"), projectID)
 	if err != nil {
 		return nil, err
 	}

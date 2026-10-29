@@ -28,7 +28,7 @@ type pinPayload struct {
 type portablePins map[string]pin.Pin
 
 func loadPinSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
-	values, err := pin.All(ctx, source, projectID)
+	values, err := pin.All(ctx, selectedExportSource(source, "pins"), projectID)
 	if err != nil {
 		return nil, err
 	}

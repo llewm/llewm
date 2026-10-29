@@ -63,7 +63,7 @@ type portableCheckpointTransition struct {
 
 func loadCheckpointSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
 	result := make([]EnvelopeSpec, 0)
-	rows, err := source.QueryContext(ctx, `SELECT id,COALESCE(session_id,''),COALESCE(task_id,''),task_title,status,summary,next_action,payload_json,created_at FROM checkpoints WHERE project_id=? ORDER BY created_at,id`, projectID)
+	rows, err := exportRows(ctx, source, "checkpoints", `SELECT id,COALESCE(session_id,''),COALESCE(task_id,''),task_title,status,summary,next_action,payload_json,created_at FROM checkpoints WHERE project_id=? ORDER BY created_at,id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func loadCheckpointSpecs(ctx context.Context, source queryer, projectID, project
 		return nil, err
 	}
 
-	actionRows, err := source.QueryContext(ctx, `SELECT id,source_checkpoint_id,description,created_at FROM checkpoint_actions WHERE project_id=? ORDER BY created_at,id`, projectID)
+	actionRows, err := exportRows(ctx, source, "checkpoint_actions", `SELECT id,source_checkpoint_id,description,created_at FROM checkpoint_actions WHERE project_id=? ORDER BY created_at,id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func loadCheckpointSpecs(ctx context.Context, source queryer, projectID, project
 		return nil, err
 	}
 
-	transitionRows, err := source.QueryContext(ctx, `SELECT t.id,t.action_id,COALESCE(t.checkpoint_id,''),t.status,COALESCE(t.reason,''),t.created_at FROM checkpoint_action_transitions t JOIN checkpoint_actions a ON a.id=t.action_id WHERE a.project_id=? ORDER BY t.created_at,t.id`, projectID)
+	transitionRows, err := exportRows(ctx, source, "checkpoint_action_transitions", `SELECT t.id,t.action_id,COALESCE(t.checkpoint_id,''),t.status,COALESCE(t.reason,''),t.created_at FROM checkpoint_action_transitions t JOIN checkpoint_actions a ON a.id=t.action_id WHERE a.project_id=? ORDER BY t.created_at,t.id`, projectID)
 	if err != nil {
 		return nil, err
 	}

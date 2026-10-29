@@ -59,11 +59,11 @@ func staleResolutionIndex(payload staleResolutionPayload) envelopeIndex {
 }
 
 func loadLeaseSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
-	stamps, err := lease.Stamps(ctx, source, projectID)
+	stamps, err := lease.Stamps(ctx, selectedExportSource(source, "lease_stamps"), projectID)
 	if err != nil {
 		return nil, err
 	}
-	resolutions, err := lease.StaleResolutions(ctx, source, projectID)
+	resolutions, err := lease.StaleResolutions(ctx, selectedExportSource(source, "stale_write_resolutions"), projectID)
 	if err != nil {
 		return nil, err
 	}

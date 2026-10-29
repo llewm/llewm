@@ -33,7 +33,7 @@ type procedurePayload struct {
 }
 
 func loadProcedureSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string) ([]EnvelopeSpec, error) {
-	rows, err := source.QueryContext(ctx, `SELECT `+procedures.Columns+` FROM reviewed_procedures WHERE project_id=? ORDER BY procedure_id,revision`, projectID)
+	rows, err := exportRows(ctx, source, "reviewed_procedures", `SELECT `+procedures.Columns+` FROM reviewed_procedures WHERE project_id=? ORDER BY procedure_id,revision`, projectID)
 	if err != nil {
 		return nil, err
 	}

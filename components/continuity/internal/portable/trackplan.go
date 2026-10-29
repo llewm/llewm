@@ -40,7 +40,7 @@ func loadTrackPlanSpecs(ctx context.Context, source queryer, projectID, projectR
 	// Plan revisions often repeat unchanged items. Reuse only deterministic
 	// text transformations within this export; never persist the input cache.
 	text := cachedTrackText(projectID, projectRoot)
-	planRows, err := source.QueryContext(ctx, `SELECT id,revision FROM track_plan_revisions WHERE project_id=? ORDER BY id,revision`, projectID)
+	planRows, err := exportRows(ctx, source, "track_plan_revisions", `SELECT id,revision FROM track_plan_revisions WHERE project_id=? ORDER BY id,revision`, projectID)
 	if err != nil {
 		return nil, err
 	}

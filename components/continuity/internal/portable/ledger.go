@@ -91,7 +91,7 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 	// Leave placeholders for retainedSpecs to validate and overlay, rather than
 	// rebuilding, redacting and canonicalizing bytes that it will replace.
 	retained := map[string]bool{}
-	retainedRows, err := source.QueryContext(ctx, `SELECT record_type,record_id,record_revision FROM portable_envelopes WHERE project_id=? AND record_type IN ('decision','topic_revision','topic_alias','topic_link')`, projectID)
+	retainedRows, err := exportRetainedRows(ctx, source, `SELECT record_type,record_id,record_revision FROM portable_envelopes WHERE project_id=? AND record_type IN ('decision','topic_revision','topic_alias','topic_link')`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		specs = append(specs, EnvelopeSpec{RecordType: kind, RecordID: id, RecordRevision: revision})
 		return true
 	}
-	rows, err := source.QueryContext(ctx, `SELECT id,title,rationale,disposition,actor,actor_type,authority,review_source,COALESCE(supersedes_id,''),recorded_at,schema_version FROM decision_records WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	rows, err := exportRows(ctx, source, "decision_records", `SELECT id,title,rationale,disposition,actor,actor_type,authority,review_source,COALESCE(supersedes_id,''),recorded_at,schema_version FROM decision_records WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		specs = append(specs, spec)
 	}
 
-	rows, err = source.QueryContext(ctx, `SELECT id,revision,title,summary,status,creator,COALESCE(model,''),authority,recorded_at,schema_version FROM topic_revisions WHERE project_id=? ORDER BY id,revision`, projectID)
+	rows, err = exportRows(ctx, source, "topic_revisions", `SELECT id,revision,title,summary,status,creator,COALESCE(model,''),authority,recorded_at,schema_version FROM topic_revisions WHERE project_id=? ORDER BY id,revision`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		return nil, err
 	}
 
-	rows, err = source.QueryContext(ctx, `SELECT alias,topic_id,creator,recorded_at FROM topic_aliases WHERE project_id=? ORDER BY alias`, projectID)
+	rows, err = exportRows(ctx, source, "topic_aliases", `SELECT alias,topic_id,creator,recorded_at FROM topic_aliases WHERE project_id=? ORDER BY alias`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func loadLedgerSpecs(ctx context.Context, source queryer, projectID, projectRoot
 		return nil, err
 	}
 
-	rows, err = source.QueryContext(ctx, `SELECT id,topic_id,target_kind,target_id,target_revision,status,creator,COALESCE(model,''),authority,COALESCE(accepted_from,''),recorded_at FROM topic_links WHERE project_id=? ORDER BY recorded_at,id`, projectID)
+	rows, err = exportRows(ctx, source, "topic_links", `SELECT id,topic_id,target_kind,target_id,target_revision,status,creator,COALESCE(model,''),authority,COALESCE(accepted_from,''),recorded_at FROM topic_links WHERE project_id=? ORDER BY recorded_at,id`, projectID)
 	if err != nil {
 		return nil, err
 	}
