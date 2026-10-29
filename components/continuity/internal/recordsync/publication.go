@@ -126,8 +126,24 @@ func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive
 	if err != nil {
 		return nil, nil, err
 	}
-	all, err := packValidatedBlocks(s.Lineage, inventory)
-	return blocks, all, err
+	// The publication plan already contains stable, validated blocks whose
+	// objects are in this same archive snapshot. Preserve those identities for
+	// import instead of repacking old history whenever one envelope arrives.
+	covered := make(map[string]bool, len(inventory))
+	all := append([]Block(nil), blocks...)
+	for _, block := range blocks {
+		for _, object := range block.Objects {
+			covered[object.Envelope.EnvelopeSHA256] = true
+		}
+	}
+	var remaining []portable.EncodedEnvelope
+	for _, object := range inventory {
+		if !covered[object.Envelope.EnvelopeSHA256] {
+			remaining = append(remaining, object)
+		}
+	}
+	extra, err := packValidatedBlocks(s.Lineage, remaining)
+	return blocks, append(all, extra...), err
 }
 
 func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, known []Block) ([]Block, error) {

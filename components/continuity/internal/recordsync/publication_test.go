@@ -56,7 +56,7 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 		t.Fatalf("initial plan: %+v %v", initial, err)
 	}
 	planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false, nil)
-	if err != nil || len(planned) != 1 || planned[0].Hash != initial[0].Hash || len(inventory) != 1 || len(inventory[0].Objects) != 2 {
+	if err != nil || len(planned) != 1 || planned[0].Hash != initial[0].Hash || len(inventory) != 2 || inventory[0].Hash != initial[0].Hash || len(inventory[1].Objects) != 1 || inventory[1].Objects[0].Envelope.RecordID != "foreign" {
 		t.Fatalf("restricted plan and complete local inventory: %+v %+v %v", planned, inventory, err)
 	}
 	for _, object := range planned[0].Objects {
