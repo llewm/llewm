@@ -215,15 +215,26 @@ func EncodeEnvelope(spec EnvelopeSpec) (EncodedEnvelope, error) {
 		Authority: spec.Authority, ContentSHA256: hashHex(payload), Index: index,
 		Refs: refs, Payload: payload,
 	}
-	withoutHash, err := canonicalMarshal(value)
-	if err != nil {
-		return EncodedEnvelope{}, err
-	}
-	value.EnvelopeSHA256 = hashHex(withoutHash)
+	// Reserve the final hash's exact width so canonicalization and its size
+	// checks run once. Removing this member yields the canonical hash input:
+	// authority and content_sha256 precede it; all nested objects follow it.
+	const placeholder = "0000000000000000000000000000000000000000000000000000000000000000"
+	const hashMember = `,"envelope_sha256":"` + placeholder + `"`
+	value.EnvelopeSHA256 = placeholder
 	encoded, err := canonicalMarshal(value)
 	if err != nil {
 		return EncodedEnvelope{}, err
 	}
+	memberStart := bytes.Index(encoded, []byte(hashMember))
+	if memberStart < 0 {
+		return EncodedEnvelope{}, fmt.Errorf("canonical envelope hash member is missing")
+	}
+	hash := sha256.New()
+	hash.Write(encoded[:memberStart])
+	hash.Write(encoded[memberStart+len(hashMember):])
+	value.EnvelopeSHA256 = hex.EncodeToString(hash.Sum(nil))
+	hashStart := memberStart + len(`,"envelope_sha256":"`)
+	copy(encoded[hashStart:hashStart+len(placeholder)], value.EnvelopeSHA256)
 	return EncodedEnvelope{Envelope: value, Bytes: encoded}, nil
 }
 
