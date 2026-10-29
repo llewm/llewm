@@ -84,3 +84,59 @@ func TestCaptureProjectReuseAndRepair(t *testing.T) {
 		t.Fatalf("corrupt archive file reused: %t %v", reused, err)
 	}
 }
+
+func TestCaptureProjectConsumesOnlyDerivedChanges(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "cursor")
+	a, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: "decision", Title: "Decision", Rationale: "Observation", Disposition: "accepted", Actor: "test", ActorType: "human", Authority: "caller_asserted"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if _, err = a.CaptureProject(ctx, db, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Index bookkeeping changes the generation but cannot change export bytes.
+	if _, err = db.Exec(`INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,'metadata-only',1)`, project); err != nil {
+		t.Fatal(err)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || !reused {
+		t.Fatalf("metadata delta: %t %v", reused, err)
+	}
+	var pending int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM history_sync_changes c JOIN history_sync_cursors p ON c.project_id=p.project_id WHERE c.sequence>p.sequence AND c.project_id=?`, project).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("cursor failed to advance: %d %v", pending, err)
+	}
+	// A canonical arrival must still call the full exporter.
+	if _, err = (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: "second", Title: "Second", Rationale: "Arrival", Disposition: "accepted", Actor: "test", ActorType: "human", Authority: "caller_asserted"}); err != nil {
+		t.Fatal(err)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || reused {
+		t.Fatalf("canonical change: %t %v", reused, err)
+	}
+	reference, err := portable.EncodeMemoryExport(ctx, db, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, object := range reference.Envelopes {
+		body, err := os.ReadFile(filepath.Join(a.Directory, portable.MemoryRecordPath(object.Envelope)))
+		if err != nil || string(body) != string(portable.MemoryFileBytes(object)) {
+			t.Fatalf("reference differs: %v", err)
+		}
+	}
+	if _, err = db.Exec(`DELETE FROM history_sync_changes WHERE sequence=(SELECT MIN(sequence) FROM history_sync_changes)`); err != nil {
+		t.Fatal(err)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || reused {
+		t.Fatalf("journal damage: %t %v", reused, err)
+	}
+	if _, err = db.Exec(`UPDATE history_sync_cursors SET sequence=sequence+1`); err != nil {
+		t.Fatal(err)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || reused {
+		t.Fatalf("cursor damage: %t %v", reused, err)
+	}
+}

@@ -19,7 +19,7 @@ func (a Archive) captureGuard(ctx context.Context, db *sql.DB, projectID string)
 	if build.BuildDirty {
 		return g, fmt.Errorf("uncommitted build cannot reuse capture proofs")
 	}
-	body, _ := json.Marshal([]any{"capture-v1", build.GitCommit, a.Directory, a.Lineage})
+	body, _ := json.Marshal([]any{"capture-v2", build.GitCommit, a.Directory, a.Lineage})
 	g.route = Hash(string(body))
 	var generationErr error
 	g.generation, generationErr = database.SyncGeneration(ctx, db, projectID)
@@ -43,12 +43,17 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 		return false, fmt.Errorf("matching project/archive lineage required")
 	}
 	before, guardErr := a.captureGuard(ctx, db, projectID)
+	var cursor database.SyncCursor
 	if guardErr == nil && before.generation != "" {
-		var generation, archive string
-		err := db.QueryRowContext(ctx, `SELECT generation,archive FROM history_sync_proofs WHERE project_id=? AND route=?`, projectID, before.route).Scan(&generation, &archive)
-		if err == nil && generation == before.generation && archive == before.archive {
+		var changes []database.SyncChange
+		var fallback string
+		cursor, changes, fallback, err = database.ReadSyncChanges(ctx, db, projectID, before.route, before.archive, 4096)
+		if err == nil && fallback == "" && cursor.Generation == before.generation && captureMetadataOnly(changes) {
 			after, err := a.captureGuard(ctx, db, projectID)
 			if err == nil && after == before {
+				// Consume only the observed batch. A racing canonical write
+				// prevents acknowledgement and will be retried next time.
+				_, _ = database.RememberSyncCursor(ctx, db, cursor, before.archive)
 				return true, nil
 			}
 		}
@@ -65,11 +70,25 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 	}
 	if guardErr == nil && before.generation != "" && captureDependenciesClosed(export.Envelopes) {
 		after, err := a.captureGuard(ctx, db, projectID)
-		if err == nil && after == before {
-			_ = database.RememberSyncProof(ctx, db, projectID, before.route, before.generation, "", before.archive)
+		if err == nil && after == before && cursor.Generation == before.generation {
+			_, _ = database.RememberSyncCursor(ctx, db, cursor, before.archive)
 		}
 	}
 	return false, nil
+}
+
+// Derived block membership is not a canonical export input. Other changes,
+// including retained envelopes, deletes and dependency arrivals, still require
+// the complete exporter until their dependency closure is qualified.
+func captureMetadataOnly(changes []database.SyncChange) bool {
+	for _, change := range changes {
+		switch change.Table {
+		case "history_index_blocks", "history_index_publications", "history_index_records", "history_index_refs":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Raw invocations deliberately do not invalidate generations until referenced

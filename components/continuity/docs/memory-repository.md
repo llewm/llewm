@@ -111,10 +111,17 @@ Changes in another known project no longer invalidate the proof. Missing tokens
 fail closed; journal edits or deletions invalidate proofs globally. The journal
 contains no record bodies and is not portable history or a peer receipt.
 
-This is the change-tracking foundation, not yet incremental export: changed
-cycles still use the full exporter and validated archive discovery. No journal
-cursor, pruning, hierarchical folder manifest or dependency-closure replay is
-enabled by this migration. Existing proofs are discarded during migration.
+Migration 087 adds durable, checksummed consumer cursors. Reads are bounded by
+an ingestion sequence in one database snapshot; acknowledgement compares that
+snapshot's generation atomically, after successful materialization. Interrupted
+consumers replay their unacknowledged changes. Missing or damaged cursors, global
+changes, archive changes and oversized deltas require complete validation.
+Local capture consumes index-only changes without rebuilding canonical exports;
+Git and folder sync share this capture path. Canonical changes still use the
+complete exporter. Cursor advancement requires a stable archive stamp, so this
+does not yet enable canonical export deltas, hierarchical folder manifests,
+dependency-closure replay or journal pruning. Existing proofs are discarded by
+migration 086; capture-v2 does not reuse earlier capture proofs.
 Migration 082 narrows attribution tracking: raw invocation activity invalidates
 only when the invocation is already retained or referenced by indexed history.
 Adding a referring record invalidates independently. The generation also records

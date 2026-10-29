@@ -41,38 +41,41 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if err := stopped(ctx, "exporting"); err != nil {
 		return result, err
 	}
-	export, err := portable.EncodeMemoryExport(local, s.DB, s.ProjectID)
+	identity, err := (portable.Service{DB: s.DB}).Get(local, s.ProjectID)
 	if err != nil {
-		return result, fmt.Errorf("export memory records: %w", err)
+		return result, err
+	}
+	if identity == nil {
+		return result, fmt.Errorf("project portable identity is not initialized")
 	}
 	if s.Archive == nil {
 		var projectRoot string
 		if err := s.DB.QueryRowContext(local, `SELECT root FROM projects WHERE id=?`, s.ProjectID).Scan(&projectRoot); err != nil {
 			return result, err
 		}
-		archive, err := recordsync.OpenArchive(filepath.Join(config.StateDir(projectRoot), "history"), export.Identity.LineageID)
+		archive, err := recordsync.OpenArchive(filepath.Join(config.StateDir(projectRoot), "history"), identity.LineageID)
 		if err != nil {
 			return result, err
 		}
 		s.Archive = &archive
 	}
-	if s.Archive.Lineage != export.Identity.LineageID {
+	if s.Archive.Lineage != identity.LineageID {
 		return result, fmt.Errorf("matching history archive is required")
 	}
 	// Rebuild receipt membership and provenance from already tracked local
 	// history before classifying operational records as locally originated or
 	// planning publication. This also repairs damaged entries that are present.
-	tracked, err := s.trackedBlocks(local, repo, export.Identity.LineageID)
+	tracked, err := s.trackedBlocks(local, repo, identity.LineageID)
 	if err != nil {
 		return result, err
 	}
-	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: export.Identity.LineageID, Now: s.Now}
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID, Now: s.Now}
 	for _, block := range tracked {
 		if _, err := index.ObservePublication(local, *s.Archive, s.Endpoint(), block); err != nil {
 			return result, err
 		}
 	}
-	old, err := s.trackedV3Snapshot(local, repo, export.Identity.LineageID)
+	old, err := s.trackedV3Snapshot(local, repo, identity.LineageID)
 	if err != nil {
 		return result, err
 	}
@@ -84,15 +87,15 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 			return result, err
 		}
 	}
-	if err := s.Archive.CaptureLocal(export.Envelopes); err != nil {
+	if _, err := s.Archive.CaptureProject(local, s.DB, s.ProjectID); err != nil {
 		return result, err
 	}
-	paths, count, snapshot, err := s.publishBlocks(local, export.Identity.LineageID, tracked)
+	paths, count, snapshot, err := s.publishBlocks(local, identity.LineageID, tracked)
 	result.ExportedRecords = count
 	if err != nil {
 		return result, err
 	}
-	if err := commitBlocks(local, repo, paths, fmt.Sprintf("continuity: %s +%d records", export.Identity.InstanceID, count)); err != nil {
+	if err := commitBlocks(local, repo, paths, fmt.Sprintf("continuity: %s +%d records", identity.InstanceID, count)); err != nil {
 		return result, err
 	}
 	head, err := repo.run(local, "symbolic-ref", "--short", "HEAD")
@@ -102,7 +105,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	branch := head
 	importBlocks := func() error {
 		importCurrent := func() error {
-			imported, err := s.importTrackedBlocks(local, repo, export.Identity.LineageID, snapshot)
+			imported, err := s.importTrackedBlocks(local, repo, identity.LineageID, snapshot)
 			result.ImportedRecords += imported.ImportedRecords
 			result.Collisions, result.Forks, result.SupersessionForks, result.DeferredRecords = imported.Collisions, imported.Forks, imported.SupersessionForks, imported.DeferredRecords
 			if err != nil {
@@ -123,11 +126,11 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		// Convert older format-2 records first; this operation refuses them in
 		// an ordinary sync. Both conversion steps require stopped old writers.
 		var legacy Result
-		if err := retireFormerFormat(local, repo, s.Clone, export.Identity, p.convert, &legacy); err != nil {
+		if err := retireFormerFormat(local, repo, s.Clone, *identity, p.convert, &legacy); err != nil {
 			return err
 		}
 		result.ExportedRecords += legacy.ExportedRecords
-		snapshot, err := s.trackedV3Snapshot(local, repo, export.Identity.LineageID)
+		snapshot, err := s.trackedV3Snapshot(local, repo, identity.LineageID)
 		if err != nil {
 			return err
 		}
@@ -135,7 +138,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 			return fmt.Errorf("format-3 observations require explicit conversion: stop old writers, then run `llewm sync convert --writers-stopped`")
 		}
 		if p.convert {
-			converted, err := s.convertTrackedV3(local, repo, export.Identity)
+			converted, err := s.convertTrackedV3(local, repo, *identity)
 			if err != nil {
 				return err
 			}
