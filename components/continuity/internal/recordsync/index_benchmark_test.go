@@ -35,12 +35,24 @@ func BenchmarkBlockInventory(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		got, err := index.blockObjects(ctx, blocks)
-		if err != nil || len(got) != len(objects) {
-			b.Fatalf("inventory: %d objects, %v", len(got), err)
-		}
+	// Model private snapshots from indexed reads and publication plans. Both
+	// paths operate on the same canonical objects and inventory; setup is untimed.
+	for i := range blocks {
+		blocks[i].validated = sealBlockContents(lineage, blocks[i].Objects)
+	}
+	for _, mode := range []string{"inventory", "scanned_snapshot"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				read := index.blockObjects
+				if mode == "scanned_snapshot" {
+					read = index.importBlockObjects
+				}
+				got, err := read(ctx, blocks)
+				if err != nil || len(got) != len(objects) {
+					b.Fatalf("inventory: %d objects, %v", len(got), err)
+				}
+			}
+		})
 	}
 }

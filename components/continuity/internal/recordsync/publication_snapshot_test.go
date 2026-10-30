@@ -124,6 +124,19 @@ func testPublicationSnapshotPreservesIndexedMembership(t *testing.T, origin stri
 		if before != after || after != unique || unique != 500+cycle || blocks != 1+cycle {
 			t.Fatalf("snapshot duplicated indexed history: before=%d after=%d unique=%d blocks=%d", before, after, unique, blocks)
 		}
+		// Both newly packed arrivals and reused publication membership must
+		// carry an exact private snapshot, including foreign residual records.
+		for _, block := range snapshot {
+			if !block.matchesValidatedContents(lineage) {
+				t.Fatal("publication snapshot cannot reuse verified envelopes")
+			}
+			want := append([]byte(nil), block.Objects[0].Bytes...)
+			block.Objects[0].Bytes[0] ^= 1
+			got, err := index.importBlockObjects(ctx, []Block{block})
+			if err != nil || len(got) != len(block.Objects) || !bytes.Equal(got[0].Bytes, want) {
+				t.Fatalf("publication parsed fields changed private snapshot: %v", err)
+			}
+		}
 		t.Logf("cycle=%d publication_blocks=%d snapshot_blocks=%d rows_before=%d rows_after=%d added_by_snapshot=%d unique=%d indexed_blocks=%d", cycle, len(published), len(snapshot), before, after, after-before, unique, blocks)
 	}
 }

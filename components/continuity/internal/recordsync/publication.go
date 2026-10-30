@@ -319,6 +319,7 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 		}
 		if permitted && addsRecord {
 			block := Block{Hash: saved.hash, Bytes: append([]byte(nil), body.Bytes()...), Objects: objects}
+			block.validated = sealBlockContents(s.Lineage, objects)
 			result = append(result, block)
 			for _, object := range block.Objects {
 				covered[object.Envelope.EnvelopeSHA256] = true
@@ -342,6 +343,7 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, endpointHash, block.Hash); err != nil {
 			return nil, err
 		}
+		block.validated = sealBlockContents(s.Lineage, block.Objects)
 		result = append(result, block)
 	}
 	if err := tx.Commit(); err != nil {

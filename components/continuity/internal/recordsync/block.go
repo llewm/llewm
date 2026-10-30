@@ -51,6 +51,20 @@ func sealBlockContents(lineage string, objects []portable.EncodedEnvelope) *vali
 	return sealed
 }
 
+func (b Block) matchesValidatedContents(lineage string) bool {
+	if b.validated == nil || b.validated.lineage != lineage || !bytes.HasPrefix(b.Bytes, []byte(blockHeader)) {
+		return false
+	}
+	rest := b.Bytes[len(blockHeader):]
+	for _, object := range b.validated.objects {
+		if !bytes.HasPrefix(rest, object.Bytes) || len(rest) <= len(object.Bytes) || rest[len(object.Bytes)] != '\n' {
+			return false
+		}
+		rest = rest[len(object.Bytes)+1:]
+	}
+	return len(rest) == 0
+}
+
 // EncodeBlock validates envelopes before publication. Sorting by canonical
 // bytes makes the result independent of input order while preserving competing
 // envelopes for the same record identity.

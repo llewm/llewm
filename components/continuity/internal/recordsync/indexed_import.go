@@ -87,14 +87,14 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 	// Clearing the index here would also discard publication membership for
 	// every endpoint. The transport coordinator must first obtain complete
 	// inventories for those endpoints and rebuild them together.
-	objects, err := s.blockObjects(ctx, blocks)
+	objects, err := s.importBlockObjects(ctx, blocks)
 	if errors.Is(err, ErrIndexRebuild) {
 		for _, block := range blocks {
 			if repairErr := s.RepairBlock(ctx, block); repairErr != nil {
 				return ImportResult{}, repairErr
 			}
 		}
-		objects, err = s.blockObjects(ctx, blocks)
+		objects, err = s.importBlockObjects(ctx, blocks)
 	}
 	if err != nil {
 		return ImportResult{}, err
@@ -355,6 +355,61 @@ func (s Index) validatedNarrativesPresent(ctx context.Context, setHash string, o
 		return false, err
 	}
 	return true, nil
+}
+
+// importBlockObjects reuses private snapshots from indexed reads and archive
+// publication plans.
+// The seal must reconstruct the supplied bytes exactly; exported Objects are
+// never trusted. A later inventory mutation cannot change these immutable wire
+// observations. Fresh reads still verify/repair the inventory, and dependency
+// selectors and semantic state retain their own transaction guards.
+func (s Index) importBlockObjects(ctx context.Context, blocks []Block) ([]portable.EncodedEnvelope, error) {
+	// Preserve the batched inventory path for callers with no private snapshots.
+	hasSnapshot := false
+	for _, block := range blocks {
+		if block.validated != nil {
+			hasSnapshot = true
+			break
+		}
+	}
+	if !hasSnapshot {
+		return s.blockObjects(ctx, blocks)
+	}
+	var result []portable.EncodedEnvelope
+	seen := make(map[string]bool)
+	count := 0
+	for _, block := range blocks {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var objects []portable.EncodedEnvelope
+		sealed := block.matchesValidatedContents(s.Lineage)
+		if sealed {
+			objects = block.validated.objects
+		} else {
+			var err error
+			objects, err = s.blockObjects(ctx, []Block{block})
+			if err != nil {
+				return nil, err
+			}
+		}
+		count += len(objects)
+		if count > portable.MaxRecordCount {
+			return nil, fmt.Errorf("history block records exceed count bound")
+		}
+		for _, object := range objects {
+			hash := object.Envelope.EnvelopeSHA256
+			if !seen[hash] {
+				seen[hash] = true
+				// Keep the private seal private even if a caller changes results.
+				if sealed {
+					object = copyEnvelope(object)
+				}
+				result = append(result, object)
+			}
+		}
+	}
+	return result, nil
 }
 
 func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.EncodedEnvelope, error) {

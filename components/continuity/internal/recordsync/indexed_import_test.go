@@ -81,6 +81,26 @@ func TestBlockImportMatchesFullScanForFork(t *testing.T) {
 		}
 	}
 	index := Index{DB: indexed, ProjectID: indexedID, Lineage: lineage}
+	root, err := OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	var scanned []Block
+	for _, block := range blocks {
+		if _, err := PublishBlock(root, lineage, block); err != nil {
+			t.Fatal(err)
+		}
+		path, err := blockPath(lineage, block.Hash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		read, err := index.ReadBlock(ctx, root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanned = append(scanned, read)
+	}
 	for round := 0; round < 2; round++ {
 		var objects []portable.EncodedEnvelope
 		for _, block := range blocks {
@@ -96,7 +116,11 @@ func TestBlockImportMatchesFullScanForFork(t *testing.T) {
 			}
 		}
 		want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, objects)
-		got, gotErr := index.ImportBlocks(ctx, blocks)
+		input := blocks
+		if round == 1 {
+			input = scanned
+		}
+		got, gotErr := index.ImportBlocks(ctx, input)
 		if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
 			t.Fatalf("round %d: full=%+v %v indexed=%+v %v", round, want, wantErr, got, gotErr)
 		}

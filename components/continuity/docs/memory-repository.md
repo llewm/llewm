@@ -304,6 +304,15 @@ after an in-place edit that preserves mtime. Unknown, damaged, changing or
 unsupported metadata takes the complete scan path. Independent inventory
 rebuilds always scan the endpoint directly.
 
+Indexed block reads and archive publication plans keep private copies of their
+verified envelopes. Import reuses each copy when it reconstructs the supplied
+block bytes exactly, avoiding
+a second inventory query and envelope decode during the same cycle. Exported
+parsed fields cannot change that copy. Blocks without a matching copy use the
+ordinary inventory validation and repair path. Later scans still check the
+inventory; dependency selectors and local semantic state keep their separate
+transaction guards. This reuse does not prove delivery or semantic acceptance.
+
 This is local directory-membership evidence, not external delivery, provenance
 or semantic import evidence. Manifest traversal, block reads and complete import
 remain. Folder publication now consumes the discovered membership delta, but
