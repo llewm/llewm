@@ -179,6 +179,8 @@ binds each complete selector set and its support flag to an immutable envelope
 hash and interpretation version. Missing, stale or damaged sets are decoded and
 replaced atomically; cache access failures use the full importer. These are
 disposable derived checksums, not authentication or semantic import receipts.
+Nested prior/any revision selectors consume each matching target once during
+closure traversal, avoiding repeated scans of the same revision history.
 Loading selectors and assembling the affected graph still visit the supplied
 snapshot; payload decoders are reused, but this is not a scaling guarantee.
 

@@ -84,6 +84,7 @@ func dependencyClosureWithSelectors(ctx context.Context, objects, changed []port
 		})
 		reverse[key] = list
 	}
+	sortedRanges := make(map[dependencyIdentity]bool)
 	selected := make(map[string]bool)
 	visitedSelectors := make(map[portable.ImportDependency]bool)
 	visitedRevisions := make(map[dependencyRevision]bool)
@@ -130,11 +131,22 @@ func dependencyClosureWithSelectors(ctx context.Context, objects, changed []port
 				}
 				continue
 			}
-			for _, target := range identities[dependencyIdentity{selector.RecordType, selector.RecordID}] {
-				if dependencyMatches(selector, byHash[target].Envelope.RecordRevision) {
-					add(target)
-				}
+			targetKey := dependencyIdentity{selector.RecordType, selector.RecordID}
+			list := identities[targetKey]
+			// Prior/any selectors select nested prefixes. Sort on first use
+			// and consume each target once across all bounds for this identity.
+			// Exact-only identities need no range sorting.
+			if !sortedRanges[targetKey] {
+				sort.Slice(list, func(i, j int) bool {
+					return byHash[list[i]].Envelope.RecordRevision < byHash[list[j]].Envelope.RecordRevision
+				})
+				sortedRanges[targetKey] = true
 			}
+			for len(list) > 0 && dependencyMatches(selector, byHash[list[0]].Envelope.RecordRevision) {
+				add(list[0])
+				list = list[1:]
+			}
+			identities[targetKey] = list
 		}
 		list := reverse[key]
 		for len(list) > 0 && dependencyMatches(list[len(list)-1].selector, e.RecordRevision) {

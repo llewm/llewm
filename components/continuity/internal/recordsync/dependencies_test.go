@@ -3,7 +3,9 @@ package recordsync
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -236,5 +238,85 @@ func TestDependencyClosurePublishedReleasePriorHead(t *testing.T) {
 	selected, ok := dependencyClosure(ctx, withoutPrior, []portable.EncodedEnvelope{prior})
 	if !ok || len(selected) != len(exported.Envelopes) {
 		t.Fatalf("late prior head missed closure: %v %d/%d", ok, len(selected), len(exported.Envelopes))
+	}
+}
+
+// Compare with a deliberately simple fixed-point graph walk. This exercises
+// arbitrary queue order, nested ranges, missing targets, cycles and exact forks
+// independently of the production traversal's sorted, consuming indexes.
+func TestDependencyClosureRangeDifferential(t *testing.T) {
+	rng := rand.New(rand.NewSource(47))
+	for trial := 0; trial < 200; trial++ {
+		var objects []portable.EncodedEnvelope
+		selectors := map[string][]portable.ImportDependency{}
+		for i := 0; i < 40; i++ {
+			hash := fmt.Sprintf("%03d", i)
+			e := portable.Envelope{EnvelopeSHA256: hash, RecordType: fmt.Sprint(rng.Intn(3)), RecordID: fmt.Sprint(rng.Intn(4)), RecordRevision: 1 + rng.Intn(8)}
+			objects = append(objects, portable.EncodedEnvelope{Envelope: e})
+			for j := rng.Intn(3); j > 0; j-- {
+				selectors[hash] = append(selectors[hash], portable.ImportDependency{RecordType: fmt.Sprint(rng.Intn(3)), RecordID: fmt.Sprint(rng.Intn(5)), Mode: []string{portable.DependencyExact, portable.DependencyAny, portable.DependencyPrior}[rng.Intn(3)], Revision: 1 + rng.Intn(10)})
+			}
+		}
+		changed := []portable.EncodedEnvelope{objects[rng.Intn(len(objects))]}
+		selected := map[string]bool{changed[0].Envelope.EnvelopeSHA256: true}
+		matches := func(s portable.ImportDependency, e portable.Envelope) bool {
+			return s.RecordType == e.RecordType && s.RecordID == e.RecordID && (s.Mode == portable.DependencyAny || s.Mode == portable.DependencyExact && s.Revision == e.RecordRevision || s.Mode == portable.DependencyPrior && e.RecordRevision < s.Revision)
+		}
+		for {
+			before := len(selected)
+			for _, a := range objects {
+				for _, b := range objects {
+					ea, eb := a.Envelope, b.Envelope
+					linked := ea.RecordType == eb.RecordType && ea.RecordID == eb.RecordID && ea.RecordRevision == eb.RecordRevision
+					for _, s := range selectors[ea.EnvelopeSHA256] {
+						linked = linked || matches(s, eb)
+					}
+					if linked && (selected[ea.EnvelopeSHA256] || selected[eb.EnvelopeSHA256]) {
+						selected[ea.EnvelopeSHA256], selected[eb.EnvelopeSHA256] = true, true
+					}
+				}
+			}
+			if len(selected) == before {
+				break
+			}
+		}
+		got, ok := dependencyClosureWithSelectors(context.Background(), objects, changed, func(e portable.Envelope) ([]portable.ImportDependency, bool) {
+			return selectors[e.EnvelopeSHA256], true
+		})
+		var wantHashes, gotHashes []string
+		for hash := range selected {
+			wantHashes = append(wantHashes, hash)
+		}
+		sort.Strings(wantHashes)
+		for _, object := range got {
+			gotHashes = append(gotHashes, object.Envelope.EnvelopeSHA256)
+		}
+		if !ok || !reflect.DeepEqual(gotHashes, wantHashes) {
+			t.Fatalf("trial %d: got %v (ok %v), want %v", trial, gotHashes, ok, wantHashes)
+		}
+	}
+}
+
+// Repeated prior bounds used to revisit every revision for every selector.
+// Fixture setup is outside timing; this measures graph traversal, not a sync.
+func BenchmarkDependencyClosurePriorHistory(b *testing.B) {
+	for _, size := range []int{500, 5669, 20000} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) {
+			objects := make([]portable.EncodedEnvelope, size)
+			for i := range objects {
+				objects[i].Envelope = portable.Envelope{EnvelopeSHA256: fmt.Sprint(i), RecordType: "roadmap_release", RecordID: "release", RecordRevision: i + 1}
+			}
+			dependencies := func(e portable.Envelope) ([]portable.ImportDependency, bool) {
+				return []portable.ImportDependency{{RecordType: e.RecordType, RecordID: e.RecordID, Mode: portable.DependencyPrior, Revision: e.RecordRevision}}, true
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, ok := dependencyClosureWithSelectors(context.Background(), objects, objects[len(objects)-1:], dependencies)
+				if !ok || len(result) != size {
+					b.Fatal("incomplete closure")
+				}
+			}
+		})
 	}
 }
