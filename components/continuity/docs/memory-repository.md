@@ -173,8 +173,14 @@ release. Plan predecessors and comparison revisions come from canonical payloads
 not informational wire references. The canonical importer validates the selected
 records; the writer transaction still compares the complete local state before
 renewing reuse evidence. Unknown or recovery-sensitive dependency rules retain
-the full importer. Building the dependency graph still visits the complete
-snapshot; this is not a persistent incremental graph or a scaling guarantee.
+the full importer. Migration 088 persists typed selectors with forward/reverse
+indexes and no target foreign key, preserving unresolved dependencies. A checksum
+binds each complete selector set and its support flag to an immutable envelope
+hash and interpretation version. Missing, stale or damaged sets are decoded and
+replaced atomically; cache access failures use the full importer. These are
+disposable derived checksums, not authentication or semantic import receipts.
+Loading selectors and assembling the affected graph still visit the supplied
+snapshot; payload decoders are reused, but this is not a scaling guarantee.
 
 The immediate sync JSON result includes `unchanged: true` when this proof skips
 export, archive content reads, block processing, and semantic replay. Migration
@@ -289,7 +295,7 @@ This is local directory-membership evidence, not external delivery, provenance
 or semantic import evidence. Manifest traversal, block reads and complete import
 remain. Folder publication now consumes the discovered membership delta, but
 discovery still traverses the complete root union. Git delta discovery across
-cycles, persistent dependency indexing and complete-cycle scaling qualification remain
+cycles, incremental graph discovery and complete-cycle scaling qualification remain
 unfinished. These segments alone make no end-to-end speed or scaling claim
 and do not convert block format 4.
 

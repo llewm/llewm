@@ -38,6 +38,7 @@ func TestDependencyClosureTypedRevisionsAndLateTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
 	var latestResource, latestPlan, note portable.EncodedEnvelope
 	for _, object := range exported.Envelopes {
 		switch object.Envelope.RecordType {
@@ -73,7 +74,38 @@ func TestDependencyClosureTypedRevisionsAndLateTargets(t *testing.T) {
 			if !reflect.DeepEqual(got, tc.kinds) {
 				t.Fatalf("selected %v, want %v", got, tc.kinds)
 			}
+			persisted, complete := index.indexedDependencyClosure(ctx, exported.Envelopes, []portable.EncodedEnvelope{tc.seed})
+			if !complete || !reflect.DeepEqual(persisted, selected) {
+				t.Fatal("persistent selectors differ from canonical graph")
+			}
 		})
+	}
+	// A cache hit must work without writing. This distinguishes reuse from a
+	// silent re-decode/rebuild on every invocation.
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER reject_dependency_cache_write BEFORE INSERT ON history_index_dependency_records BEGIN SELECT RAISE(ABORT,'unexpected dependency rewrite'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := index.indexedDependencyClosure(ctx, exported.Envelopes, []portable.EncodedEnvelope{latestResource}); !ok {
+		t.Fatal("complete cache was not reusable")
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER reject_dependency_cache_write`); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []string{
+		`DELETE FROM history_index_dependencies WHERE target_type='resource'`,
+		`UPDATE history_index_dependencies SET target_revision=999 WHERE target_type='resource'`,
+		`UPDATE history_index_dependency_records SET supported=0 WHERE supported=1`,
+		`UPDATE history_index_dependency_records SET selectors_sha256='damaged'`,
+		`UPDATE history_index_dependency_records SET index_version=0`,
+		`DELETE FROM history_index_dependency_records`,
+	} {
+		if _, err := db.ExecContext(ctx, mutation); err != nil {
+			t.Fatal(err)
+		}
+		selected, ok := index.indexedDependencyClosure(ctx, exported.Envelopes, []portable.EncodedEnvelope{latestResource})
+		if !ok || len(selected) != 3 {
+			t.Fatalf("damaged cache was not repaired: %s (%v %d)", mutation, ok, len(selected))
+		}
 	}
 	// Preserve unresolved selectors so late target arrivals find earlier owners.
 	selected, ok := dependencyClosure(ctx, []portable.EncodedEnvelope{note}, []portable.EncodedEnvelope{note})
@@ -83,6 +115,31 @@ func TestDependencyClosureTypedRevisionsAndLateTargets(t *testing.T) {
 	selected, ok = dependencyClosure(ctx, []portable.EncodedEnvelope{note, latestResource}, []portable.EncodedEnvelope{latestResource})
 	if !ok || len(selected) != 2 {
 		t.Fatalf("late target missed dependent: %v %d", ok, len(selected))
+	}
+	selected, ok = index.indexedDependencyClosure(ctx, []portable.EncodedEnvelope{note}, []portable.EncodedEnvelope{note})
+	if !ok || len(selected) != 1 {
+		t.Fatal("cache pulled a target outside the supplied snapshot")
+	}
+	selected, ok = index.indexedDependencyClosure(ctx, []portable.EncodedEnvelope{note, latestResource}, []portable.EncodedEnvelope{latestResource})
+	if !ok || len(selected) != 2 {
+		t.Fatal("persistent unresolved selector missed arriving target")
+	}
+	// A failed rebuild may not leave a partial batch that looks complete.
+	if _, err := db.ExecContext(ctx, `DELETE FROM history_index_dependency_records`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER reject_dependency_edge BEFORE INSERT ON history_index_dependencies BEGIN SELECT RAISE(ABORT,'fixture failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if selected, ok := index.indexedDependencyClosure(ctx, exported.Envelopes, []portable.EncodedEnvelope{latestResource}); ok || selected != nil {
+		t.Fatal("failed cache write produced closure")
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_dependency_records`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial dependency batch: %d %v", count, err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER reject_dependency_edge`); err != nil {
+		t.Fatal(err)
 	}
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()

@@ -25,6 +25,10 @@ type dependencyEdge struct {
 // Unknown rules decline the optimization rather than asserting independence.
 // Building this graph still visits the snapshot; it is not a durable delta proof.
 func dependencyClosure(ctx context.Context, objects, changed []portable.EncodedEnvelope) ([]portable.EncodedEnvelope, bool) {
+	return dependencyClosureWithSelectors(ctx, objects, changed, portable.ImportDependencies)
+}
+
+func dependencyClosureWithSelectors(ctx context.Context, objects, changed []portable.EncodedEnvelope, dependencies func(portable.Envelope) ([]portable.ImportDependency, bool)) ([]portable.EncodedEnvelope, bool) {
 	byHash := make(map[string]portable.EncodedEnvelope, len(objects))
 	identities := make(map[dependencyIdentity][]string)
 	exactIdentities := make(map[dependencyRevision][]string)
@@ -44,7 +48,7 @@ func dependencyClosure(ctx context.Context, objects, changed []portable.EncodedE
 		if total > portable.MaxRecordsBytes {
 			return nil, false
 		}
-		selectors, ok := portable.ImportDependencies(e)
+		selectors, ok := dependencies(e)
 		if !ok {
 			return nil, false
 		}

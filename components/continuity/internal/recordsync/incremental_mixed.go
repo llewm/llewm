@@ -63,7 +63,7 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 	if !eligible || oldHash != prior || len(old) != len(members) || len(added) == 0 {
 		return ImportResult{}, false, nil
 	}
-	affected, complete := dependencyClosure(ctx, objects, added)
+	affected, complete := s.indexedDependencyClosure(ctx, objects, added)
 	if !complete {
 		return ImportResult{}, false, nil
 	}
