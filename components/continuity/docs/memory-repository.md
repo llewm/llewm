@@ -226,17 +226,20 @@ permission. Snapshots still validate archive bytes and indexed references;
 damaged inventories follow the existing repair path. Existing duplicate derived
 rows are not pruned by this change.
 
-Within a locked Git block cycle, tracked-path discovery reuses immutable Git
-tree nodes. The tree is taken from the index, including staged additions and
+Tracked-path discovery reuses immutable Git tree nodes across locked block
+cycles. The tree is taken from the index, including staged additions and
 deletions, rather than assuming HEAD describes interrupted publication state.
-Unchanged subtrees reuse membership; changed nodes are listed again. Uncertain
+Raw tree objects are cached locally under the archive's `status/git-trees`.
+Each read verifies the complete bytes against the selected Git SHA-1 or SHA-256
+object ID before parsing membership. Only missing, changed or damaged nodes
+are fetched from Git again; cache writes are optional. Uncertain
 or unmerged indexes and discovery limits fall back to the complete tracked-path
 listing. Paths use NUL delimiters. Every discovered block still undergoes the
 ordinary working-file and content validation, so a tree cache cannot conceal
-missing or corrupt working files. The cache ends with the cycle. This is a
-precursor to durable manifests; the current flat block namespace and complete
-content validation still visit old history. It does not establish fixed-delta
-scaling or replace full recovery.
+missing or corrupt working files. Cache contents are bounded per object and
+root-relative file access confines local I/O. Cached node reads, path enumeration
+and complete content validation still visit old history. This reduces repeated
+Git discovery; it does not establish fixed-delta scaling or replace full recovery.
 
 Folder publication writes bounded, content-addressed arrival segments after
 publishing its authorized blocks. The validated catalog from discovery supplies
@@ -294,8 +297,8 @@ rebuilds always scan the endpoint directly.
 This is local directory-membership evidence, not external delivery, provenance
 or semantic import evidence. Manifest traversal, block reads and complete import
 remain. Folder publication now consumes the discovered membership delta, but
-discovery still traverses the complete root union. Git delta discovery across
-cycles, incremental graph discovery and complete-cycle scaling qualification remain
+discovery still traverses the complete root union. Incremental graph discovery
+and complete-cycle scaling qualification remain
 unfinished. These segments alone make no end-to-end speed or scaling claim
 and do not convert block format 4.
 

@@ -50,7 +50,7 @@ func (g git) run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), err
 }
 
-func (g git) execOut(ctx context.Context, stdin io.Reader, stdout *bytes.Buffer, args []string) error {
+func (g git) execOut(ctx context.Context, stdin io.Reader, stdout io.Writer, args []string) error {
 	base := append([]string{"-C", g.Dir}, g.config()...)
 	command := gitenv.Command(ctx, append(base, args...)...)
 	if !g.Interactive || g.NoPrompt {

@@ -3,6 +3,7 @@ package memsync
 import (
 	"context"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -10,13 +11,17 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
 
-// blockTreeDiscovery caches immutable Git tree nodes for one locked cycle.
+// blockTreeDiscovery caches immutable Git tree nodes for one locked cycle,
+// optionally backed by local raw tree objects verified against their Git IDs.
 // Tree identity proves membership only. Every returned path still goes through
 // the ordinary filesystem and block validation, including on a cache hit.
-// No cache survives a cycle or becomes a receipt for semantic import.
+// Persisted membership is never a receipt for semantic import.
 type blockTreeDiscovery struct {
-	nodes   map[string][]blockTreeEntry
-	entries int
+	nodes     map[string][]blockTreeEntry
+	entries   int
+	cache     *os.Root
+	gitReads  int
+	cacheHits int
 }
 
 type blockTreeEntry struct{ name, kind, oid string }
@@ -60,24 +65,13 @@ func (d *blockTreeDiscovery) read(ctx context.Context, repo git, oid string) ([]
 			return nil, fmt.Errorf("invalid tree identity")
 		}
 	}
-	listing, err := repo.run(ctx, "ls-tree", "-z", oid)
+	entries, err := d.treeEntries(ctx, repo, oid)
 	if err != nil {
 		return nil, err
 	}
-	var entries []blockTreeEntry
-	if listing != "" {
-		for _, item := range strings.Split(strings.TrimSuffix(listing, "\x00"), "\x00") {
-			header, name, ok := strings.Cut(item, "\t")
-			fields := strings.Fields(header)
-			if !ok || len(fields) != 3 || name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
-				return nil, fmt.Errorf("invalid tree entry")
-			}
-			d.entries++
-			if d.entries > recordsync.MaxScanEntries {
-				return nil, fmt.Errorf("tree discovery exceeds bounds")
-			}
-			entries = append(entries, blockTreeEntry{name: name, kind: fields[1], oid: fields[2]})
-		}
+	d.entries += len(entries)
+	if d.entries > recordsync.MaxScanEntries {
+		return nil, fmt.Errorf("tree discovery exceeds bounds")
 	}
 	if d.nodes == nil {
 		d.nodes = make(map[string][]blockTreeEntry)

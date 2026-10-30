@@ -63,6 +63,10 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if s.Archive.Lineage != identity.LineageID {
 		return result, fmt.Errorf("matching history archive is required")
 	}
+	if cache, err := openBlockTreeCache(s.Archive.Directory); err == nil {
+		defer cache.Close()
+		s.discovery.cache = cache
+	}
 	// Rebuild receipt membership and provenance from already tracked local
 	// history before classifying operational records as locally originated or
 	// planning publication. This also repairs damaged entries that are present.
