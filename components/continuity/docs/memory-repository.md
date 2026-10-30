@@ -246,8 +246,16 @@ The manifest reader validates lineage, canonical framing, hashes, radix position
 and traversal bounds. Its delta operation skips equal subtree hashes only when
 the caller already holds the previous validated catalog; missing or damaged
 metadata is an error, never an empty inventory. Block bytes still require their
-own validation. Folder sync currently publishes these catalogs while retaining
-the complete block scan/import path. Durable catalog selection, ingestion-order
+own validation. Root discovery selects all observed immutable announcements and
+unions their catalogs; it never chooses a snapshot by publication time or file
+modification time. Shared manifest nodes are validated once per catalog read.
+Missing announcements, unexpected root entries, damaged nodes, exceeded bounds
+or an observed root-set change fail the whole read without a partial inventory.
+Interrupted staging files are ignored. Even a valid union can omit block files
+whose writer has not announced a root, so it is not proof of endpoint coverage.
+
+Folder sync currently publishes these catalogs while retaining the complete
+block scan/import path. Durable transport coverage receipts, ingestion-order
 publication segments, transport use of catalog deltas, typed dependency closure
 and complete-cycle scaling qualification remain unfinished. These manifests
 alone make no end-to-end speed or scaling claim and do not convert block format 4.

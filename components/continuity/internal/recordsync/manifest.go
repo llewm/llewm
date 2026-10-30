@@ -191,48 +191,9 @@ func PublishManifest(ctx context.Context, root *os.Root, lineage string, hashes 
 // ManifestBlocks reads a complete snapshot, validating every manifest node.
 // It deliberately does not trust a manifest as proof of block byte validity.
 func ManifestBlocks(ctx context.Context, root *os.Root, lineage, hash string) ([]string, error) {
-	if err := readManifestAnnouncement(root, lineage, hash); err != nil {
+	catalog, err := readManifestCatalog(ctx, root, lineage, []string{hash})
+	if err != nil {
 		return nil, err
 	}
-	var result []string
-	visited := 0
-	var walk func(string, string) error
-	walk = func(hash, prefix string) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		visited++
-		if visited > MaxScanEntries {
-			return fmt.Errorf("manifest traversal exceeds bounds")
-		}
-		path, err := manifestPath(lineage, hash)
-		if err != nil {
-			return err
-		}
-		body, err := ReadFile(root, path, MaxManifestBytes)
-		if err != nil {
-			return err
-		}
-		m, err := DecodeManifest(lineage, hash, prefix, body)
-		if err != nil {
-			return err
-		}
-		result = append(result, m.Blocks...)
-		if len(result) > portable.MaxRecordCount {
-			return fmt.Errorf("manifest blocks exceed bounds")
-		}
-		for _, digit := range "0123456789abcdef" {
-			child := prefix + string(digit)
-			if hash, ok := m.Children[child]; ok {
-				if err := walk(hash, child); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	if err := walk(hash, ""); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return catalog.Blocks, nil
 }
