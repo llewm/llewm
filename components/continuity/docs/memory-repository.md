@@ -179,10 +179,15 @@ binds each complete selector set and its support flag to an immutable envelope
 hash and interpretation version. Missing, stale or damaged sets are decoded and
 replaced atomically; cache access failures use the full importer. These are
 disposable derived checksums, not authentication or semantic import receipts.
-Nested prior/any revision selectors consume each matching target once during
-closure traversal, avoiding repeated scans of the same revision history.
-Loading selectors and assembling the affected graph still visit the supplied
-snapshot; payload decoders are reused, but this is not a scaling guarantee.
+Closure traversal discovers earlier dependents through SQLite's typed reverse
+index and reads forward selectors only for reached records. Nested prior/any
+selectors consume each matching target once, and reverse range lookups fetch
+only newly matching bounds. Selector verification releases each bounded batch
+before loading the next instead of retaining the complete edge graph. Verification
+and traversal share one SQLite snapshot; warm reads leave the writer available,
+while repairs restart under a writer transaction and recheck the snapshot.
+Complete selector checks and snapshot identity assembly still visit old history;
+this is not a complete-cycle scaling guarantee.
 
 The immediate sync JSON result includes `unchanged: true` when this proof skips
 export, archive content reads, block processing, and semantic replay. Migration

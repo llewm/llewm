@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,8 @@ type indexedDependencies struct {
 	Supported bool
 	Selectors []portable.ImportDependency
 }
+
+var errDependencyRepair = errors.New("dependency selector repair required")
 
 // dependencyDigest seals a complete derived selector set to its immutable
 // envelope identity and interpretation version. It detects cache corruption;
@@ -33,21 +36,68 @@ func dependencyDigest(hash string, value indexedDependencies) string {
 // atomically. Neither a cached selector nor its digest bypasses the canonical
 // importer or the transaction's complete local-state guard.
 func (s Index) indexedDependencyClosure(ctx context.Context, objects, changed []portable.EncodedEnvelope) ([]portable.EncodedEnvelope, bool) {
-	selectors, err := s.dependencySelectors(ctx, objects)
-	if err != nil {
-		return nil, false
+	for _, repair := range []bool{false, true} {
+		// Warm reads do not reserve the SQLite writer. A repair restarts with
+		// an immediate writer transaction and rechecks the complete snapshot.
+		tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: !repair})
+		if err != nil {
+			return nil, false
+		}
+		// Verification and indexed traversal share one SQLite snapshot.
+		// New arrivals commonly need cache rows. Detect that before scanning
+		// the old snapshot, so the writer retry does not repeat that work.
+		if !repair {
+			_, err = s.dependencySelectorsWithin(ctx, tx, changed, false, false)
+		}
+		if err == nil {
+			_, err = s.dependencySelectorsWithin(ctx, tx, objects, false, repair)
+		}
+		if err != nil {
+			tx.Rollback()
+			if !repair && errors.Is(err, errDependencyRepair) {
+				continue
+			}
+			return nil, false
+		}
+		result, ok := s.dependencyClosureWithin(ctx, tx, objects, changed)
+		if !ok {
+			tx.Rollback()
+			return nil, false
+		}
+		if tx.Commit() != nil {
+			return nil, false
+		}
+		return result, true
 	}
-	return dependencyClosureWithSelectors(ctx, objects, changed, func(e portable.Envelope) ([]portable.ImportDependency, bool) {
-		value, ok := selectors[e.EnvelopeSHA256]
-		return value.Selectors, ok && value.Supported
-	})
+	return nil, false
 }
 
 func (s Index) dependencySelectors(ctx context.Context, objects []portable.EncodedEnvelope) (map[string]indexedDependencies, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	result, err := s.dependencySelectorsWithin(ctx, tx, objects, true, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// The traversal needs only a verified persistent index, so it releases each
+// batch's selectors after checking its seals rather than retaining every edge.
+func (s Index) dependencySelectorsWithin(ctx context.Context, tx *sql.Tx, objects []portable.EncodedEnvelope, collect, repair bool) (map[string]indexedDependencies, error) {
 	if len(objects) > portable.MaxRecordCount {
 		return nil, fmt.Errorf("dependency records exceed bounds")
 	}
-	result := make(map[string]indexedDependencies, len(objects))
+	var result map[string]indexedDependencies
+	if collect {
+		result = make(map[string]indexedDependencies, len(objects))
+	}
 	seen := make(map[string]bool, len(objects))
 	unique := make([]portable.EncodedEnvelope, 0, len(objects))
 	total := 0
@@ -75,10 +125,11 @@ func (s Index) dependencySelectors(ctx context.Context, objects []portable.Encod
 			args = append(args, object.Envelope.EnvelopeSHA256)
 		}
 		in := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
-		rows, err := s.DB.QueryContext(ctx, `SELECT envelope_hash,supported,selectors_sha256 FROM history_index_dependency_records WHERE project_id=? AND index_version=? AND envelope_hash IN (`+in+`)`, args...)
+		rows, err := tx.QueryContext(ctx, `SELECT envelope_hash,supported,selectors_sha256 FROM history_index_dependency_records WHERE project_id=? AND index_version=? AND envelope_hash IN (`+in+`)`, args...)
 		if err != nil {
 			return nil, err
 		}
+		values := make(map[string]indexedDependencies, len(batch))
 		seals := make(map[string]string, len(batch))
 		for rows.Next() {
 			var hash, digest string
@@ -87,7 +138,7 @@ func (s Index) dependencySelectors(ctx context.Context, objects []portable.Encod
 				rows.Close()
 				return nil, err
 			}
-			result[hash] = indexedDependencies{Supported: supported}
+			values[hash] = indexedDependencies{Supported: supported}
 			seals[hash] = digest
 		}
 		err = rows.Err()
@@ -95,7 +146,7 @@ func (s Index) dependencySelectors(ctx context.Context, objects []portable.Encod
 		if err != nil {
 			return nil, err
 		}
-		rows, err = s.DB.QueryContext(ctx, `SELECT d.envelope_hash,d.target_type,d.target_id,d.selection_mode,d.target_revision FROM history_index_dependencies d JOIN history_index_dependency_records r ON r.project_id=d.project_id AND r.envelope_hash=d.envelope_hash WHERE d.project_id=? AND r.index_version=? AND d.envelope_hash IN (`+in+`) ORDER BY d.envelope_hash,d.target_type,d.target_id,d.selection_mode,d.target_revision`, args...)
+		rows, err = tx.QueryContext(ctx, `SELECT d.envelope_hash,d.target_type,d.target_id,d.selection_mode,d.target_revision FROM history_index_dependencies d JOIN history_index_dependency_records r ON r.project_id=d.project_id AND r.envelope_hash=d.envelope_hash WHERE d.project_id=? AND r.index_version=? AND d.envelope_hash IN (`+in+`) ORDER BY d.envelope_hash,d.target_type,d.target_id,d.selection_mode,d.target_revision`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -111,9 +162,9 @@ func (s Index) dependencySelectors(ctx context.Context, objects []portable.Encod
 				rows.Close()
 				return nil, fmt.Errorf("dependency edges exceed bounds")
 			}
-			value := result[hash]
+			value := values[hash]
 			value.Selectors = append(value.Selectors, selector)
-			result[hash] = value
+			values[hash] = value
 		}
 		err = rows.Err()
 		rows.Close()
@@ -123,12 +174,21 @@ func (s Index) dependencySelectors(ctx context.Context, objects []portable.Encod
 		repairs := make(map[string]indexedDependencies)
 		for _, object := range batch {
 			hash := object.Envelope.EnvelopeSHA256
-			value, exists := result[hash]
+			value, exists := values[hash]
 			if !exists || seals[hash] != dependencyDigest(hash, value) {
+				if !repair {
+					return nil, errDependencyRepair
+				}
 				refs, supported := portable.ImportDependencies(object.Envelope)
 				value = indexedDependencies{Supported: supported, Selectors: refs}
-				result[hash] = value
+				values[hash] = value
 				repairs[hash] = value
+			}
+			if !collect && !value.Supported {
+				return nil, fmt.Errorf("unsupported dependency rules")
+			}
+			if collect {
+				result[hash] = value
 			}
 			selectedEdges += len(value.Selectors)
 			if selectedEdges > MaxScanEntries {
@@ -136,7 +196,7 @@ func (s Index) dependencySelectors(ctx context.Context, objects []portable.Encod
 			}
 		}
 		if len(repairs) > 0 {
-			if err := s.saveDependencySelectors(ctx, repairs); err != nil {
+			if err := s.saveDependencySelectorsWithin(ctx, tx, repairs); err != nil {
 				return nil, err
 			}
 		}
@@ -150,6 +210,13 @@ func (s Index) saveDependencySelectors(ctx context.Context, values map[string]in
 		return err
 	}
 	defer tx.Rollback()
+	if err := s.saveDependencySelectorsWithin(ctx, tx, values); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s Index) saveDependencySelectorsWithin(ctx context.Context, tx *sql.Tx, values map[string]indexedDependencies) error {
 	for hash, value := range values {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_dependency_records WHERE project_id=? AND envelope_hash=?`, s.ProjectID, hash); err != nil {
 			return err
@@ -161,7 +228,7 @@ func (s Index) saveDependencySelectors(ctx context.Context, values map[string]in
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func insertDependencyEdges(ctx context.Context, tx *sql.Tx, project, hash string, selectors []portable.ImportDependency) error {

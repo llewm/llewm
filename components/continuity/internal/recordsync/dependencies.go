@@ -29,24 +29,18 @@ func dependencyClosure(ctx context.Context, objects, changed []portable.EncodedE
 }
 
 func dependencyClosureWithSelectors(ctx context.Context, objects, changed []portable.EncodedEnvelope, dependencies func(portable.Envelope) ([]portable.ImportDependency, bool)) ([]portable.EncodedEnvelope, bool) {
-	byHash := make(map[string]portable.EncodedEnvelope, len(objects))
-	identities := make(map[dependencyIdentity][]string)
-	exactIdentities := make(map[dependencyRevision][]string)
 	forward := make(map[string][]portable.ImportDependency)
 	reverse := make(map[dependencyIdentity][]dependencyEdge)
 	exactReverse := make(map[dependencyRevision][]string)
-	edges, total := 0, 0
+	edges := 0
+	seen := make(map[string]bool)
 	for _, object := range objects {
-		if ctx.Err() != nil || len(byHash) >= portable.MaxRecordCount {
+		if ctx.Err() != nil {
 			return nil, false
 		}
 		e := object.Envelope
-		if _, ok := byHash[e.EnvelopeSHA256]; ok {
+		if seen[e.EnvelopeSHA256] {
 			continue
-		}
-		total += len(object.Bytes)
-		if total > portable.MaxRecordsBytes {
-			return nil, false
 		}
 		selectors, ok := dependencies(e)
 		if !ok {
@@ -56,11 +50,7 @@ func dependencyClosureWithSelectors(ctx context.Context, objects, changed []port
 		if edges > MaxScanEntries {
 			return nil, false
 		}
-		byHash[e.EnvelopeSHA256] = object
-		key := dependencyIdentity{e.RecordType, e.RecordID}
-		identities[key] = append(identities[key], e.EnvelopeSHA256)
-		exactKey := dependencyRevision{key, e.RecordRevision}
-		exactIdentities[exactKey] = append(exactIdentities[exactKey], e.EnvelopeSHA256)
+		seen[e.EnvelopeSHA256] = true
 		forward[e.EnvelopeSHA256] = selectors
 		for _, selector := range selectors {
 			key := dependencyIdentity{selector.RecordType, selector.RecordID}
@@ -83,6 +73,49 @@ func dependencyClosureWithSelectors(ctx context.Context, objects, changed []port
 			return a.Revision < b.Revision
 		})
 		reverse[key] = list
+	}
+	return traverseDependencies(ctx, objects, changed,
+		func(hash string) ([]portable.ImportDependency, bool) { return forward[hash], true },
+		func(e portable.Envelope) ([]string, bool) {
+			key := dependencyIdentity{e.RecordType, e.RecordID}
+			owners := exactReverse[dependencyRevision{key, e.RecordRevision}]
+			list := reverse[key]
+			for len(list) > 0 && dependencyMatches(list[len(list)-1].selector, e.RecordRevision) {
+				owners = append(owners, list[len(list)-1].owner)
+				list = list[:len(list)-1]
+			}
+			reverse[key] = list
+			return owners, true
+		})
+}
+
+// traverseDependencies keeps snapshot identities in memory, but lets the caller
+// discover forward/reverse edges only for records reached by the closure.
+func traverseDependencies(ctx context.Context, objects, changed []portable.EncodedEnvelope, forward func(string) ([]portable.ImportDependency, bool), reverse func(portable.Envelope) ([]string, bool)) ([]portable.EncodedEnvelope, bool) {
+	byHash := make(map[string]portable.EncodedEnvelope, len(objects))
+	identities := make(map[dependencyIdentity][]string)
+	exactIdentities := make(map[dependencyRevision][]string)
+	total := 0
+	for _, object := range objects {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		e := object.Envelope
+		if _, ok := byHash[e.EnvelopeSHA256]; ok {
+			continue
+		}
+		if len(byHash) >= portable.MaxRecordCount {
+			return nil, false
+		}
+		total += len(object.Bytes)
+		if total > portable.MaxRecordsBytes {
+			return nil, false
+		}
+		byHash[e.EnvelopeSHA256] = object
+		key := dependencyIdentity{e.RecordType, e.RecordID}
+		identities[key] = append(identities[key], e.EnvelopeSHA256)
+		exactKey := dependencyRevision{key, e.RecordRevision}
+		exactIdentities[exactKey] = append(exactIdentities[exactKey], e.EnvelopeSHA256)
 	}
 	sortedRanges := make(map[dependencyIdentity]bool)
 	selected := make(map[string]bool)
@@ -116,11 +149,21 @@ func dependencyClosureWithSelectors(ctx context.Context, objects, changed []port
 			for _, other := range exactIdentities[exactKey] {
 				add(other)
 			}
-			for _, owner := range exactReverse[exactKey] {
-				add(owner)
+			owners, ok := reverse(e)
+			if !ok {
+				return nil, false
+			}
+			for _, owner := range owners {
+				if _, present := byHash[owner]; present {
+					add(owner)
+				}
 			}
 		}
-		for _, selector := range forward[hash] {
+		selectors, ok := forward(hash)
+		if !ok {
+			return nil, false
+		}
+		for _, selector := range selectors {
 			if visitedSelectors[selector] {
 				continue
 			}
@@ -148,12 +191,6 @@ func dependencyClosureWithSelectors(ctx context.Context, objects, changed []port
 			}
 			identities[targetKey] = list
 		}
-		list := reverse[key]
-		for len(list) > 0 && dependencyMatches(list[len(list)-1].selector, e.RecordRevision) {
-			add(list[len(list)-1].owner)
-			list = list[:len(list)-1]
-		}
-		reverse[key] = list
 	}
 	sort.Strings(queue)
 	result := make([]portable.EncodedEnvelope, 0, len(queue))

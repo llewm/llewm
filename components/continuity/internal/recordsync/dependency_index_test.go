@@ -1,11 +1,15 @@
 package recordsync
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/resource"
 )
 
 func TestDependencySelectorBatchesAndProjectScope(t *testing.T) {
@@ -59,5 +63,61 @@ func TestDependencySelectorBatchesAndProjectScope(t *testing.T) {
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_dependency_records WHERE project_id=?`, project).Scan(&count); err != nil || count != 131 {
 		t.Fatalf("repaired membership: %d %v", count, err)
+	}
+}
+
+func TestDependencyLookupUsesVerifiedSnapshot(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "dependency-snapshot")
+	service := resource.Service{DB: db}
+	if _, err := service.Record(ctx, resource.Resource{ProjectID: project, ID: "host", Kind: "host", Title: "Host", Creator: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AddNote(ctx, resource.Note{ProjectID: project, ResourceID: "host", Text: "Observation", Authority: "machine_observed", Creator: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	export, err := portable.EncodeMemoryExport(ctx, db, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var changed []portable.EncodedEnvelope
+	for _, object := range export.Envelopes {
+		if object.Envelope.RecordType == "resource" {
+			changed = append(changed, object)
+		}
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	want, complete := index.indexedDependencyClosure(ctx, export.Envelopes, changed)
+	if !complete || len(want) != 2 {
+		t.Fatalf("fixture closure: %v %d", complete, len(want))
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := index.dependencySelectorsWithin(ctx, tx, export.Envelopes, false, false); err != nil {
+		t.Fatal(err)
+	}
+	// A different connection can write while the warm lookup holds a read
+	// snapshot. Its edge deletion must not hide the earlier note in that read.
+	if _, err := db.ExecContext(ctx, `DELETE FROM history_index_dependencies WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := index.dependencyClosureWithin(ctx, tx, export.Envelopes, changed)
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot changed: %v %d", ok, len(got))
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	// A subsequent read observes damage, restarts under a writer and repairs it.
+	got, ok = index.indexedDependencyClosure(ctx, export.Envelopes, changed)
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatal("next lookup failed to repair concurrent deletion")
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if got, ok := index.indexedDependencyClosure(canceled, export.Envelopes, changed); ok || got != nil {
+		t.Fatal("canceled lookup returned closure")
 	}
 }

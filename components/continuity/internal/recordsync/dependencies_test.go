@@ -245,6 +245,8 @@ func TestDependencyClosurePublishedReleasePriorHead(t *testing.T) {
 // arbitrary queue order, nested ranges, missing targets, cycles and exact forks
 // independently of the production traversal's sorted, consuming indexes.
 func TestDependencyClosureRangeDifferential(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "range-differential")
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
 	rng := rand.New(rand.NewSource(47))
 	for trial := 0; trial < 200; trial++ {
 		var objects []portable.EncodedEnvelope
@@ -293,6 +295,52 @@ func TestDependencyClosureRangeDifferential(t *testing.T) {
 		}
 		if !ok || !reflect.DeepEqual(gotHashes, wantHashes) {
 			t.Fatalf("trial %d: got %v (ok %v), want %v", trial, gotHashes, ok, wantHashes)
+		}
+		// Keep all 200 independent traversal cases, with a representative SQL
+		// subset: instrumented SQLite makes repeating every write under -race
+		// disproportionately expensive.
+		if trial >= 20 {
+			continue
+		}
+		// Persist synthetic selectors to compare SQLite discovery with the same
+		// independent reference. Normalize them as canonical decoders do, since
+		// duplicate selectors represent one edge in the persistent index.
+		values := make(map[string]indexedDependencies)
+		for _, object := range objects {
+			hash := object.Envelope.EnvelopeSHA256
+			unique := make(map[portable.ImportDependency]bool)
+			for _, selector := range selectors[hash] {
+				unique[selector] = true
+			}
+			var list []portable.ImportDependency
+			for selector := range unique {
+				list = append(list, selector)
+			}
+			sort.Slice(list, func(i, j int) bool {
+				a, b := list[i], list[j]
+				if a.RecordType != b.RecordType {
+					return a.RecordType < b.RecordType
+				}
+				if a.RecordID != b.RecordID {
+					return a.RecordID < b.RecordID
+				}
+				if a.Mode != b.Mode {
+					return a.Mode < b.Mode
+				}
+				return a.Revision < b.Revision
+			})
+			values[hash] = indexedDependencies{Supported: true, Selectors: list}
+		}
+		if err := index.saveDependencySelectors(ctx, values); err != nil {
+			t.Fatal(err)
+		}
+		persisted, complete := index.indexedDependencyClosure(ctx, objects, changed)
+		var persistedHashes []string
+		for _, object := range persisted {
+			persistedHashes = append(persistedHashes, object.Envelope.EnvelopeSHA256)
+		}
+		if !complete || !reflect.DeepEqual(persistedHashes, wantHashes) {
+			t.Fatalf("SQL trial %d: got %v (ok %v), want %v", trial, persistedHashes, complete, wantHashes)
 		}
 	}
 }
