@@ -150,6 +150,9 @@ type BlockScanResult struct {
 	Invalid int
 	// CatalogReused reports local membership receipt reuse, not semantic reuse.
 	CatalogReused bool
+	// Only a successful catalog read can supply publication membership. Keep
+	// this private and tied to the open transport root, not caller-editable data.
+	publicationBase *manifestPublicationBase
 }
 
 // ScanBlocks reads only complete, validated blocks in the selected lineage.

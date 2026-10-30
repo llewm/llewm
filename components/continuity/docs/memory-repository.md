@@ -226,11 +226,24 @@ precursor to durable manifests; the current flat block namespace and complete
 content validation still visit old history. It does not establish fixed-delta
 scaling or replace full recovery.
 
-Folder publication also writes a content-addressed manifest of the complete
-observed endpoint block set after publishing its authorized blocks. Manifest
-leaves contain at most 128 sorted block identities; radix branches contain at
-most sixteen children, each bound to its hash prefix. A late arrival changes
-only its ancestors and leaf, preserving unrelated subtree identities. This
+Folder publication writes bounded, content-addressed arrival segments after
+publishing its authorized blocks. The validated catalog from discovery supplies
+existing membership; only newly observed block identities enter new segments,
+with at most 128 block identities per segment. Segment roots are immutable and
+their union describes the observed endpoint block set. Late or backdated records
+append in the current publication batch rather than reopening old time buckets.
+There is no global sequence, mutable latest root, or last-writer selection.
+Concurrent publishers can announce overlapping batches without losing records.
+A retry after interruption rediscovers completed segments and publishes the
+remaining membership. The private discovery catalog is bound to the same open
+root and lineage; a fresh process rediscovers it. Unknown or damaged metadata
+falls back to cataloging the complete supplied block inventory. This does not
+remove damaged older roots or replace independent complete block discovery.
+
+Manifest leaves contain at most 128 sorted block identities; radix branches
+contain at most sixteen children, each bound to its hash prefix. For complete
+snapshot manifests, a late arrival changes only its ancestors and leaf,
+preserving unrelated subtree identities. This
 catalog does not repartition existing blocks or sort arrivals by their recorded
 timestamps. It contains no record payloads and grants no relay permission.
 
@@ -268,9 +281,10 @@ rebuilds always scan the endpoint directly.
 
 This is local directory-membership evidence, not external delivery, provenance
 or semantic import evidence. Manifest traversal, block reads and complete import
-remain. Ingestion-order publication segments, transport use of catalog deltas,
-typed dependency closure and complete-cycle scaling qualification remain
-unfinished. These manifests alone make no end-to-end speed or scaling claim
+remain. Folder publication now consumes the discovered membership delta, but
+discovery still traverses the complete root union. Git delta discovery across
+cycles, typed dependency closure and complete-cycle scaling qualification remain
+unfinished. These segments alone make no end-to-end speed or scaling claim
 and do not convert block format 4.
 
 Curated exports include a referenced creator invocation and its transitive

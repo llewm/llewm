@@ -4,11 +4,102 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"testing"
+	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
+
+func TestFolderManifestSegmentsRetainLateArrivalsAndRecoverOnFreshReceiver(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	marker, err := Create(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := receiver(t, directory, marker.StoreID)
+	if err := source.Convert(ctx); err != nil {
+		t.Fatal(err)
+	}
+	objects := exportCheckpoint(t, source)
+	if err := source.Archive.CaptureLocal(objects); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	root, err := recordsync.OpenRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	before, err := recordsync.DiscoverManifestCatalog(ctx, root, testLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Backdate the new decision: publication follows arrival, not event time.
+	_, err = (decision.Service{DB: source.DB, Now: func() time.Time { return time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) }}).Append(ctx, decision.Record{ProjectID: source.ProjectID, ID: "backdated", Title: "Late decision", Rationale: "Arrives after newer history", Disposition: "accepted", Actor: "test", ActorType: "human", Authority: "caller_asserted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, err := portable.EncodeMemoryExport(ctx, source.DB, source.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Archive.CaptureLocal(exported.Envelopes); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := source.Sync(ctx); err != nil || result.PublishedRecords == 0 {
+		t.Fatalf("late publication: %+v %v", result, err)
+	}
+	after, err := recordsync.DiscoverManifestCatalog(ctx, root, testLineage)
+	if err != nil || len(after.Roots) != len(before.Roots)+1 {
+		t.Fatalf("segment roots: %+v %v", after, err)
+	}
+	for _, hash := range before.Roots {
+		if _, err := recordsync.ManifestBlocks(ctx, root, testLineage, hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldBlocks := make(map[string]bool)
+	for _, hash := range before.Blocks {
+		oldBlocks[hash] = true
+	}
+	for _, hash := range after.Roots {
+		if sort.SearchStrings(before.Roots, hash) < len(before.Roots) && before.Roots[sort.SearchStrings(before.Roots, hash)] == hash {
+			continue
+		}
+		blocks, err := recordsync.ManifestBlocks(ctx, root, testLineage, hash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, block := range blocks {
+			if oldBlocks[block] {
+				t.Fatal("late segment repacked earlier block membership")
+			}
+		}
+	}
+	// A fresh receiver has no private catalog/cache and imports the same union.
+	target := receiver(t, directory, marker.StoreID)
+	if result, err := target.Sync(ctx); err != nil || result.ImportedRecords != len(exported.Envelopes) {
+		t.Fatalf("fresh recovery: %+v %v", result, err)
+	}
+	scan, err := recordsync.ScanBlocks(ctx, root, testLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hashes []string
+	for _, block := range scan.Blocks {
+		hashes = append(hashes, block.Hash)
+	}
+	if !reflect.DeepEqual(after.Blocks, hashes) {
+		t.Fatal("catalog differs from complete block scan")
+	}
+}
 
 func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *testing.T) {
 	ctx := context.Background()

@@ -80,6 +80,7 @@ func (s Index) ScanBlocksWithCatalog(ctx context.Context, root *os.Root, archive
 		after, guardErr := blockDirectoryIdentity(root, s.Lineage)
 		if guardErr == nil && before == after {
 			result.CatalogReused = true
+			result.publicationBase = &manifestPublicationBase{root: root, lineage: s.Lineage, blocks: catalog.Blocks}
 			return result, err
 		}
 		// A concurrent arrival may not have a manifest yet. Discard the
@@ -90,6 +91,7 @@ func (s Index) ScanBlocksWithCatalog(ctx context.Context, root *os.Root, archive
 	if err != nil || result.Pending+result.Invalid != 0 {
 		return result, err
 	}
+	result.publicationBase = &manifestPublicationBase{root: root, lineage: s.Lineage, blocks: catalog.Blocks}
 	hashes := make([]string, 0, len(result.Blocks))
 	for _, block := range result.Blocks {
 		hashes = append(hashes, block.Hash)

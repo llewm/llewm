@@ -134,9 +134,10 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 			result.PublishedRecords += len(block.Objects)
 		}
 	}
-	// Include the complete observed endpoint snapshot, including records whose
+	// Supply the complete observed endpoint snapshot, including records whose
 	// origin is not authorized for relay elsewhere. The manifest catalogs this
 	// endpoint only; it does not change those records' provenance or permission.
+	// Discovery membership lets publication append only new bounded segments.
 	hashes := make(map[string]bool, len(scan.Blocks)+len(blocks))
 	for _, inventory := range [][]recordsync.Block{scan.Blocks, blocks} {
 		for _, block := range inventory {
@@ -147,7 +148,7 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 	for hash := range hashes {
 		manifestBlocks = append(manifestBlocks, hash)
 	}
-	if _, _, err := recordsync.PublishManifest(ctx, root, s.Archive.Lineage, manifestBlocks); err != nil {
+	if _, err := scan.PublishManifestSegments(ctx, root, s.Archive.Lineage, manifestBlocks); err != nil {
 		return result, err
 	}
 	result.ImportResult, err = index.ImportBlocks(ctx, all)
