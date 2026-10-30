@@ -92,11 +92,10 @@ func dependencyClosureWithSelectors(ctx context.Context, objects, changed []port
 // traverseDependencies keeps snapshot identities in memory, but lets the caller
 // discover forward/reverse edges only for records reached by the closure.
 func traverseDependencies(ctx context.Context, objects, changed []portable.EncodedEnvelope, forward func(string) ([]portable.ImportDependency, bool), reverse func(portable.Envelope) ([]string, bool)) ([]portable.EncodedEnvelope, bool) {
-	byHash := make(map[string]portable.EncodedEnvelope, len(objects))
-	identities := make(map[dependencyIdentity][]string)
-	exactIdentities := make(map[dependencyRevision][]string)
+	byHash := make(map[string]int, len(objects))
+	identities := make(map[dependencyIdentity][]int)
 	total := 0
-	for _, object := range objects {
+	for position, object := range objects {
 		if ctx.Err() != nil {
 			return nil, false
 		}
@@ -111,13 +110,35 @@ func traverseDependencies(ctx context.Context, objects, changed []portable.Encod
 		if total > portable.MaxRecordsBytes {
 			return nil, false
 		}
-		byHash[e.EnvelopeSHA256] = object
+		byHash[e.EnvelopeSHA256] = position
 		key := dependencyIdentity{e.RecordType, e.RecordID}
-		identities[key] = append(identities[key], e.EnvelopeSHA256)
-		exactKey := dependencyRevision{key, e.RecordRevision}
-		exactIdentities[exactKey] = append(exactIdentities[exactKey], e.EnvelopeSHA256)
+		identities[key] = append(identities[key], position)
 	}
-	sortedRanges := make(map[dependencyIdentity]bool)
+	// One compact identity list serves exact forks and range selectors. Keep
+	// its complete sorted membership: consuming a prior/any prefix must not
+	// hide targets from a later exact selector. Unreached lists need no sorting.
+	sortedIdentities := make(map[dependencyIdentity]bool)
+	consumedRanges := make(map[dependencyIdentity]int)
+	sortedTargets := func(key dependencyIdentity) []int {
+		list := identities[key]
+		if len(list) > 1 && !sortedIdentities[key] {
+			sort.Slice(list, func(i, j int) bool {
+				return objects[list[i]].Envelope.RecordRevision < objects[list[j]].Envelope.RecordRevision
+			})
+			sortedIdentities[key] = true
+		}
+		return list
+	}
+	exactTargets := func(key dependencyIdentity, revision int) []int {
+		list := sortedTargets(key)
+		start := sort.Search(len(list), func(i int) bool {
+			return objects[list[i]].Envelope.RecordRevision >= revision
+		})
+		end := sort.Search(len(list), func(i int) bool {
+			return objects[list[i]].Envelope.RecordRevision > revision
+		})
+		return list[start:end]
+	}
 	selected := make(map[string]bool)
 	visitedSelectors := make(map[portable.ImportDependency]bool)
 	visitedRevisions := make(map[dependencyRevision]bool)
@@ -140,14 +161,14 @@ func traverseDependencies(ctx context.Context, objects, changed []portable.Encod
 			return nil, false
 		}
 		hash := queue[cursor]
-		e := byHash[hash].Envelope
+		e := objects[byHash[hash]].Envelope
 		key := dependencyIdentity{e.RecordType, e.RecordID}
 		// Forked versions of one exact identity cannot be separated by closure.
 		exactKey := dependencyRevision{key, e.RecordRevision}
 		if !visitedRevisions[exactKey] {
 			visitedRevisions[exactKey] = true
-			for _, other := range exactIdentities[exactKey] {
-				add(other)
+			for _, other := range exactTargets(key, e.RecordRevision) {
+				add(objects[other].Envelope.EnvelopeSHA256)
 			}
 			owners, ok := reverse(e)
 			if !ok {
@@ -169,33 +190,27 @@ func traverseDependencies(ctx context.Context, objects, changed []portable.Encod
 			}
 			visitedSelectors[selector] = true
 			if selector.Mode == portable.DependencyExact {
-				for _, target := range exactIdentities[dependencyRevision{dependencyIdentity{selector.RecordType, selector.RecordID}, selector.Revision}] {
-					add(target)
+				for _, target := range exactTargets(dependencyIdentity{selector.RecordType, selector.RecordID}, selector.Revision) {
+					add(objects[target].Envelope.EnvelopeSHA256)
 				}
 				continue
 			}
 			targetKey := dependencyIdentity{selector.RecordType, selector.RecordID}
-			list := identities[targetKey]
-			// Prior/any selectors select nested prefixes. Sort on first use
-			// and consume each target once across all bounds for this identity.
-			// Exact-only identities need no range sorting.
-			if !sortedRanges[targetKey] {
-				sort.Slice(list, func(i, j int) bool {
-					return byHash[list[i]].Envelope.RecordRevision < byHash[list[j]].Envelope.RecordRevision
-				})
-				sortedRanges[targetKey] = true
+			// Prepare the same list used for exact lookups, then consume only
+			// the newly selected range across repeated nested bounds.
+			list := sortedTargets(targetKey)
+			cursor := consumedRanges[targetKey]
+			for cursor < len(list) && dependencyMatches(selector, objects[list[cursor]].Envelope.RecordRevision) {
+				add(objects[list[cursor]].Envelope.EnvelopeSHA256)
+				cursor++
 			}
-			for len(list) > 0 && dependencyMatches(selector, byHash[list[0]].Envelope.RecordRevision) {
-				add(list[0])
-				list = list[1:]
-			}
-			identities[targetKey] = list
+			consumedRanges[targetKey] = cursor
 		}
 	}
 	sort.Strings(queue)
 	result := make([]portable.EncodedEnvelope, 0, len(queue))
 	for _, hash := range queue {
-		result = append(result, byHash[hash])
+		result = append(result, objects[byHash[hash]])
 	}
 	return result, true
 }

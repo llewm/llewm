@@ -186,6 +186,9 @@ only newly matching bounds. Selector verification releases each bounded batch
 before loading the next instead of retaining the complete edge graph. Verification
 and traversal share one SQLite snapshot; warm reads leave the writer available,
 while repairs restart under a writer transaction and recheck the snapshot.
+Snapshot identity lookups retain positions into the validated envelopes rather
+than copying envelopes. Exact forks and range selectors share revision lists,
+sorted only when reached; consuming a range leaves exact membership available.
 Complete selector checks and snapshot identity assembly still visit old history;
 this is not a complete-cycle scaling guarantee.
 
