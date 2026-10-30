@@ -56,21 +56,18 @@ func TestMixedFirstTopicRevisionMatchesReference(t *testing.T) {
 		}
 		want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, export.Envelopes)
 		got, used, gotErr := index.tryMixedAdditions(ctx, hash, export.Envelopes)
-		if revision == 1 && !used {
-			t.Fatalf("first revision missed shortcut: %v", gotErr)
-		}
-		if revision == 2 {
-			if used {
-				t.Fatal("later revision bypassed reference importer")
-			}
-			block, err := EncodeBlock(lineage, export.Envelopes)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, gotErr = index.ImportBlocks(ctx, []Block{block})
+		if !used {
+			t.Fatalf("revision %d missed typed closure: %v", revision, gotErr)
 		}
 		if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
 			t.Fatalf("revision %d: reference=%+v %v indexed=%+v %v", revision, want, wantErr, got, gotErr)
+		}
+		var replayed int
+		if err := indexed.QueryRowContext(ctx, `SELECT already_present_records FROM portable_import_receipts WHERE project_id=? ORDER BY applied_at DESC,id DESC LIMIT 1`, indexedID).Scan(&replayed); err != nil {
+			t.Fatal(err)
+		}
+		if replayed != 0 {
+			t.Fatalf("independent topic arrival replayed %d unrelated records", replayed)
 		}
 		wantRecords, err := portable.LocalEnvelopes(ctx, full, fullID)
 		if err != nil {
@@ -254,9 +251,12 @@ func TestMixedAdditionsMatchFullImportAndGuardDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherHash, _ := mixedReplaySet(other.Envelopes)
-	if _, used, err := index.tryMixedAdditions(ctx, otherHash, other.Envelopes); err != nil || used {
-		t.Fatalf("unproven anchor incorrectly used shortcut: used=%t %v", used, err)
+	want, wantErr = (Importer{DB: full, ProjectID: fullID}).Import(ctx, other.Envelopes)
+	got, used, gotErr = index.tryMixedAdditions(ctx, otherHash, other.Envelopes)
+	if !used || fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
+		t.Fatalf("informational anchor: full=%+v %v closure=%+v used=%t %v", want, wantErr, got, used, gotErr)
 	}
+
 	// A local change outside the added input invalidates the previous proof.
 	appendRecord(indexed, indexedID, "unrelated-local", "")
 	appendRecord(source, sourceID, "fifth", "")
@@ -272,7 +272,7 @@ func TestMixedAdditionsMatchFullImportAndGuardDependencies(t *testing.T) {
 	if err := indexed.QueryRowContext(ctx, `SELECT COUNT(*) FROM work_narratives WHERE project_id=? AND id='fifth'`, indexedID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("rejected mixed shortcut left partial records: %d %v", count, err)
 	}
-	// A new dependent successor is intentionally sent to the full importer.
+	// Local drift must also reject a later dependent successor atomically.
 	appendRecord(source, sourceID, "fourth", "third")
 	dependent, err := portable.EncodeMemoryExport(ctx, source, sourceID)
 	if err != nil {

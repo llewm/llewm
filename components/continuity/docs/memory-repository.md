@@ -166,9 +166,15 @@ is not a provider delivery acknowledgement. The coordinator can also reuse a com
 its database and archive inputs remain stable. A capture with unresolved actor
 dependencies is never cached.
 
-Guarded mixed imports also accept a reference-free first topic revision. Later
-topic revisions, aliases, links and other unqualified additions retain the full
-reference importer. Existing dependency and local-state guards still apply.
+Guarded mixed imports select the affected typed dependency closure, including
+earlier dependents of newly arriving targets. Selectors distinguish exact
+revisions, any revision, and the prior revisions used to validate a published
+release. Plan predecessors and comparison revisions come from canonical payloads,
+not informational wire references. The canonical importer validates the selected
+records; the writer transaction still compares the complete local state before
+renewing reuse evidence. Unknown or recovery-sensitive dependency rules retain
+the full importer. Building the dependency graph still visits the complete
+snapshot; this is not a persistent incremental graph or a scaling guarantee.
 
 The immediate sync JSON result includes `unchanged: true` when this proof skips
 export, archive content reads, block processing, and semantic replay. Migration
@@ -283,7 +289,7 @@ This is local directory-membership evidence, not external delivery, provenance
 or semantic import evidence. Manifest traversal, block reads and complete import
 remain. Folder publication now consumes the discovered membership delta, but
 discovery still traverses the complete root union. Git delta discovery across
-cycles, typed dependency closure and complete-cycle scaling qualification remain
+cycles, persistent dependency indexing and complete-cycle scaling qualification remain
 unfinished. These segments alone make no end-to-end speed or scaling claim
 and do not convert block format 4.
 

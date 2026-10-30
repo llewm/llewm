@@ -86,6 +86,15 @@ func TestBlockImportMatchesFullScanForFork(t *testing.T) {
 		for _, block := range blocks {
 			objects = append(objects, block.Objects...)
 		}
+		for _, object := range objects {
+			if object.Envelope.RecordType != "topic_revision" || object.Envelope.RecordRevision != 2 {
+				continue
+			}
+			selected, complete := dependencyClosure(ctx, objects, []portable.EncodedEnvelope{object})
+			if !complete || len(selected) != 2 {
+				t.Fatalf("closure separated competing revisions: complete=%v count=%d", complete, len(selected))
+			}
+		}
 		want, wantErr := (Importer{DB: full, ProjectID: fullID}).Import(ctx, objects)
 		got, gotErr := index.ImportBlocks(ctx, blocks)
 		if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {

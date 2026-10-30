@@ -13,11 +13,10 @@ import (
 
 var errMixedProofChanged = errors.New("mixed replay proof changed")
 
-// tryMixedAdditions handles independent decisions, first topic revisions and narratives, task- or
-// commit-anchored narratives, and supersession edges to proven or new narratives.
-// Plans, resources and checkpoint families use the canonical addition planner
-// and a fresh post-write snapshot for appends.
-// All other changes use the full importer.
+// tryMixedAdditions revalidates the typed affected dependency closure while
+// preserving the proven remainder. The canonical planner still checks/applies
+// every selected record, and the writer transaction compares the complete local
+// state before renewing proof. Unknown dependency rules use the full importer.
 func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []portable.EncodedEnvelope) (ImportResult, bool, error) {
 	var prior, priorState string
 	err := s.DB.QueryRowContext(ctx, `SELECT t.set_hash,v.local_state_hash FROM history_index_mixed_tip t JOIN history_index_valid_sets v ON v.project_id=t.project_id AND v.set_hash=t.set_hash AND v.index_version=t.index_version WHERE t.project_id=? AND t.index_version=?`, s.ProjectID, IndexVersion).Scan(&prior, &priorState)
@@ -50,76 +49,30 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 		return ImportResult{}, false, err
 	}
 	var old, added []portable.EncodedEnvelope
-	newIDs := make(map[string]bool)
 	excluded := make(map[string]bool)
-	oldNarratives := make(map[string]bool)
-	newNarratives := make(map[string]bool)
-	var edges []portable.EncodedEnvelope
 	for _, object := range objects {
 		if members[object.Envelope.EnvelopeSHA256] {
 			old = append(old, object)
-			if object.Envelope.RecordType == "work_narrative" {
-				oldNarratives[object.Envelope.RecordID] = true
-			}
 			continue
 		}
 		e := object.Envelope
-		switch e.RecordType {
-		case "track_plan", "resource", "resource_note", "checkpoint", "checkpoint_context", "checkpoint_branches", "checkpoint_action", "checkpoint_action_transition":
-			// Canonical planning validates all additions and their dependencies.
-		case "work_narrative_supersession":
-			edges = append(edges, object)
-		default:
-			if e.RecordType != "decision" && e.RecordType != "work_narrative" && !(e.RecordType == "topic_revision" && e.RecordRevision == 1) {
-				return ImportResult{}, false, nil
-			}
-			for _, ref := range e.Refs {
-				if e.RecordType != "work_narrative" || (ref.Kind != "task" && ref.Kind != "commit") {
-					return ImportResult{}, false, nil
-				}
-			}
-		}
-		if e.RecordType == "work_narrative" {
-			newNarratives[e.RecordID] = true
-		}
 		added = append(added, object)
-		newIDs[e.RecordID] = true
 		excluded[portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)] = true
 	}
 	oldHash, eligible := mixedReplaySet(old)
 	if !eligible || oldHash != prior || len(old) != len(members) || len(added) == 0 {
 		return ImportResult{}, false, nil
 	}
-	for _, edge := range edges {
-		e := edge.Envelope
-		if !newNarratives[e.RecordID] || len(e.Refs) != 2 {
-			return ImportResult{}, false, nil
-		}
-		self, parent := false, false
-		for _, ref := range e.Refs {
-			if ref.Kind != "narrative" {
-				return ImportResult{}, false, nil
-			}
-			self = self || ref.ID == e.RecordID
-			parent = parent || (ref.ID != e.RecordID && (oldNarratives[ref.ID] || newNarratives[ref.ID]))
-		}
-		if !self || !parent {
-			return ImportResult{}, false, nil
-		}
-	}
-	for _, object := range old {
-		for _, ref := range object.Envelope.Refs {
-			if newIDs[ref.ID] {
-				return ImportResult{}, false, nil
-			}
-		}
+	affected, complete := dependencyClosure(ctx, objects, added)
+	if !complete {
+		return ImportResult{}, false, nil
 	}
 	before, err := supersessionForkRefs(ctx, s.DB, s.ProjectID)
 	if err != nil {
 		return ImportResult{}, false, nil
 	}
 	var specs []portable.EnvelopeSpec
-	for _, object := range added {
+	for _, object := range affected {
 		spec, err := portable.DecodeMemoryEnvelope(object.Bytes)
 		if err != nil {
 			return ImportResult{}, false, nil

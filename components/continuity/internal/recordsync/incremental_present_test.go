@@ -31,8 +31,8 @@ func TestMixedHistoryMatchesFullImporter(t *testing.T) {
 				if cycle > 0 {
 					hostID := fmt.Sprintf("host-%d", cycle)
 					if cycle == 3 {
-						// The old note refers to this ID. Keep the conservative
-						// inbound-reference guard for a later resource revision.
+						// The old note refers to this ID. The typed closure
+						// must include it when a resource revision arrives.
 						hostID = "host-2"
 					}
 					plan.Summary = fmt.Sprintf("Progress %d", cycle)
@@ -93,7 +93,7 @@ func TestMixedHistoryMatchesFullImporter(t *testing.T) {
 						t.Fatal(err)
 					}
 					got, used, gotErr = index.tryMixedAdditions(ctx, hash, export.Envelopes)
-					wantUsed := cycle != 3 && !drift
+					wantUsed := !drift
 					if used != wantUsed || gotErr != nil {
 						t.Fatalf("cycle %d: shortcut used=%t want=%t err=%v", cycle, used, wantUsed, gotErr)
 					}
@@ -115,14 +115,14 @@ func TestMixedHistoryMatchesFullImporter(t *testing.T) {
 				if fmt.Sprint(wantErr) != fmt.Sprint(gotErr) || want != got {
 					t.Fatalf("cycle %d: full=%+v %v indexed=%+v %v", cycle, want, wantErr, got, gotErr)
 				}
-				if cycle > 0 && cycle != 3 && !drift {
+				if cycle > 0 && !drift {
 					hash, _ := mixedReplaySet(export.Envelopes)
 					if _, proof, err := index.mixedReplaySnapshot(ctx, hash, export.Envelopes, ""); err != nil || !proof {
 						t.Fatalf("cycle %d: missing renewed proof: %v", cycle, err)
 					}
 				}
 				// Both appends and present additions renew the proof directly;
-				// an inbound-reference fallback requires an unchanged replay.
+				// a local-drift fallback requires an unchanged replay.
 				for replay := 0; replay < 2; replay++ {
 					if _, err := index.ImportBlocks(ctx, []Block{block}); err != nil {
 						t.Fatal(err)
