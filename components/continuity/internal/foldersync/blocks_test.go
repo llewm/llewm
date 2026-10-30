@@ -28,6 +28,29 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 	if result, err := source.Sync(ctx); err != nil || result.PublishedRecords != len(objects) {
 		t.Fatalf("source publication: %+v %v", result, err)
 	}
+	// A successful publication announces a readable immutable catalog whose
+	// block membership matches an independent complete endpoint scan.
+	root, err := recordsync.OpenRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	scan, err := recordsync.ScanBlocks(ctx, root, testLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hashes []string
+	for _, block := range scan.Blocks {
+		hashes = append(hashes, block.Hash)
+	}
+	nodes, err := recordsync.BuildManifest(testLineage, hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := recordsync.ManifestBlocks(ctx, root, testLineage, nodes[len(nodes)-1].Hash)
+	if err != nil || len(manifest) != len(hashes) {
+		t.Fatalf("published catalog incomplete: %v", err)
+	}
 	if _, err := source.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, source.ProjectID); err != nil {
 		t.Fatal(err)
 	}

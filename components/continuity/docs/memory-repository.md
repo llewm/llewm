@@ -135,8 +135,8 @@ identities. Unexpected changes, including concurrent foreign provenance, decline
 the optimization. Parent directories may change timestamps and size but must
 retain their device, inode and mode. Tracking starts only before an actual file
 creation; platforms without change-time identities retain complete validation.
-This does not yet enable hierarchical folder manifests, affected-dependency import
-replay or journal pruning. Existing proofs are discarded by
+This does not yet enable affected-dependency import replay or journal pruning.
+Existing proofs are discarded by
 migration 086; capture-v2 does not reuse earlier capture proofs.
 Migration 082 narrows attribution tracking: raw invocation activity invalidates
 only when the invocation is already retained or referenced by indexed history.
@@ -225,6 +225,32 @@ missing or corrupt working files. The cache ends with the cycle. This is a
 precursor to durable manifests; the current flat block namespace and complete
 content validation still visit old history. It does not establish fixed-delta
 scaling or replace full recovery.
+
+Folder publication also writes a content-addressed manifest of the complete
+observed endpoint block set after publishing its authorized blocks. Manifest
+leaves contain at most 128 sorted block identities; radix branches contain at
+most sixteen children, each bound to its hash prefix. A late arrival changes
+only its ancestors and leaf, preserving unrelated subtree identities. This
+catalog does not repartition existing blocks or sort arrivals by their recorded
+timestamps. It contains no record payloads and grants no relay permission.
+
+Manifest nodes live at `v4/<lineage>/manifests/<hash-prefix>/<hash>.manifest`.
+Children are durably published before parents, followed by an immutable root
+announcement at `v4/<lineage>/manifest-roots/<hash>.root`. Independent writers
+retain separate snapshot roots; interrupted publication can leave unannounced
+nodes, and retry reuses their exact bytes. Nothing is removed or overwritten.
+An announcement identifies a snapshot, not the endpoint's latest or complete
+inventory, external delivery, or a semantic import receipt.
+
+The manifest reader validates lineage, canonical framing, hashes, radix positions
+and traversal bounds. Its delta operation skips equal subtree hashes only when
+the caller already holds the previous validated catalog; missing or damaged
+metadata is an error, never an empty inventory. Block bytes still require their
+own validation. Folder sync currently publishes these catalogs while retaining
+the complete block scan/import path. Durable catalog selection, ingestion-order
+publication segments, transport use of catalog deltas, typed dependency closure
+and complete-cycle scaling qualification remain unfinished. These manifests
+alone make no end-to-end speed or scaling claim and do not convert block format 4.
 
 Curated exports include a referenced creator invocation and its transitive
 parent invocations, loaded in bounded batches. Unrelated invocation activity
