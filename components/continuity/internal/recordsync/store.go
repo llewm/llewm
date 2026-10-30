@@ -265,6 +265,7 @@ func scanWithKnown(ctx context.Context, root *os.Root, lineage string, known map
 				}
 				var e portable.EncodedEnvelope
 				var err error
+				RecordWork(ctx, "archive_record_paths_visited", 1)
 				if cached, ok := known[child]; ok {
 					body, readErr := ReadFile(root, child, MaxObjectBytes)
 					if readErr == nil && bytes.Equal(body, portable.MemoryFileBytes(cached)) {

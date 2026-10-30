@@ -101,6 +101,7 @@ func (s Index) insertBlockObjects(ctx context.Context, tx *sql.Tx, verified Bloc
 // block bytes without discarding any endpoint publication memberships. All
 // cached semantic-set proofs are invalidated in the same transaction.
 func (s Index) RepairBlock(ctx context.Context, block Block) error {
+	RecordWork(ctx, "fallback_block_inventory_repair", 1)
 	verified, err := DecodeBlock(s.Lineage, block.Hash, block.Bytes)
 	if err != nil || block.Hash == "" {
 		return fmt.Errorf("invalid block for index repair")

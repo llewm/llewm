@@ -33,6 +33,8 @@ func (s Index) ReadBlock(ctx context.Context, root *os.Root, path string) (Block
 	if err != nil {
 		return Block{}, err
 	}
+	RecordWork(ctx, "block_read_bytes", int64(len(body)))
+	RecordWork(ctx, "block_reads", 1)
 	block := Block{Hash: hash, Bytes: body}
 	if err := validateBlockBytes(block); err != nil {
 		return Block{}, err
@@ -145,6 +147,8 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 			}
 		}
 	}
+	RecordWork(ctx, "fallback_full_semantic_import", 1)
+	RecordWork(ctx, "full_semantic_records", int64(len(objects)))
 	result, err := (Importer{DB: s.DB, ProjectID: s.ProjectID, Now: s.Now}).Import(ctx, objects)
 	if err == nil && eligible && result.Collisions == 0 && result.Forks == 0 && result.SupersessionForks == 0 && result.DeferredRecords == 0 {
 		err = s.rememberNarrativeSet(ctx, setHash, objects)
@@ -445,6 +449,7 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 				rows.Close()
 				return nil, err
 			}
+			RecordWork(ctx, "inventory_records_checked", 1)
 			var envelope portable.Envelope
 			if err := json.Unmarshal([]byte(body), &envelope); err != nil || envelope.EnvelopeSHA256 != hash || envelope.RecordType != kind || envelope.RecordID != id || envelope.RecordRevision != revision || envelope.LineageID != s.Lineage {
 				rows.Close()

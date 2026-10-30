@@ -73,11 +73,26 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 	fetched := false
 	var saved syncGuard
 	err := s.DB.QueryRowContext(ctx, `SELECT generation,tree,archive FROM history_sync_proofs WHERE project_id=? AND route=?`, s.ProjectID, g.route).Scan(&saved.generation, &saved.tree, &saved.archive)
-	if err != nil || g.generation == "" || g.generation != saved.generation || g.tree != saved.tree || g.archive != saved.archive {
+	reason := ""
+	switch {
+	case err != nil:
+		reason = "fallback_unchanged_proof_unavailable"
+	case g.generation == "":
+		reason = "fallback_unchanged_generation_unknown"
+	case g.generation != saved.generation:
+		reason = "fallback_unchanged_generation_changed"
+	case g.tree != saved.tree:
+		reason = "fallback_unchanged_tree_changed"
+	case g.archive != saved.archive:
+		reason = "fallback_unchanged_archive_changed"
+	}
+	if reason != "" {
+		recordsync.RecordWork(ctx, reason, 1)
 		return Result{}, false, fetched
 	}
 	clean, err := repo.run(ctx, "status", "--porcelain", "--untracked-files=no")
 	if err != nil || clean != "" {
+		recordsync.RecordWork(ctx, "fallback_unchanged_worktree_unclean", 1)
 		return Result{}, false, fetched
 	}
 	head, err := repo.run(ctx, "symbolic-ref", "--short", "HEAD")
@@ -86,6 +101,7 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 	}
 	// A prior incomplete delivery must still take the normal push/repair path.
 	if unpushed(ctx, repo, remoteBranch(ctx, repo, head)) != 0 {
+		recordsync.RecordWork(ctx, "fallback_unchanged_delivery_pending", 1)
 		return Result{}, false, fetched
 	}
 	if err := probe(ctx, repo, s.Remote, p.deadline); err != nil {
@@ -98,6 +114,7 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 	branch := remoteBranch(ctx, repo, head)
 	remoteTree, err := lineageTree(ctx, repo, "origin/"+branch, s.lineageForGuard(ctx))
 	if err != nil || remoteTree != g.tree {
+		recordsync.RecordWork(ctx, "fallback_unchanged_remote_tree", 1)
 		return Result{}, false, fetched
 	}
 	if _, err := repo.run(ctx, "rebase", "--quiet", "origin/"+branch); err != nil {

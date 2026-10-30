@@ -31,6 +31,9 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	defer lock.Close()
 	s.discovery = &blockTreeDiscovery{}
 	before, guardErr := s.guard(local, repo)
+	if guardErr != nil {
+		recordsync.RecordWork(ctx, "fallback_unchanged_guard_unavailable", 1)
+	}
 	prefetched := false
 	if !p.convert && guardErr == nil {
 		unchanged, ok, fetched := s.tryUnchanged(ctx, repo, p, before)

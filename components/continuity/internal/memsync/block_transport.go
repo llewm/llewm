@@ -196,6 +196,7 @@ func (s Syncer) publishBlocks(ctx context.Context, lineage string, known []recor
 		paths = append(paths, filepath.ToSlash(filepath.Join(directory, block.Hash+".block")))
 		if added {
 			count += len(block.Objects)
+			recordsync.RecordWork(ctx, "published_block_bytes", int64(len(block.Bytes)))
 		}
 	}
 	return paths, count, inventory, nil

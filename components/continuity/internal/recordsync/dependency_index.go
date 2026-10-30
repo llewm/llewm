@@ -120,6 +120,7 @@ func (s Index) dependencySelectorsWithin(ctx context.Context, tx *sql.Tx, object
 	for start := 0; start < len(unique); start += 128 {
 		end := min(start+128, len(unique))
 		batch := unique[start:end]
+		RecordWork(ctx, "dependency_records_checked", int64(len(batch)))
 		args := []any{s.ProjectID, IndexVersion}
 		for _, object := range batch {
 			args = append(args, object.Envelope.EnvelopeSHA256)
@@ -158,6 +159,7 @@ func (s Index) dependencySelectorsWithin(ctx context.Context, tx *sql.Tx, object
 				return nil, err
 			}
 			count++
+			RecordWork(ctx, "dependency_edges_checked", 1)
 			if count > MaxScanEntries {
 				rows.Close()
 				return nil, fmt.Errorf("dependency edges exceed bounds")

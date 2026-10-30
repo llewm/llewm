@@ -506,6 +506,22 @@ to skip replacement scans only when no existing rule can match; possible
 matches still run every original replacement in order. Differential fuzzing
 compares this path with the replacement rules, including Unicode case folding.
 
+The plan, mixed-history and remote mixed-history complete-cycle benchmarks also
+report opt-in work counters per measured cycle. `published_block_bytes/op` counts
+new block file writes to the local Git clone, including headers and repairs of
+missing files; it is not network traffic or globally new knowledge.
+`block_read_bytes/op` and `block_reads/op` count normal indexed tracked block
+reads. Inventory, archive path, dependency verification, dependency snapshot
+membership and Git tree entry counters count visits, including repeated visits
+to the same history. `dependency_selected_records/op` counts closure output.
+`fallback_*` counters name observed fallback categories (such as changed local
+generation, unavailable completion proof, inventory repair and full semantic
+import); they do not yet cover every fallback branch or every local-state scan.
+Missing counters mean zero observed events. Metrics exclude fixture setup and
+warm-up, contain no record contents or identities, and do not authorize reuse.
+Use the same fixture shape and iteration count when comparing histories; these
+counters expose remaining full scans rather than asserting bounded delta work.
+
 ## Authentication
 
 Syncs run from session hooks and after checkpoints, where nobody can answer a

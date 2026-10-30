@@ -142,6 +142,7 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 			}
 			b.ResetTimer()
 			previousCheckpoint := ""
+			work := make(map[string]int64)
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				if mixed {
@@ -163,8 +164,13 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 					m.sync(b, OutcomeSynced)
 				}
 				b.StartTimer()
-				pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(context.Context) {
-					result := receiver.sync(b, OutcomeSynced)
+				var metrics *recordsync.WorkMetrics
+				pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(measured context.Context) {
+					measured, metrics = recordsync.WithWorkMetrics(measured)
+					result, err := receiver.syncer.Sync(measured)
+					if err != nil || result.Outcome != OutcomeSynced {
+						b.Fatalf("sync: %+v %v", result, err)
+					}
 					if remote {
 						if result.Unchanged || result.ImportedRecords < 1 || result.ExportedRecords != 0 {
 							b.Fatalf("unexpected remote cycle: %+v", result)
@@ -175,6 +181,13 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 						b.Fatalf("unexpected plan-history cycle: %+v", result)
 					}
 				})
+				b.StopTimer()
+				for name, count := range metrics.Counts() {
+					work[name] += count
+				}
+			}
+			for name, count := range work {
+				b.ReportMetric(float64(count)/float64(b.N), name+"/op")
 			}
 		})
 	}
