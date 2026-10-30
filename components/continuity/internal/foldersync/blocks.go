@@ -93,7 +93,7 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 		return result, nil
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: s.Archive.Lineage}
-	scan, err := index.ScanBlocks(ctx, root)
+	scan, err := index.ScanBlocksWithCatalog(ctx, root, s.Archive, s.Endpoint.ID())
 	if err != nil {
 		return result, err
 	}

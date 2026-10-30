@@ -254,11 +254,24 @@ or an observed root-set change fail the whole read without a partial inventory.
 Interrupted staging files are ignored. Even a valid union can omit block files
 whose writer has not announced a root, so it is not proof of endpoint coverage.
 
-Folder sync currently publishes these catalogs while retaining the complete
-block scan/import path. Durable transport coverage receipts, ingestion-order
-publication segments, transport use of catalog deltas, typed dependency closure
-and complete-cycle scaling qualification remain unfinished. These manifests
-alone make no end-to-end speed or scaling claim and do not convert block format 4.
+Folder sync retains a disposable local catalog coverage receipt only after a
+complete valid block-directory scan exactly matches the manifest union and the
+directory identity remains stable. The receipt is scoped to the project,
+lineage, endpoint, root set and directory device/inode/mode/size/mtime/ctime;
+it lives in local archive status and is never transported. On Linux, unchanged
+membership can reuse the catalog instead of enumerating the flat block
+directory. Adding, removing or renaming any entry invalidates this receipt.
+Every block's bytes and derived index contents are still validated, including
+after an in-place edit that preserves mtime. Unknown, damaged, changing or
+unsupported metadata takes the complete scan path. Independent inventory
+rebuilds always scan the endpoint directly.
+
+This is local directory-membership evidence, not external delivery, provenance
+or semantic import evidence. Manifest traversal, block reads and complete import
+remain. Ingestion-order publication segments, transport use of catalog deltas,
+typed dependency closure and complete-cycle scaling qualification remain
+unfinished. These manifests alone make no end-to-end speed or scaling claim
+and do not convert block format 4.
 
 Curated exports include a referenced creator invocation and its transitive
 parent invocations, loaded in bounded batches. Unrelated invocation activity

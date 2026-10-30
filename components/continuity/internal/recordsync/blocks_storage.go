@@ -148,6 +148,8 @@ type BlockScanResult struct {
 	Blocks  []Block
 	Pending int
 	Invalid int
+	// CatalogReused reports local membership receipt reuse, not semantic reuse.
+	CatalogReused bool
 }
 
 // ScanBlocks reads only complete, validated blocks in the selected lineage.
