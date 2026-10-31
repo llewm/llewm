@@ -41,7 +41,7 @@ func TestCaptureProjectReuseAndRepair(t *testing.T) {
 	if reused, err := a.CaptureProject(measured, db, project); err != nil || reused {
 		t.Fatalf("initial capture: %t %v", reused, err)
 	}
-	if counts := initialWork.Counts(); counts["fallback_capture_missing_cursor"] != 1 || counts["capture_full_exports"] != 1 || counts["fallback_export_writer_retry"] != 1 {
+	if counts := initialWork.Counts(); counts["fallback_capture_missing_cursor"] != 1 || counts["capture_full_exports"] != 1 || counts["export_writer_snapshot_reuses"] != 1 || counts["operational_full_loads"] != 1 || counts["fallback_export_writer_retry"] != 0 {
 		t.Fatalf("missing initial fallback work: %v", counts)
 	}
 	warm()

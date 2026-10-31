@@ -128,6 +128,12 @@ database/archive guards. Interrupted retention or publication therefore replays
 through complete export. Updates, deletions, retained-envelope changes, recovery
 graphs, unknown families and more than 128 selected identities in a table retain
 complete validation; journal reads are additionally bounded to 4096 changes.
+Complete export starts with a read-only snapshot. When new identities need
+retention, it releases that transaction and reserves the writer on the same
+pinned connection. An unchanged SQLite `data_version` permits reuse of the
+loaded specifications and validated encodings; another connection's commit or
+an unknown version requires a fresh complete snapshot under the writer lock.
+Unchanged exports continue without acquiring the writer.
 Capture may advance its archive stamp across its own new
 record/provenance files only after accounting for the exact additions, validating
 their bytes, and checking that all pre-existing files retain their metadata
@@ -553,6 +559,9 @@ encoding attempts of assembled specifications, and `snapshot_encoding_reuses/op`
 counts reuse of an encoding already validated in the same snapshot. Encoding
 performed while validating a retained or recovered envelope is covered by the
 decode counters instead.
+`export_writer_snapshot_reuses/op` counts complete export snapshots reused after
+the same-connection writer guard. `fallback_export_writer_retry/op` counts full
+reconstructions after that guard detects a commit or cannot prove equality.
 `retained_envelopes_decoded/op` and `retained_envelope_bytes_decoded/op` count
 retained overlay decode attempts and input bytes, including failed validation;
 the corresponding `recovery_*` counters cover recovery substitutions. These do

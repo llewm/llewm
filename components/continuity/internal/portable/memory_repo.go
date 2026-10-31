@@ -63,75 +63,130 @@ type MemoryExport struct {
 
 // EncodeMemoryExport encodes every curated record of the project.
 func EncodeMemoryExport(ctx context.Context, db *sql.DB, projectID string) (MemoryExport, error) {
-	return encodeMemoryExport(ctx, db, projectID, true)
-}
-
-func encodeMemoryExport(ctx context.Context, db *sql.DB, projectID string, readOnly bool) (MemoryExport, error) {
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
+	// data_version is connection-local. Keep this connection pinned from before
+	// the read snapshot until the writer guard; pool reuse cannot prove equality.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return MemoryExport{}, err
+	}
+	defer conn.Close()
+	var version int64
+	if err := conn.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&version); err != nil {
+		version = 0 // Unknown versions always rebuild under the writer lock.
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return MemoryExport{}, err
 	}
 	defer tx.Rollback()
-	identity, err := identityFrom(ctx, tx, projectID)
+	snapshot, err := loadMemoryExportSnapshot(ctx, tx, projectID)
 	if err != nil {
 		return MemoryExport{}, err
 	}
-	root, err := projectRootFrom(ctx, tx, projectID)
+	for _, spec := range snapshot.specs {
+		if !snapshot.retained[RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)] {
+			// Release the read transaction before acquiring the writer, avoiding
+			// SQLITE_BUSY_SNAPSHOT. Reuse only after a same-connection guard.
+			if err := tx.Rollback(); err != nil {
+				return MemoryExport{}, err
+			}
+			return retainMemoryExportSnapshot(ctx, conn, projectID, version, snapshot)
+		}
+	}
+	result, err := snapshot.encode(ctx, tx, projectID)
 	if err != nil {
 		return MemoryExport{}, err
 	}
-	result := MemoryExport{Identity: identity}
-	if err := tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&result.DatabaseSchema); err != nil {
-		return MemoryExport{}, err
-	}
-	validated := make(snapshotEncodings)
-	specs, _, err := loadOperationalSpecs(ctx, tx, projectID, root, identity.LineageID, false, validated)
+	return result, tx.Commit()
+}
+
+type memoryExportSnapshot struct {
+	result    MemoryExport
+	specs     []EnvelopeSpec
+	validated snapshotEncodings
+	retained  map[string]bool
+}
+
+func loadMemoryExportSnapshot(ctx context.Context, source queryer, projectID string) (memoryExportSnapshot, error) {
+	var snapshot memoryExportSnapshot
+	identity, err := identityFrom(ctx, source, projectID)
 	if err != nil {
-		return MemoryExport{}, err
+		return snapshot, err
 	}
-	// Retention is append-only. Avoid even a no-op INSERT for identities
-	// already present: SQLite would acquire a writer lock on unchanged exports.
-	rows, err := tx.QueryContext(ctx, `SELECT record_type,record_id,record_revision FROM portable_envelopes WHERE project_id=?`, projectID)
+	root, err := projectRootFrom(ctx, source, projectID)
 	if err != nil {
-		return MemoryExport{}, err
+		return snapshot, err
 	}
-	retained := make(map[string]bool)
+	snapshot.result.Identity = identity
+	if err := source.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&snapshot.result.DatabaseSchema); err != nil {
+		return snapshot, err
+	}
+	snapshot.validated = make(snapshotEncodings)
+	snapshot.specs, _, err = loadOperationalSpecs(ctx, source, projectID, root, identity.LineageID, false, snapshot.validated)
+	if err != nil {
+		return snapshot, err
+	}
+	rows, err := source.QueryContext(ctx, `SELECT record_type,record_id,record_revision FROM portable_envelopes WHERE project_id=?`, projectID)
+	if err != nil {
+		return snapshot, err
+	}
+	defer rows.Close()
+	snapshot.retained = make(map[string]bool)
 	for rows.Next() {
 		var kind, id string
 		var revision int
 		if err := rows.Scan(&kind, &id, &revision); err != nil {
-			rows.Close()
-			return MemoryExport{}, err
+			return snapshot, err
 		}
-		retained[RecordKey(kind, id, revision)] = true
+		snapshot.retained[RecordKey(kind, id, revision)] = true
 	}
-	err = rows.Err()
-	rows.Close()
+	return snapshot, rows.Err()
+}
+
+func retainMemoryExportSnapshot(ctx context.Context, conn *sql.Conn, projectID string, version int64, snapshot memoryExportSnapshot) (MemoryExport, error) {
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return MemoryExport{}, err
 	}
-	for _, spec := range specs {
-		encoded, err := validated.encode(ctx, spec)
+	defer tx.Rollback()
+	// Reserve the writer even if the connection defaults to deferred transactions.
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET name=name WHERE id=? AND 0`, projectID); err != nil {
+		return MemoryExport{}, err
+	}
+	var current int64
+	if err := tx.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&current); err != nil || version == 0 || current != version {
+		syncwork.RecordWork(ctx, "fallback_export_writer_retry", 1)
+		snapshot, err = loadMemoryExportSnapshot(ctx, tx, projectID)
+		if err != nil {
+			return MemoryExport{}, err
+		}
+	} else {
+		syncwork.RecordWork(ctx, "export_writer_snapshot_reuses", 1)
+	}
+	result, err := snapshot.encode(ctx, tx, projectID)
+	if err != nil {
+		return MemoryExport{}, err
+	}
+	return result, tx.Commit()
+}
+
+func (snapshot memoryExportSnapshot) encode(ctx context.Context, tx *sql.Tx, projectID string) (MemoryExport, error) {
+	result := snapshot.result
+	for _, spec := range snapshot.specs {
+		encoded, err := snapshot.validated.encode(ctx, spec)
 		if err != nil {
 			return MemoryExport{}, fmt.Errorf("encode %s %s: %w", spec.RecordType, spec.RecordID, err)
 		}
-		if !retained[RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)] {
-			if readOnly {
-				// Rebuild the complete snapshot under the writer lock rather
-				// than trying to upgrade a potentially stale read transaction.
-				if err := tx.Rollback(); err != nil {
-					return MemoryExport{}, err
-				}
-				syncwork.RecordWork(ctx, "fallback_export_writer_retry", 1)
-				return encodeMemoryExport(ctx, db, projectID, false)
-			}
+		// Avoid no-op INSERTs: an unchanged read-only export must not reserve
+		// SQLite's sole writer. New identities reach here only with that lock.
+		if !snapshot.retained[RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)] {
 			if err := retainEnvelope(ctx, tx, projectID, "export", encoded); err != nil {
 				return MemoryExport{}, err
 			}
 		}
 		result.Envelopes = append(result.Envelopes, encoded)
 	}
-	return result, tx.Commit()
+	return result, nil
 }
 
 // MemoryFileBytes is the on-disk form of one envelope: its canonical line.
