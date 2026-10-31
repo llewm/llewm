@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
@@ -95,7 +97,12 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 // and checked against the derived inventory. Keep the membership writer lock
 // and stale-version guard shared with the standalone observation path.
 func (s Index) observePublicationObjects(ctx context.Context, archive Archive, endpoint, hash string, objects []portable.EncodedEnvelope) (int, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	conn, err := s.DB.Conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -116,11 +123,19 @@ func (s Index) observePublicationObjects(ctx context.Context, archive Archive, e
 	}
 	defer root.Close()
 	addedCount := 0
+	var observation *captureObservation
+	attempted := false
+	beforeCreate := func() {
+		if !attempted {
+			attempted = true
+			observation = archive.prepareCaptureObservation(ctx, tx, s.ProjectID, endpoint, objects)
+		}
+	}
 	for _, object := range objects {
 		if err := ctx.Err(); err != nil {
 			return addedCount, err
 		}
-		added, err := putValidatedRoot(root, object, endpoint)
+		added, err := putValidatedRootObserved(root, object, endpoint, beforeCreate)
 		if err != nil {
 			return addedCount, err
 		}
@@ -131,7 +146,23 @@ func (s Index) observePublicationObjects(ctx context.Context, archive Archive, e
 	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, Hash(endpoint), hash); err != nil {
 		return addedCount, err
 	}
-	return addedCount, tx.Commit()
+	acknowledged := observation.complete(ctx, tx, archive, s.ProjectID)
+	err = tx.Commit()
+	if err != nil {
+		// SQLite can leave a failed COMMIT transaction active (for example a
+		// deferred FK violation). database/sql has already closed the Tx, so
+		// retain its connection and clean it before returning it to the pool.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if _, rollbackErr := conn.ExecContext(cleanup, `ROLLBACK`); rollbackErr != nil {
+			// A connection whose transaction state is uncertain cannot be reused.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}
+	if err == nil && acknowledged {
+		syncwork.RecordWork(ctx, "capture_observation_receipts", 1)
+	}
+	return addedCount, err
 }
 
 // PlanPublication stages immutable publication intent before returning blocks

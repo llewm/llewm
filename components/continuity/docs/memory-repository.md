@@ -148,6 +148,15 @@ identities. Unexpected changes, including concurrent foreign provenance, decline
 the optimization. Parent directories may change timestamps and size but must
 retain their device, inode and mode. Tracking starts only before an actual file
 creation; platforms without change-time identities retain complete validation.
+Observing an endpoint block can also extend the capture stamp for its new
+destination markers when every record and its local provenance were already
+captured. The receipt validates all existing metadata and the exact new marker
+bytes, then rechecks the archive stamp. It checks the bounded journal twice in
+the observation's writer transaction and commits the cursor with membership;
+canonical changes, foreign arrivals, damaged tracking, unexpected filesystem
+changes or rollback leave the old receipt untouched. Unchanged observations
+perform no additional metadata walk. This avoids a full capture on the next
+consecutive local arrival without treating observation as semantic import proof.
 This does not yet enable affected-dependency import replay or journal pruning.
 Existing proofs are discarded by
 migration 086; capture-v2 does not reuse earlier capture proofs.

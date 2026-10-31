@@ -14,20 +14,23 @@ import (
 
 type captureGuard struct{ route, generation, archive string }
 
-func (a Archive) captureInputs(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {
-	var g captureGuard
+func (a Archive) captureRoute() (string, error) {
 	build := buildinfo.Current()
 	if build.BuildDirty {
-		return g, fmt.Errorf("uncommitted build cannot reuse capture proofs")
+		return "", fmt.Errorf("uncommitted build cannot reuse capture proofs")
 	}
 	body, _ := json.Marshal([]any{"capture-v2", build.GitCommit, a.Directory, a.Lineage})
-	g.route = Hash(string(body))
-	var generationErr error
-	g.generation, generationErr = database.SyncGeneration(ctx, db, projectID)
-	if generationErr != nil {
-		return g, generationErr
+	return Hash(string(body)), nil
+}
+
+func (a Archive) captureInputs(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {
+	var g captureGuard
+	var err error
+	g.route, err = a.captureRoute()
+	if err == nil {
+		g.generation, err = database.SyncGeneration(ctx, db, projectID)
 	}
-	return g, nil
+	return g, err
 }
 
 func (a Archive) captureGuard(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {

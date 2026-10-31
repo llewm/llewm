@@ -20,29 +20,30 @@ type capturePublication struct {
 
 func prepareCapturePublication(before map[string]archiveMetadata, objects []portable.EncodedEnvelope) *capturePublication {
 	p := &capturePublication{before: before, additions: map[string][]byte{}, directories: map[string]bool{}}
-	add := func(path string, body []byte) {
-		if _, exists := before[path]; exists {
-			return
-		}
-		p.additions[path] = body
-		for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
-			p.directories[parent] = true
-			if parent == "." {
-				break
-			}
-		}
-	}
 	for _, object := range objects {
 		path := portable.MemoryRecordPath(object.Envelope)
 		if _, exists := before[path]; !exists {
-			add(path, portable.MemoryFileBytes(object))
+			p.add(path, portable.MemoryFileBytes(object))
 		}
 		origin := filepath.Join("origins", object.Envelope.EnvelopeSHA256)
 		if _, exists := before[origin]; !exists {
-			add(filepath.Join(origin, Hash("local")), []byte("observed\n"))
+			p.add(filepath.Join(origin, Hash("local")), []byte("observed\n"))
 		}
 	}
 	return p
+}
+
+func (p *capturePublication) add(path string, body []byte) {
+	if _, exists := p.before[path]; exists {
+		return
+	}
+	p.additions[path] = body
+	for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
+		p.directories[parent] = true
+		if parent == "." {
+			break
+		}
+	}
 }
 
 // completedStamp declines optimization on any unaccounted mutation, including

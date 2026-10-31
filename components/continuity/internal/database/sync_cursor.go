@@ -55,6 +55,17 @@ func ReadSyncChanges(ctx context.Context, db *sql.DB, project, consumer, state s
 		return next, nil, "", err
 	}
 	defer tx.Rollback()
+	return ReadSyncChangesWithin(ctx, tx, project, consumer, state, limit)
+}
+
+// ReadSyncChangesWithin uses the caller's transaction so a consumer can check
+// and acknowledge its own materialization writes without a second connection.
+func ReadSyncChangesWithin(ctx context.Context, tx *sql.Tx, project, consumer, state string, limit int) (SyncCursor, []SyncChange, string, error) {
+	next := SyncCursor{Project: project, Consumer: consumer}
+	if project == "" || consumer == "" || limit < 1 || limit > 100000 {
+		return next, nil, "", fmt.Errorf("invalid sync cursor request")
+	}
+	var err error
 	if err = tx.QueryRowContext(ctx, syncGenerationQuery, project).Scan(&next.Generation); err != nil {
 		return next, nil, "", err
 	}
@@ -109,8 +120,20 @@ func ReadSyncChanges(ctx context.Context, db *sql.DB, project, consumer, state s
 // consumers call it after durable materialization; failure merely causes replay.
 // A racing write cannot be blessed by a later generation read.
 func RememberSyncCursor(ctx context.Context, db *sql.DB, c SyncCursor, state string) (bool, error) {
+	return rememberSyncCursor(ctx, db, c, state)
+}
+
+// RememberSyncCursorWithin commits the receipt with the caller's own writes.
+// Rollback discards both; the ordinary generation/sequence checks still apply.
+func RememberSyncCursorWithin(ctx context.Context, tx *sql.Tx, c SyncCursor, state string) (bool, error) {
+	return rememberSyncCursor(ctx, tx, c, state)
+}
+
+func rememberSyncCursor(ctx context.Context, writer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, c SyncCursor, state string) (bool, error) {
 	c.State = state
-	result, err := db.ExecContext(ctx, `INSERT INTO history_sync_cursors(project_id,consumer,sequence,generation,state,checksum)
+	result, err := writer.ExecContext(ctx, `INSERT INTO history_sync_cursors(project_id,consumer,sequence,generation,state,checksum)
  SELECT ?,?,?,?,?,? WHERE (`+syncGenerationQuery+`)=? AND (SELECT COALESCE(MAX(sequence),0) FROM history_sync_changes WHERE project_id=?)=?
  ON CONFLICT(project_id,consumer) DO UPDATE SET sequence=excluded.sequence,generation=excluded.generation,state=excluded.state,checksum=excluded.checksum`, c.Project, c.Consumer, c.Sequence, c.Generation, c.State, c.checksum(), c.Project, c.Generation, c.Project, c.Sequence)
 	if err != nil {

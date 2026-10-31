@@ -8,7 +8,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
-func TestCheckpointArrivalsUseDeltaCaptureAfterStableCycle(t *testing.T) {
+func TestConsecutiveCheckpointArrivalsUseDeltaCapture(t *testing.T) {
 	ctx := context.Background()
 	m := newMachine(t, "checkpoint-delta", bareRemote(t))
 	m.decide(t, "baseline", "Existing history")
@@ -17,10 +17,6 @@ func TestCheckpointArrivalsUseDeltaCaptureAfterStableCycle(t *testing.T) {
 	}
 	previous := ""
 	for i := 0; i < 3; i++ {
-		// Publication observation can add endpoint provenance after capture's
-		// receipt. Settle that independently before qualifying this arrival;
-		// the archive-change guard must still reject an unsettled receipt.
-		m.sync(t, OutcomeSynced)
 		saved, err := (checkpoint.Service{DB: m.db}).CreateWithActions(ctx, checkpoint.Checkpoint{ProjectID: m.project, TaskID: "checkpoint-delta", PredecessorCheckpointID: previous, Task: "Qualification", Status: "in_progress", Summary: "New checkpoint", NextAction: "Continue"})
 		if err != nil {
 			t.Fatal(err)
