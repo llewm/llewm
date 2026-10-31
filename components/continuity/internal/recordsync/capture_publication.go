@@ -18,11 +18,7 @@ type capturePublication struct {
 	directories map[string]bool
 }
 
-func (a Archive) prepareCapturePublication(ctx context.Context, state string, objects []portable.EncodedEnvelope) *capturePublication {
-	stamp, before, err := directoryChangeSnapshot(ctx, a.Directory, true)
-	if err != nil || stamp != state {
-		return nil
-	}
+func prepareCapturePublication(before map[string]archiveMetadata, objects []portable.EncodedEnvelope) *capturePublication {
 	p := &capturePublication{before: before, additions: map[string][]byte{}, directories: map[string]bool{}}
 	add := func(path string, body []byte) {
 		if _, exists := before[path]; exists {

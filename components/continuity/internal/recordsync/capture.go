@@ -13,7 +13,7 @@ import (
 
 type captureGuard struct{ route, generation, archive string }
 
-func (a Archive) captureGuard(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {
+func (a Archive) captureInputs(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {
 	var g captureGuard
 	build := buildinfo.Current()
 	if build.BuildDirty {
@@ -26,9 +26,32 @@ func (a Archive) captureGuard(ctx context.Context, db *sql.DB, projectID string)
 	if generationErr != nil {
 		return g, generationErr
 	}
-	var err error
-	g.archive, err = a.ChangeStamp(ctx)
+	return g, nil
+}
+
+func (a Archive) captureGuard(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {
+	g, err := a.captureInputs(ctx, db, projectID)
+	if err == nil {
+		g.archive, err = a.ChangeStamp(ctx)
+	}
 	return g, err
+}
+
+// Retaining the first metadata walk avoids a second pre-publication walk when
+// canonical changes need new files. The saved generation is only an allocation
+// hint: the normal cursor, generation and final filesystem checks still decide
+// reuse. An unchanged capture keeps no per-file snapshot map.
+func (a Archive) captureStart(ctx context.Context, db *sql.DB, projectID string) (captureGuard, map[string]archiveMetadata, error) {
+	g, err := a.captureInputs(ctx, db, projectID)
+	if err != nil {
+		return g, nil, err
+	}
+	var saved string
+	err = db.QueryRowContext(ctx, `SELECT generation FROM history_sync_cursors WHERE project_id=? AND consumer=?`, projectID, g.route).Scan(&saved)
+	retain := err != nil || saved != g.generation
+	stamp, snapshot, err := directoryChangeSnapshot(ctx, a.Directory, retain)
+	g.archive = stamp
+	return g, snapshot, err
 }
 
 // CaptureProject reuses a completed local export/capture only while both its
@@ -42,7 +65,7 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 	if identity == nil || identity.LineageID != a.Lineage {
 		return false, fmt.Errorf("matching project/archive lineage required")
 	}
-	before, guardErr := a.captureGuard(ctx, db, projectID)
+	before, snapshot, guardErr := a.captureStart(ctx, db, projectID)
 	var cursor database.SyncCursor
 	var changes []database.SyncChange
 	var fallback string
@@ -95,13 +118,22 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 		generation, err := database.SyncGeneration(ctx, db, projectID)
 		eligible = err == nil && generation == before.generation
 		if eligible {
-			// Snapshot only before the first actual publication. Revalidating
-			// existing immutable files needs no metadata maps or extra walks.
+			// Prepare a receipt only for an actual publication. Prefer the
+			// initial snapshot; the final check also detects mutations between
+			// that observation and the first write. A missing allocation hint
+			// takes a fresh matching snapshot instead.
 			attempted := false
 			beforeCreate = func() {
 				if !attempted {
 					attempted = true
-					publication = a.prepareCapturePublication(ctx, before.archive, export.Envelopes)
+					if snapshot == nil {
+						stamp, held, err := directoryChangeSnapshot(ctx, a.Directory, true)
+						if err != nil || stamp != before.archive {
+							return
+						}
+						snapshot = held
+					}
+					publication = prepareCapturePublication(snapshot, export.Envelopes)
 				}
 			}
 		}

@@ -523,6 +523,16 @@ generation, unavailable completion proof, inventory repair and full semantic
 import); they do not yet cover every fallback branch or every local-state scan.
 `archive_metadata_entries_visited/op` includes files and directories visited by
 archive change guards, excluding the bookkeeping status directory.
+When the saved capture generation differs, capture retains its initial metadata
+snapshot for an eventual publication receipt instead of walking the archive
+again before the first write. An unchanged generation avoids that map allocation;
+the generation comparison is only a hint and cannot authorize reuse. Final
+publication validation and the final archive/database guard still run, including
+rejection of foreign arrivals between the initial observation and publication.
+The retained map is speculative and may be unused when later eligibility checks
+decline a receipt. This trades that allocation for one fewer metadata walk on
+qualified publications; it does not make archive validation proportional to the
+new records.
 `local_state_records_visited/op`, `local_state_records_hashed/op` and
 `local_state_payload_bytes_hashed/op` measure replay-guard hash construction,
 including recovery guards. They exclude operational loading, encoding and other

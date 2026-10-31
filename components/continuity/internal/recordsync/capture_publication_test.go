@@ -24,7 +24,7 @@ func TestCapturePublicationRejectsConcurrentDamage(t *testing.T) {
 		return e
 	}
 	old, newObject := makeObject("old"), makeObject("new")
-	for _, mode := range []string{"own-additions", "foreign-existing", "interrupted", "old-record", "old-provenance", "old-deletion", "new-record", "new-provenance", "foreign-provenance", "unexpected-file"} {
+	for _, mode := range []string{"own-additions", "foreign-existing", "interrupted", "before-publication", "old-record", "old-provenance", "old-deletion", "new-record", "new-provenance", "foreign-provenance", "unexpected-file"} {
 		t.Run(mode, func(t *testing.T) {
 			a, err := OpenArchive(t.TempDir(), lineage)
 			if err != nil {
@@ -38,12 +38,19 @@ func TestCapturePublicationRejectsConcurrentDamage(t *testing.T) {
 			if err := a.CaptureLocal([]portable.EncodedEnvelope{old}); err != nil {
 				t.Fatal(err)
 			}
-			stamp, err := a.ChangeStamp(ctx)
+			_, snapshot, err := directoryChangeSnapshot(ctx, a.Directory, true)
 			if err != nil {
 				t.Fatal(err)
 			}
 			objects := []portable.EncodedEnvelope{old, newObject}
-			p := a.prepareCapturePublication(ctx, stamp, objects)
+			if mode == "before-publication" {
+				// A valid foreign arrival after the initial observation must
+				// not become part of our own publication receipt.
+				if _, err := a.Put(makeObject("foreign"), "peer"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p := prepareCapturePublication(snapshot, objects)
 			if p == nil {
 				t.Fatal("publication not prepared")
 			}
@@ -107,6 +114,50 @@ func TestCapturePublicationRejectsConcurrentDamage(t *testing.T) {
 				t.Fatal("unexpected mutation blessed")
 			}
 		})
+	}
+}
+
+func TestCapturePublicationReusesInitialMetadataSnapshot(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "snapshot")
+	a, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendDecision := func(id string) {
+		t.Helper()
+		if _, err := (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: id, Title: id, Rationale: "Observation", Disposition: "accepted", Actor: "test", ActorType: "human", Authority: "caller_asserted"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendDecision("old")
+	for i := 0; i < 4; i++ {
+		if _, err := a.CaptureProject(ctx, db, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, snapshot, err := a.captureStart(ctx, db, project); err != nil || snapshot != nil {
+		t.Fatalf("unchanged capture retained metadata: %d %v", len(snapshot), err)
+	}
+	_, before, err := directoryChangeSnapshot(ctx, a.Directory, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendDecision("new")
+	measured, work := WithWorkMetrics(ctx)
+	if reused, err := a.CaptureProject(measured, db, project); err != nil || reused {
+		t.Fatalf("capture delta: %t %v", reused, err)
+	}
+	_, after, err := directoryChangeSnapshot(ctx, a.Directory, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Initial observation, completed publication, and final guard. The first
+	// write no longer needs a fourth full metadata walk.
+	if got, want := work.Counts()["archive_metadata_entries_visited"], int64(len(before)+2*len(after)); got != want {
+		t.Fatalf("metadata visits: got %d want %d", got, want)
+	}
+	if reused, err := a.CaptureProject(ctx, db, project); err != nil || !reused {
+		t.Fatalf("publication not acknowledged: %t %v", reused, err)
 	}
 }
 
