@@ -31,6 +31,11 @@ func TestSyncGenerationCoversSchema(t *testing.T) {
 	for _, name := range []string{"history_index_dependency_records", "history_index_dependencies"} {
 		excluded[name] = true
 	}
+	// Durable transport observations have their own atomic, project-scoped
+	// journal/epoch. They are not another operational export record family.
+	for _, name := range []string{"history_archive_state", "history_archive_envelopes", "history_archive_origins", "history_archive_changes", "history_archive_cursors"} {
+		excluded[name] = true
+	}
 	for _, name := range strings.Fields(`bootstrap_deliveries contract_index_entries events head_observations commit_authors presence_events sessions sync_attempts usage_requests usage_sources usage_tool_calls usage_tool_results roadmap_sync_files roadmap_sync_runs portable_import_receipts history_sync_changes history_sync_generation history_sync_proofs history_sync_cursors schema_migrations`) {
 		excluded[name] = true
 	}

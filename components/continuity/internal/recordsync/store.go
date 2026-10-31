@@ -1,5 +1,5 @@
 // Package recordsync owns immutable transport records and shared import semantics.
-// Transport storage is distinct from the operational SQLite database.
+// Transport observations are distinct from operational semantic state.
 package recordsync
 
 import (

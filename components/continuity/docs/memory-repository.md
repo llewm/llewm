@@ -96,6 +96,26 @@ can read every lineage stored there; lineage directories do not enforce access.
 
 ## Commits and content
 
+### Durable archive protocol
+
+Schema 091 defines a project-scoped SQLite archive of exact envelope bytes and
+append-only origin observations, separate from disposable block indexes. Envelope
+hashes preserve competing versions of one logical record. A first-origin foreign
+key requires body and provenance to commit together. Insertion also appends the
+change journal and updates its sequence/counts in that transaction. Consumers use
+checksummed, project/lineage/policy-bound receipts; uncertainty requires complete
+validation rather than an inferred delta. Raw endpoint strings are not persisted
+as provenance: origin and consumer identities are hashes.
+
+SQL migration creates no active archive. Explicit storage migration must stage
+verified observations and compare their complete content/provenance inventory
+before activation. Full audit validates bodies, hashes, origins, journal coverage
+and counts without consulting disposable indexes. Ordinary access verifies the
+selected bytes; changed journal epochs invalidate old consumer receipts. Archive
+rows cannot be silently replaced as cache repair. Activation of this protocol and
+replacement of the loose-file archive require the supported, backup-gated storage
+migration; creating the schema alone does not switch the runtime storage path.
+
 ### Unchanged syncs
 
 Migration 081 adds device-local completion proofs for Git sync. SQL triggers
