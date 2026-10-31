@@ -268,97 +268,100 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 	if err != nil {
 		return nil, err
 	}
-	type saved struct {
-		hash  string
-		items []struct{ hash, body string }
-	}
-	var savedBlocks []saved
-	rowCount, rowBytes := 0, 0
-	for rows.Next() {
-		rowCount++
-		if rowCount > portable.MaxRecordCount {
-			rows.Close()
-			return nil, fmt.Errorf("%w: publication record count exceeds bounds", ErrIndexRebuild)
-		}
-		var hash string
-		var objectHash, body sql.NullString
-		if err := rows.Scan(&hash, &objectHash, &body); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if len(savedBlocks) == 0 || savedBlocks[len(savedBlocks)-1].hash != hash {
-			savedBlocks = append(savedBlocks, saved{hash: hash})
-			if len(savedBlocks) > portable.MaxRecordCount {
-				rows.Close()
-				return nil, fmt.Errorf("%w: too many publication blocks", ErrIndexRebuild)
-			}
-		}
-		if !body.Valid || !objectHash.Valid {
-			rows.Close()
-			return nil, fmt.Errorf("%w: publication has no records", ErrIndexRebuild)
-		}
-		rowBytes += len(body.String) + 1
-		if rowBytes > portable.MaxRecordsBytes {
-			rows.Close()
-			return nil, fmt.Errorf("%w: publication records exceed bounds", ErrIndexRebuild)
-		}
-		savedBlocks[len(savedBlocks)-1].items = append(savedBlocks[len(savedBlocks)-1].items, struct{ hash, body string }{objectHash.String, body.String})
-		if len(savedBlocks[len(savedBlocks)-1].items) > MaxBlockRecords || len(body.String) > MaxObjectBytes {
-			rows.Close()
-			return nil, fmt.Errorf("%w: publication exceeds bounds", ErrIndexRebuild)
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
+	// Consume the ordered catalog one block at a time. Retaining all SQL bodies
+	// duplicates the entire archive snapshot until validation finishes.
+	defer rows.Close()
 	covered := make(map[string]bool, len(allowed))
 	var result []Block
-	for _, saved := range savedBlocks {
-		var body bytes.Buffer
-		body.WriteString(blockHeader)
-		permitted, addsRecord := true, false
-		var objects []portable.EncodedEnvelope
-		for _, item := range saved.items {
-			if body.Len()+len(item.body)+1 > MaxBlockBytes {
-				return nil, fmt.Errorf("%w: publication exceeds bounds", ErrIndexRebuild)
-			}
-			body.WriteString(item.body)
-			body.WriteByte('\n')
-			existing, ok := byHash[item.hash]
-			if !ok || !bytes.Equal(existing.Bytes, []byte(item.body)) {
-				// Entries outside the validated, permitted archive snapshot still
-				// need their own identity check, even when not being published.
-				syncwork.RecordWork(ctx, "publication_envelope_decodes", 1)
-				var envelope portable.Envelope
-				if err := json.Unmarshal([]byte(item.body), &envelope); err != nil || envelope.EnvelopeSHA256 != item.hash || envelope.LineageID != s.Lineage {
-					return nil, fmt.Errorf("%w: invalid publication entry", ErrIndexRebuild)
-				}
-				permitted = false
-				continue
-			}
-			// Exact bytes from this scan already carry a validated identity.
-			// Reuse its parsed envelope; the complete block hash below still
-			// checks membership and ordering against the staged intent.
-			syncwork.RecordWork(ctx, "publication_envelopes_reused", 1)
-			objects = append(objects, existing)
-			if !covered[item.hash] {
-				addsRecord = true
-			}
+	var hash string
+	var body bytes.Buffer
+	var objects []portable.EncodedEnvelope
+	permitted, addsRecord := true, false
+	blockRecords := 0
+	finish := func() error {
+		if blockRecords == 0 {
+			return nil
 		}
 		sum := sha256.Sum256(body.Bytes())
-		if len(saved.items) == 0 || len(saved.items) > MaxBlockRecords || body.Len() > MaxBlockBytes || hex.EncodeToString(sum[:]) != saved.hash {
-			return nil, fmt.Errorf("%w: invalid publication block", ErrIndexRebuild)
+		if hex.EncodeToString(sum[:]) != hash {
+			return fmt.Errorf("%w: invalid publication block", ErrIndexRebuild)
 		}
 		if permitted && addsRecord {
-			block := Block{Hash: saved.hash, Bytes: append([]byte(nil), body.Bytes()...), Objects: objects}
+			block := Block{Hash: hash, Bytes: append([]byte(nil), body.Bytes()...), Objects: objects}
 			block.validated = sealBlockContents(s.Lineage, objects)
 			result = append(result, block)
-			for _, object := range block.Objects {
+			for _, object := range objects {
 				covered[object.Envelope.EnvelopeSHA256] = true
 			}
 		}
+		return nil
+	}
+	rowCount, rowBytes := 0, 0
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rowCount++
+		if rowCount > portable.MaxRecordCount {
+			return nil, fmt.Errorf("%w: publication record count exceeds bounds", ErrIndexRebuild)
+		}
+		var nextHash string
+		var objectHash, item sql.NullString
+		if err := rows.Scan(&nextHash, &objectHash, &item); err != nil {
+			return nil, err
+		}
+		if blockRecords == 0 || nextHash != hash {
+			if err := finish(); err != nil {
+				return nil, err
+			}
+			hash = nextHash
+			body.Reset()
+			body.WriteString(blockHeader)
+			objects = nil
+			permitted, addsRecord = true, false
+			blockRecords = 0
+		}
+		if !item.Valid || !objectHash.Valid {
+			return nil, fmt.Errorf("%w: publication has no records", ErrIndexRebuild)
+		}
+		rowBytes += len(item.String) + 1
+		if rowBytes > portable.MaxRecordsBytes {
+			return nil, fmt.Errorf("%w: publication records exceed bounds", ErrIndexRebuild)
+		}
+		blockRecords++
+		if blockRecords > MaxBlockRecords || len(item.String) > MaxObjectBytes || body.Len()+len(item.String)+1 > MaxBlockBytes {
+			return nil, fmt.Errorf("%w: publication exceeds bounds", ErrIndexRebuild)
+		}
+		body.WriteString(item.String)
+		body.WriteByte('\n')
+		existing, ok := byHash[objectHash.String]
+		if !ok || !bytes.Equal(existing.Bytes, []byte(item.String)) {
+			// Entries outside the validated, permitted archive snapshot still
+			// need their own identity check, even when not being published.
+			syncwork.RecordWork(ctx, "publication_envelope_decodes", 1)
+			var envelope portable.Envelope
+			if err := json.Unmarshal([]byte(item.String), &envelope); err != nil || envelope.EnvelopeSHA256 != objectHash.String || envelope.LineageID != s.Lineage {
+				return nil, fmt.Errorf("%w: invalid publication entry", ErrIndexRebuild)
+			}
+			permitted = false
+			continue
+		}
+		// Exact bytes from this scan already carry a validated identity.
+		// Reuse its parsed envelope; finish still checks complete membership.
+		syncwork.RecordWork(ctx, "publication_envelopes_reused", 1)
+		objects = append(objects, existing)
+		if !covered[objectHash.String] {
+			addsRecord = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := finish(); err != nil {
+		return nil, err
 	}
 	var missing []portable.EncodedEnvelope
 	for _, object := range allowed {

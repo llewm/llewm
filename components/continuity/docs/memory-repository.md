@@ -587,6 +587,10 @@ parsed envelopes while retaining complete block reconstruction and hash checks.
 outside that exact snapshot, including entries no longer permitted for relay.
 Neither counter implies that publication membership or archive scans are bounded
 by the new arrivals.
+Publication planning consumes the ordered SQL catalog one block at a time,
+discarding each block's temporary SQL bodies after validation. The complete
+validated archive snapshot and returned publication plan still occupy memory;
+this bounds only the additional Go catalog buffer, not total sync memory or work.
 Missing counters mean zero observed events. Metrics exclude fixture setup and
 warm-up, contain no record contents or identities, and do not authorize reuse.
 Use the same fixture shape and iteration count when comparing histories; these

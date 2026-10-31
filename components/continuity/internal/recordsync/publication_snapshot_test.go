@@ -68,6 +68,70 @@ func TestPublicationSnapshotPreservesIndexedMembership(t *testing.T) {
 	}
 }
 
+func TestPublicationStreamsMixedBlocksAndRejectsLateDamage(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "publication-stream")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	const endpoint = "git:destination"
+	want := make(map[string][]byte)
+	for i, origin := range []string{"local", "folder:independent", "local"} {
+		object, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: fmt.Sprintf("stream-%d", i), RecordedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Authority: "caller_asserted", Payload: []byte(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := archive.Put(object, origin); err != nil {
+			t.Fatal(err)
+		}
+		// Each arrival becomes a separate immutable block. The foreign block
+		// must not affect permission or coverage of its local neighbors.
+		blocks, err := index.PlanPublication(ctx, archive, endpoint, true)
+		if err != nil || len(blocks) != i+1 {
+			t.Fatalf("stage %d: %d blocks, %v", i, len(blocks), err)
+		}
+		if origin == "local" {
+			for _, block := range blocks {
+				if len(block.Objects) == 1 && block.Objects[0].Envelope.RecordID == object.Envelope.RecordID {
+					want[block.Hash] = append([]byte(nil), block.Bytes...)
+				}
+			}
+		}
+	}
+	blocks, err := index.PlanPublication(ctx, archive, endpoint, false)
+	if err != nil || len(blocks) != 2 || len(want) != 2 {
+		t.Fatalf("local-only plan: %d blocks, %v", len(blocks), err)
+	}
+	for _, block := range blocks {
+		if !bytes.Equal(block.Bytes, want[block.Hash]) || !block.matchesValidatedContents(lineage) {
+			t.Fatal("streaming changed block bytes, identity or permission")
+		}
+	}
+	// Damage the final block in SQL order, after earlier blocks have already
+	// been consumed. No partial plan or newly staged membership may escape.
+	arrival, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordID: "unstaged-arrival", RecordedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Authority: "caller_asserted", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.Put(arrival, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM history_index_block_members WHERE project_id=? AND block_hash=(SELECT MAX(block_hash) FROM history_index_publications WHERE project_id=?)`, project, project); err != nil {
+		t.Fatal(err)
+	}
+	got, err := index.planPublication(ctx, archive, endpoint, true, nil, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+		return archive.objects(ctx, endpoint, true)
+	})
+	if !errors.Is(err, ErrIndexRebuild) || len(got) != 0 {
+		t.Fatalf("late damage returned a partial plan: %d blocks, %v", len(got), err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM history_index_publications WHERE project_id=?`, project).Scan(&count); err != nil || count != 3 {
+		t.Fatalf("late damage changed publication membership: %d, %v", count, err)
+	}
+}
+
 func TestForeignSnapshotRecoveryAndOriginChange(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "foreign-snapshot-recovery")
 	archive, err := OpenArchive(t.TempDir(), lineage)
