@@ -1041,8 +1041,24 @@ func TestRoadmapCLIRecordsAndReportsDeterministicStatus(t *testing.T) {
 	if !strings.Contains(packet, `"trigger": "manual"`) || !strings.Contains(packet, `"sources"`) {
 		t.Fatalf("unexpected manual review packet: %s", packet)
 	}
-	if explicit := runCLI(t, "", "roadmap", "review-packet", "--manual", "--max-bytes", "1024", "--output", "json"); explicit != packet {
-		t.Fatal("review-packet JSON default changed")
+	explicit := runCLI(t, "", "roadmap", "review-packet", "--manual", "--max-bytes", "1024", "--output", "json")
+	var defaultPacket, explicitPacket roadmap.ReviewPacket
+	if err := json.Unmarshal([]byte(packet), &defaultPacket); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(explicit), &explicitPacket); err != nil {
+		t.Fatal(err)
+	}
+	// Separate commands may cross a second boundary. Compare the format and
+	// saved observations while checking the live elapsed time independently.
+	if defaultPacket.Status.ElapsedSeconds == nil || explicitPacket.Status.ElapsedSeconds == nil || *explicitPacket.Status.ElapsedSeconds < *defaultPacket.Status.ElapsedSeconds {
+		t.Fatalf("invalid elapsed time in review packets:\n%s\n%s", packet, explicit)
+	}
+	explicitPacket.Status.ElapsedSeconds = defaultPacket.Status.ElapsedSeconds
+	defaultJSON, _ := json.Marshal(defaultPacket)
+	explicitJSON, _ := json.Marshal(explicitPacket)
+	if !bytes.Equal(defaultJSON, explicitJSON) {
+		t.Fatalf("review-packet JSON default changed:\n%s\n%s", packet, explicit)
 	}
 	packetText := runCLI(t, "", "roadmap", "review-packet", "--manual", "--max-bytes", "1024", "--output", "text")
 	for _, want := range []string{"trigger=manual", "content_bytes=", "Source:", "sha256=", "does not invoke a model"} {

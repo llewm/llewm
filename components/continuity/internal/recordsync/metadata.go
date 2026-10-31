@@ -58,6 +58,7 @@ func directoryChangeSnapshot(ctx context.Context, directory string, retain bool)
 			return fs.SkipDir
 		}
 		entries++
+		RecordWork(ctx, "archive_metadata_entries_visited", 1)
 		if entries > MaxScanEntries {
 			return fmt.Errorf("archive metadata exceeds bounds")
 		}

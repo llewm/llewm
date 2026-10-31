@@ -126,13 +126,14 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 				return errMixedProofChanged
 			}
 		}
-		if localStateHash(local, excluded) != priorState {
+		previousState, completeState := localStateHashes(ctx, local, excluded, true)
+		if previousState != priorState {
 			return errMixedProofChanged
 		}
 		if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
 			return fmt.Errorf("%w: %v", errMixedProofChanged, err)
 		}
-		state = localStateHash(local, nil)
+		state = completeState
 		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_valid_sets(project_id,set_hash,index_version,local_state_hash) VALUES(?,?,?,?) ON CONFLICT(project_id,set_hash) DO UPDATE SET index_version=excluded.index_version,local_state_hash=excluded.local_state_hash`, s.ProjectID, setHash, IndexVersion, state); err != nil {
 			return err
 		}

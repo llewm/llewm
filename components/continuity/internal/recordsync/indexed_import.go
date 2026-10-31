@@ -231,7 +231,7 @@ func (s Index) mixedReplaySnapshot(ctx context.Context, setHash string, objects 
 	if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
 		return "", false, err
 	}
-	state := localStateHash(local, nil)
+	state, _ := localStateHashes(ctx, local, nil, false)
 	if expected != "" {
 		if state != expected {
 			return "", false, nil
@@ -269,24 +269,40 @@ func (s Index) mixedReplaySnapshot(ctx context.Context, setHash string, objects 
 	return state, false, nil
 }
 
-func localStateHash(local map[string]portable.EncodedEnvelope, excluded map[string]bool) string {
+// localStateHashes shares sorting and payload digests between the prior-state
+// guard and its renewed complete state. Both retain the original byte encoding;
+// exclusions affect only the prior hash, never the complete state being saved.
+func localStateHashes(ctx context.Context, local map[string]portable.EncodedEnvelope, excluded map[string]bool, complete bool) (string, string) {
 	keys := make([]string, 0, len(local))
 	for key := range local {
-		if !excluded[key] {
+		RecordWork(ctx, "local_state_records_visited", 1)
+		if complete || !excluded[key] {
 			keys = append(keys, key)
 		}
 	}
 	sort.Strings(keys)
-	hash := sha256.New()
+	prior, current := sha256.New(), sha256.New()
 	var length [8]byte
 	for _, key := range keys {
 		binary.BigEndian.PutUint64(length[:], uint64(len(key)))
-		hash.Write(length[:])
-		hash.Write([]byte(key))
 		sum := sha256.Sum256(local[key].Bytes)
-		hash.Write(sum[:])
+		RecordWork(ctx, "local_state_records_hashed", 1)
+		RecordWork(ctx, "local_state_payload_bytes_hashed", int64(len(local[key].Bytes)))
+		if !excluded[key] {
+			prior.Write(length[:])
+			prior.Write([]byte(key))
+			prior.Write(sum[:])
+		}
+		if complete {
+			current.Write(length[:])
+			current.Write([]byte(key))
+			current.Write(sum[:])
+		}
 	}
-	return hex.EncodeToString(hash.Sum(nil))
+	if !complete {
+		return hex.EncodeToString(prior.Sum(nil)), ""
+	}
+	return hex.EncodeToString(prior.Sum(nil)), hex.EncodeToString(current.Sum(nil))
 }
 
 // The first selective case is intentionally narrow. A prior complete import

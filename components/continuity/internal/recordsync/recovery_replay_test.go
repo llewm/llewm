@@ -67,17 +67,17 @@ func TestRecoveryFingerprintKeepsReferencedInvocations(t *testing.T) {
 	if len(excluded) != 1 || !excluded["unrelated"] {
 		t.Fatalf("excluded the wrong invocation identities: %#v", excluded)
 	}
-	before := localStateHash(local, excluded)
+	before := referenceLocalState(local, excluded)
 	changed := local["unrelated"]
 	changed.Bytes = []byte("unrelated change")
 	local["unrelated"] = changed
-	if localStateHash(local, recoveryInvocationExclusions(local, input, recovered)) != before {
+	if referenceLocalState(local, recoveryInvocationExclusions(local, input, recovered)) != before {
 		t.Fatal("unreferenced activity invalidated the proof")
 	}
 	changed = local["parent"]
 	changed.Bytes = []byte("referenced parent change")
 	local["parent"] = changed
-	if localStateHash(local, recoveryInvocationExclusions(local, input, recovered)) == before {
+	if referenceLocalState(local, recoveryInvocationExclusions(local, input, recovered)) == before {
 		t.Fatal("referenced invocation change did not invalidate the proof")
 	}
 }

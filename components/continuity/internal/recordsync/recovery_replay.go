@@ -136,7 +136,7 @@ func (s Index) recoveryReplaySnapshot(ctx context.Context, setHash string, objec
 	if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
 		return "", false, err
 	}
-	state := localStateHash(local, recoveryInvocationExclusions(local, objects, recovered))
+	state, _ := localStateHashes(ctx, local, recoveryInvocationExclusions(local, objects, recovered), false)
 	if expected != "" {
 		if state != expected {
 			return "", false, nil

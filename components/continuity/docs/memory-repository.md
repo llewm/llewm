@@ -521,6 +521,15 @@ verification within an observation but still visits the tracked history.
 `fallback_*` counters name observed fallback categories (such as changed local
 generation, unavailable completion proof, inventory repair and full semantic
 import); they do not yet cover every fallback branch or every local-state scan.
+`archive_metadata_entries_visited/op` includes files and directories visited by
+archive change guards, excluding the bookkeeping status directory.
+`local_state_records_visited/op`, `local_state_records_hashed/op` and
+`local_state_payload_bytes_hashed/op` measure replay-guard hash construction,
+including recovery guards. They exclude operational loading, encoding and other
+canonical importer scans. Mixed-addition guards sort local identities and hash
+each payload once to compute both the prior state excluding additions and the
+complete renewed state. Both hashes preserve their existing proof encoding;
+the complete local-state comparison and canonical import checks still apply.
 Missing counters mean zero observed events. Metrics exclude fixture setup and
 warm-up, contain no record contents or identities, and do not authorize reuse.
 Use the same fixture shape and iteration count when comparing histories; these
