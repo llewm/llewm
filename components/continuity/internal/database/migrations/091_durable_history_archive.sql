@@ -10,7 +10,10 @@ CREATE TABLE history_archive_state (
  record_count INTEGER NOT NULL DEFAULT 0 CHECK(record_count BETWEEN 0 AND 100000),
  record_bytes INTEGER NOT NULL DEFAULT 0 CHECK(record_bytes BETWEEN 0 AND 67108864),
  origin_count INTEGER NOT NULL DEFAULT 0 CHECK(origin_count BETWEEN 0 AND 500000),
- change_count INTEGER NOT NULL DEFAULT 0 CHECK(change_count=record_count+origin_count)
+ change_count INTEGER NOT NULL DEFAULT 0 CHECK(change_count=record_count+origin_count),
+ migration_json TEXT CHECK(migration_json IS NULL OR (length(migration_json)<=4096 AND json_valid(migration_json))),
+ migration_checksum TEXT CHECK(migration_checksum IS NULL OR (length(migration_checksum)=64 AND migration_checksum NOT GLOB '*[^0-9a-f]*')),
+ CHECK((migration_json IS NULL)=(migration_checksum IS NULL))
 ) STRICT;
 CREATE TABLE history_archive_envelopes (
  project_id TEXT NOT NULL REFERENCES history_archive_state(project_id),
@@ -76,5 +79,6 @@ CREATE TRIGGER history_archive_journal_removed AFTER DELETE ON history_archive_c
 CREATE TRIGGER history_archive_identity_immutable BEFORE UPDATE ON history_archive_state
  WHEN old.project_id IS NOT new.project_id OR old.lineage_id IS NOT new.lineage_id OR old.format_version IS NOT new.format_version
  OR (old.status IS NOT new.status AND NOT(old.status='staging' AND new.status='ready'))
+ OR (old.migration_json IS NOT NULL AND (old.migration_json IS NOT new.migration_json OR old.migration_checksum IS NOT new.migration_checksum))
  BEGIN SELECT RAISE(ABORT,'archive identity and activation are immutable'); END;
 CREATE TRIGGER history_archive_state_immutable_delete BEFORE DELETE ON history_archive_state BEGIN SELECT RAISE(ABORT,'durable archive state cannot be deleted'); END;

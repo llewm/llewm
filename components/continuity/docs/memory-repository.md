@@ -126,6 +126,20 @@ and origins, and never activates or deletes source files. The coordinator still
 must stop writers, verify backups, and fence the old storage route before
 activation. Reading a stable snapshot alone is not writer coordination.
 
+The private cutover coordinator records immutable, checksummed preparation in
+the archive state. It creates a non-overwriting SQLite backup, checks its
+integrity, foreign keys and project identity, and hashes the verified backup.
+Source staging and its recovery receipt commit together. Completion verifies
+the backup and staged archive before retiring the source to a distinct sibling
+directory. An exclusively published, durable marker blocks the old archive path
+from being recreated by legacy writers. Only a reverified retained source and a
+matching SQLite audit permit activation. Recovery can resume after preparation,
+rename, marker publication or activation; competing source directories, changed
+backups and mismatched receipts fail closed. Retained sources and backups are
+never overwritten or deleted by cutover. A backup created before preparation
+commits may remain unregistered after interruption; a new preparation must use
+a fresh backup destination rather than infer ownership of that file.
+
 The private Git object transport foundation reads bounded, hash-verified blobs
 and trees without an index or working tree. Tree entries retain their modes;
 selected transport blobs must be regular non-executable files. A tree delta
