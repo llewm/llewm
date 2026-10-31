@@ -28,7 +28,7 @@ func LocalEnvelopesForImport(ctx context.Context, tx *sql.Tx, projectID string) 
 	}
 	result := make(map[string]EncodedEnvelope, len(specs))
 	for _, spec := range specs {
-		encoded, err := validated.encode(spec)
+		encoded, err := validated.encode(ctx, spec)
 		if err != nil {
 			return nil, err
 		}

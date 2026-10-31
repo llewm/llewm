@@ -11,6 +11,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 func TestCapturePublicationRejectsConcurrentDamage(t *testing.T) {
@@ -143,7 +144,7 @@ func TestCapturePublicationReusesInitialMetadataSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	appendDecision("new")
-	measured, work := WithWorkMetrics(ctx)
+	measured, work := syncwork.WithWorkMetrics(ctx)
 	if reused, err := a.CaptureProject(measured, db, project); err != nil || reused {
 		t.Fatalf("capture delta: %t %v", reused, err)
 	}

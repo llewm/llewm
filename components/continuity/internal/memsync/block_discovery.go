@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // blockTreeDiscovery caches immutable Git tree nodes for one locked cycle,
@@ -39,7 +40,7 @@ func (s Syncer) trackedBlockPaths(ctx context.Context, repo git, directory strin
 		}
 	}
 	listing, err := repo.run(ctx, "ls-files", "-z", "--", directory)
-	recordsync.RecordWork(ctx, "fallback_git_path_listing", 1)
+	syncwork.RecordWork(ctx, "fallback_git_path_listing", 1)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +115,7 @@ func (d *blockTreeDiscovery) paths(ctx context.Context, repo git, tree, director
 		}
 		for _, entry := range entries {
 			visited++
-			recordsync.RecordWork(ctx, "git_tree_entries_visited", 1)
+			syncwork.RecordWork(ctx, "git_tree_entries_visited", 1)
 			if visited > recordsync.MaxScanEntries {
 				return fmt.Errorf("block tree traversal exceeds bounds")
 			}

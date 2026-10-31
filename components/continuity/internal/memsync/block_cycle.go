@@ -10,6 +10,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // cycleBlocks is the Git block workflow, including guarded reuse of a completed
@@ -32,7 +33,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	s.discovery = &blockTreeDiscovery{}
 	before, guardErr := s.guard(local, repo)
 	if guardErr != nil {
-		recordsync.RecordWork(ctx, "fallback_unchanged_guard_unavailable", 1)
+		syncwork.RecordWork(ctx, "fallback_unchanged_guard_unavailable", 1)
 	}
 	prefetched := false
 	if !p.convert && guardErr == nil {

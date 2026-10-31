@@ -13,6 +13,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
@@ -140,6 +141,7 @@ func projectRootFrom(ctx context.Context, source queryer, projectID string) (str
 const rootSeparator = "\x00"
 
 func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string, allInvocations bool, validated snapshotEncodings) ([]EnvelopeSpec, []Reference, error) {
+	syncwork.RecordWork(ctx, "operational_full_loads", 1)
 	checkpointSpecs, err := loadCheckpointSpecs(ctx, source, projectID, projectRoot, lineageID)
 	if err != nil {
 		return nil, nil, err
@@ -225,6 +227,7 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 		return nil, nil, err
 	}
 	records = append(records, narratives...)
+	syncwork.RecordWork(ctx, "operational_specs_loaded", int64(len(records)))
 	records, err = retainedSpecs(ctx, source, projectID, lineageID, records, validated)
 	return records, missing, err
 }
@@ -652,7 +655,7 @@ func planValidatedOperationalImport(ctx context.Context, source queryer, project
 	}
 	local := make(map[string]EncodedEnvelope, len(localSpecs))
 	for _, spec := range localSpecs {
-		encoded, err := validated.encode(spec)
+		encoded, err := validated.encode(ctx, spec)
 		if err != nil {
 			return ImportPlan{}, err
 		}

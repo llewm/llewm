@@ -518,9 +518,12 @@ Git tracked-block observation verifies each block's inventory once while reading
 it, then records archive provenance and publication membership from that exact
 snapshot. It repeats the read after fetching; this reduces duplicate inventory
 verification within an observation but still visits the tracked history.
-`fallback_*` counters name observed fallback categories (such as changed local
-generation, unavailable completion proof, inventory repair and full semantic
-import); they do not yet cover every fallback branch or every local-state scan.
+`fallback_*` counters name observed fallback categories, including capture cursor
+and publication guards, delta selection/snapshot/recovery/missing actors, export
+writer retries, unavailable completion proofs, inventory repair and full semantic
+import. They count the observed branch, not a unique cycle or every possible
+fallback. `capture_full_exports/op` counts full-export requests from capture,
+including the ordinary first capture and repairs after a failed delta receipt.
 `archive_metadata_entries_visited/op` includes files and directories visited by
 archive change guards, excluding the bookkeeping status directory.
 When the saved capture generation differs, capture retains its initial metadata
@@ -540,6 +543,22 @@ canonical importer scans. Mixed-addition guards sort local identities and hash
 each payload once to compute both the prior state excluding additions and the
 complete renewed state. Both hashes preserve their existing proof encoding;
 the complete local-state comparison and canonical import checks still apply.
+`operational_full_loads/op` counts complete operational snapshot load attempts;
+`operational_delta_loads/op` counts selected loads that reach specification
+assembly. `operational_specs_loaded/op` counts assembled envelope specifications
+before retained/recovery overlays, including repeated work after writer retries.
+These are logical records, not SQL rows: child rows and partial loads that fail
+before assembly are not included. `snapshot_envelope_encodes/op` counts fresh
+encoding attempts of assembled specifications, and `snapshot_encoding_reuses/op`
+counts reuse of an encoding already validated in the same snapshot. Encoding
+performed while validating a retained or recovered envelope is covered by the
+decode counters instead.
+`retained_envelopes_decoded/op` and `retained_envelope_bytes_decoded/op` count
+retained overlay decode attempts and input bytes, including failed validation;
+the corresponding `recovery_*` counters cover recovery substitutions. These do
+not count every encoder/decoder elsewhere in transport or canonical importing.
+The context-scoped collector lives in `internal/syncwork`, shared by portable
+loading, archive validation and transport; it persists no measurements.
 Missing counters mean zero observed events. Metrics exclude fixture setup and
 warm-up, contain no record contents or identities, and do not authorize reuse.
 Use the same fixture shape and iteration count when comparing histories; these

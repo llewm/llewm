@@ -11,6 +11,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/procedures"
 	"github.com/llewm/llewm/components/continuity/internal/resource"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"github.com/llewm/llewm/components/continuity/internal/topic"
 	"github.com/llewm/llewm/components/continuity/internal/trackplan"
 	"github.com/llewm/llewm/components/continuity/internal/workitem"
@@ -92,7 +93,8 @@ func TestMemoryDeltaMatchesFullExportAndConsumesRetention(t *testing.T) {
 		if reason != "" {
 			t.Fatal(reason)
 		}
-		export, receipt, used, err := EncodeMemoryDelta(ctx, db, c, changes)
+		measured, deltaWork := syncwork.WithWorkMetrics(ctx)
+		export, receipt, used, err := EncodeMemoryDelta(measured, db, c, changes)
 		if err != nil || !used {
 			t.Fatalf("delta cycle%d: used=%t %v changes=%+v", cycle, used, err, changes)
 		}
@@ -108,9 +110,17 @@ func TestMemoryDeltaMatchesFullExportAndConsumesRetention(t *testing.T) {
 			}
 			materialized[recordKey(e.Envelope)] = e.Bytes
 		}
-		full, err := EncodeMemoryExport(ctx, db, project)
+		measured, fullWork := syncwork.WithWorkMetrics(ctx)
+		full, err := EncodeMemoryExport(measured, db, project)
 		if err != nil {
 			t.Fatal(err)
+		}
+		deltaCounts, fullCounts := deltaWork.Counts(), fullWork.Counts()
+		if deltaCounts["operational_delta_loads"] != 1 || deltaCounts["operational_full_loads"] != 0 || deltaCounts["operational_specs_loaded"] != int64(len(export.Envelopes)) || deltaCounts["snapshot_envelope_encodes"] == 0 {
+			t.Fatalf("missing selected export work: %v", deltaCounts)
+		}
+		if fullCounts["operational_full_loads"] != 1 || fullCounts["operational_specs_loaded"] != int64(len(full.Envelopes)) || fullCounts["snapshot_encoding_reuses"] != int64(len(full.Envelopes)) || fullCounts["retained_envelopes_decoded"] != int64(len(full.Envelopes)) || fullCounts["retained_envelope_bytes_decoded"] == 0 {
+			t.Fatalf("missing complete snapshot work: %v", fullCounts)
 		}
 		if len(full.Envelopes) != len(materialized) {
 			t.Fatalf("missing delta records: full=%d materialized=%d", len(full.Envelopes), len(materialized))
@@ -140,6 +150,7 @@ func TestMemoryDeltaRefusesStaleUnsupportedAndOversizeBatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	change := database.SyncChange{Table: "decision_records", Key: fmt.Sprintf(`[%q,"arrival"]`, project), Operation: "insert"}
+	measured, work := syncwork.WithWorkMetrics(ctx)
 	for _, changes := range [][]database.SyncChange{
 		{{Table: "portable_envelopes", Key: `[]`, Operation: "insert"}},
 		{{Table: "decision_records", Key: change.Key, Operation: "delete"}},
@@ -147,7 +158,7 @@ func TestMemoryDeltaRefusesStaleUnsupportedAndOversizeBatches(t *testing.T) {
 		{{Table: "decision_records", Key: `["other-project","arrival"]`, Operation: "insert"}},
 		{{Table: "decision_records", Key: `[]`, Operation: "insert"}},
 	} {
-		if _, _, used, err := EncodeMemoryDelta(ctx, db, c, changes); err != nil || used {
+		if _, _, used, err := EncodeMemoryDelta(measured, db, c, changes); err != nil || used {
 			t.Fatalf("unsupported batch accepted: %t %v", used, err)
 		}
 	}
@@ -155,14 +166,17 @@ func TestMemoryDeltaRefusesStaleUnsupportedAndOversizeBatches(t *testing.T) {
 	for i := 0; i < 129; i++ {
 		large = append(large, database.SyncChange{Table: "decision_records", Key: fmt.Sprintf(`[%q,"record-%d"]`, project, i), Operation: "insert"})
 	}
-	if _, _, used, err := EncodeMemoryDelta(ctx, db, c, large); err != nil || used {
+	if _, _, used, err := EncodeMemoryDelta(measured, db, c, large); err != nil || used {
 		t.Fatalf("oversize accepted: %t %v", used, err)
 	}
 	if _, err := db.Exec(`INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,'racing',1)`, project); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, used, err := EncodeMemoryDelta(ctx, db, c, []database.SyncChange{change}); err != nil || used {
+	if _, _, used, err := EncodeMemoryDelta(measured, db, c, []database.SyncChange{change}); err != nil || used {
 		t.Fatalf("stale snapshot accepted: %t %v", used, err)
+	}
+	if counts := work.Counts(); counts["fallback_delta_unqualified_changes"] != 6 || counts["fallback_delta_snapshot_changed"] != 1 || counts["operational_specs_loaded"] != 0 {
+		t.Fatalf("fallback work misreported: %v", counts)
 	}
 }
 

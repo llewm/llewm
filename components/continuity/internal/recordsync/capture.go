@@ -9,6 +9,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 type captureGuard struct{ route, generation, archive string }
@@ -66,12 +67,16 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 		return false, fmt.Errorf("matching project/archive lineage required")
 	}
 	before, snapshot, guardErr := a.captureStart(ctx, db, projectID)
+	if guardErr != nil {
+		syncwork.RecordWork(ctx, "fallback_capture_initial_guard", 1)
+	}
 	var cursor database.SyncCursor
 	var changes []database.SyncChange
 	var fallback string
 	var deltaEligible bool
 	if guardErr == nil && before.generation != "" {
 		cursor, changes, fallback, err = database.ReadSyncChanges(ctx, db, projectID, before.route, before.archive, 4096)
+		recordCaptureCursorFallback(ctx, fallback, err)
 		deltaEligible = err == nil && fallback == "" && cursor.Generation == before.generation
 		if err == nil && fallback == "" && cursor.Generation == before.generation && captureMetadataOnly(changes) {
 			after, err := a.captureGuard(ctx, db, projectID)
@@ -83,6 +88,7 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 			}
 			// A failed second guard is uncertainty about the archive, not
 			// evidence that an empty selected export would validate it.
+			syncwork.RecordWork(ctx, "fallback_capture_metadata_guard", 1)
 			deltaEligible = false
 		}
 	}
@@ -100,6 +106,7 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 		}
 	}
 	if !delta {
+		syncwork.RecordWork(ctx, "capture_full_exports", 1)
 		export, err = portable.EncodeMemoryExport(ctx, db, projectID)
 	}
 	if err != nil {
@@ -149,6 +156,8 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 		}
 	}
 	if delta && !acknowledged {
+		syncwork.RecordWork(ctx, "fallback_capture_publication_receipt", 1)
+		syncwork.RecordWork(ctx, "capture_full_exports", 1)
 		// Never let a failed publication receipt turn selected export into
 		// partial validation. Repair/validate all local records this cycle;
 		// leave the old cursor untouched so recovery remains conservative.
@@ -198,4 +207,33 @@ func captureDependenciesClosed(objects []portable.EncodedEnvelope) bool {
 		}
 	}
 	return true
+}
+
+// Keep diagnostic categories static: errors and database contents never enter
+// metric names, including if a future cursor reader adds a fallback reason.
+func recordCaptureCursorFallback(ctx context.Context, reason string, err error) {
+	if err != nil {
+		syncwork.RecordWork(ctx, "fallback_capture_cursor_error", 1)
+		return
+	}
+	var name string
+	switch reason {
+	case "":
+		return
+	case "missing_cursor":
+		name = "fallback_capture_missing_cursor"
+	case "damaged_cursor":
+		name = "fallback_capture_damaged_cursor"
+	case "materialization_changed":
+		name = "fallback_capture_archive_changed"
+	case "global_change":
+		name = "fallback_capture_global_change"
+	case "missing_changes":
+		name = "fallback_capture_missing_changes"
+	case "delta_limit":
+		name = "fallback_capture_delta_limit"
+	default:
+		name = "fallback_capture_unknown_cursor_reason"
+	}
+	syncwork.RecordWork(ctx, name, 1)
 }

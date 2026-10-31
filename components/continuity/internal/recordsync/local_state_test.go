@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // Reference encoding deliberately keeps the old independent-state algorithm.
@@ -39,7 +40,7 @@ func TestLocalStateHashesPreserveBothProofsWithOnePayloadPass(t *testing.T) {
 		"é":      {Bytes: []byte{}},
 	}
 	for _, excluded := range []map[string]bool{nil, {"absent": true}, {"a\x00b": true}, {"z": true, "a\x00b": true, "é": true}} {
-		ctx, metrics := WithWorkMetrics(context.Background())
+		ctx, metrics := syncwork.WithWorkMetrics(context.Background())
 		prior, current := localStateHashes(ctx, local, excluded, true)
 		if prior != referenceLocalState(local, excluded) || current != referenceLocalState(local, nil) {
 			t.Fatalf("proof encoding changed for exclusions %v", excluded)
@@ -48,7 +49,7 @@ func TestLocalStateHashesPreserveBothProofsWithOnePayloadPass(t *testing.T) {
 		if counts["local_state_records_visited"] != 3 || counts["local_state_records_hashed"] != 3 || counts["local_state_payload_bytes_hashed"] != int64(len("old payloadarriving payload")) {
 			t.Fatalf("payloads were not measured once: %v", counts)
 		}
-		ctx, metrics = WithWorkMetrics(context.Background())
+		ctx, metrics = syncwork.WithWorkMetrics(context.Background())
 		single, unused := localStateHashes(ctx, local, excluded, false)
 		if single != prior || unused != "" {
 			t.Fatal("single proof differs")

@@ -11,6 +11,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
@@ -35,6 +36,13 @@ func TestCaptureProjectReuseAndRepair(t *testing.T) {
 			}
 		}
 		t.Fatal("capture never reused")
+	}
+	measured, initialWork := syncwork.WithWorkMetrics(ctx)
+	if reused, err := a.CaptureProject(measured, db, project); err != nil || reused {
+		t.Fatalf("initial capture: %t %v", reused, err)
+	}
+	if counts := initialWork.Counts(); counts["fallback_capture_missing_cursor"] != 1 || counts["capture_full_exports"] != 1 || counts["fallback_export_writer_retry"] != 1 {
+		t.Fatalf("missing initial fallback work: %v", counts)
 	}
 	warm()
 	at := time.Now()
@@ -64,8 +72,12 @@ func TestCaptureProjectReuseAndRepair(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if reused, err := a.CaptureProject(ctx, db, project); err != nil || reused {
+	measured, repairWork := syncwork.WithWorkMetrics(ctx)
+	if reused, err := a.CaptureProject(measured, db, project); err != nil || reused {
 		t.Fatalf("missing archive file not repaired: %t %v", reused, err)
+	}
+	if counts := repairWork.Counts(); counts["fallback_capture_archive_changed"] != 1 || counts["capture_full_exports"] != 1 {
+		t.Fatalf("archive repair fallback work: %v", counts)
 	}
 	warm()
 	info, err := os.Stat(path)

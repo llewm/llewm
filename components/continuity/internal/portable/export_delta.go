@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // A selection applies only to explicitly marked primary export reads. Exact
@@ -192,6 +193,7 @@ func selectExportChanges(project string, changes []database.SyncChange) (map[str
 func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCursor, changes []database.SyncChange) (MemoryExport, database.SyncCursor, bool, error) {
 	keys, qualified := selectExportChanges(expected.Project, changes)
 	if !qualified {
+		syncwork.RecordWork(ctx, "fallback_delta_unqualified_changes", 1)
 		return MemoryExport{}, expected, false, nil
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -208,6 +210,7 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		return MemoryExport{}, expected, false, err
 	}
 	if current.Generation != expected.Generation || current.Sequence != expected.Sequence {
+		syncwork.RecordWork(ctx, "fallback_delta_snapshot_changed", 1)
 		return MemoryExport{}, expected, false, nil
 	}
 	// Recovery can substitute identities and bytes beyond the changed row.
@@ -217,6 +220,7 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		return MemoryExport{}, expected, false, err
 	}
 	if recovery {
+		syncwork.RecordWork(ctx, "fallback_delta_recovery", 1)
 		return MemoryExport{}, expected, false, nil
 	}
 	identity, err := identityFrom(ctx, tx, expected.Project)
@@ -257,20 +261,26 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		return MemoryExport{}, expected, false, err
 	}
 	if len(missing) != 0 {
+		syncwork.RecordWork(ctx, "fallback_delta_missing_actors", 1)
 		return MemoryExport{}, expected, false, nil
 	}
 	specs = append(specs, narratives...)
+	syncwork.RecordWork(ctx, "operational_delta_loads", 1)
+	syncwork.RecordWork(ctx, "operational_specs_loaded", int64(len(specs)))
 	for _, spec := range specs {
 		var body string
 		err = tx.QueryRowContext(ctx, `SELECT envelope_json FROM portable_envelopes WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=?`, expected.Project, spec.RecordType, spec.RecordID, spec.RecordRevision).Scan(&body)
 		var encoded EncodedEnvelope
 		if err == nil {
 			var retained EnvelopeSpec
+			syncwork.RecordWork(ctx, "retained_envelopes_decoded", 1)
+			syncwork.RecordWork(ctx, "retained_envelope_bytes_decoded", int64(len(body)))
 			retained, encoded, err = decodeMemoryEnvelope([]byte(body))
 			if err == nil && (retained.LineageID != identity.LineageID || retained.RecordType != spec.RecordType || retained.RecordID != spec.RecordID || retained.RecordRevision != spec.RecordRevision) {
 				err = fmt.Errorf("retained portable envelope identity mismatch")
 			}
 		} else if errors.Is(err, sql.ErrNoRows) {
+			syncwork.RecordWork(ctx, "snapshot_envelope_encodes", 1)
 			encoded, err = EncodeEnvelope(spec)
 			if err == nil {
 				err = retainEnvelope(ctx, tx, expected.Project, "export", encoded)

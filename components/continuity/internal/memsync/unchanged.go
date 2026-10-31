@@ -13,6 +13,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // Bump when the completion proof's interpretation changes. These device-local
@@ -87,12 +88,12 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 		reason = "fallback_unchanged_archive_changed"
 	}
 	if reason != "" {
-		recordsync.RecordWork(ctx, reason, 1)
+		syncwork.RecordWork(ctx, reason, 1)
 		return Result{}, false, fetched
 	}
 	clean, err := repo.run(ctx, "status", "--porcelain", "--untracked-files=no")
 	if err != nil || clean != "" {
-		recordsync.RecordWork(ctx, "fallback_unchanged_worktree_unclean", 1)
+		syncwork.RecordWork(ctx, "fallback_unchanged_worktree_unclean", 1)
 		return Result{}, false, fetched
 	}
 	head, err := repo.run(ctx, "symbolic-ref", "--short", "HEAD")
@@ -101,7 +102,7 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 	}
 	// A prior incomplete delivery must still take the normal push/repair path.
 	if unpushed(ctx, repo, remoteBranch(ctx, repo, head)) != 0 {
-		recordsync.RecordWork(ctx, "fallback_unchanged_delivery_pending", 1)
+		syncwork.RecordWork(ctx, "fallback_unchanged_delivery_pending", 1)
 		return Result{}, false, fetched
 	}
 	if err := probe(ctx, repo, s.Remote, p.deadline); err != nil {
@@ -114,7 +115,7 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 	branch := remoteBranch(ctx, repo, head)
 	remoteTree, err := lineageTree(ctx, repo, "origin/"+branch, s.lineageForGuard(ctx))
 	if err != nil || remoteTree != g.tree {
-		recordsync.RecordWork(ctx, "fallback_unchanged_remote_tree", 1)
+		syncwork.RecordWork(ctx, "fallback_unchanged_remote_tree", 1)
 		return Result{}, false, fetched
 	}
 	if _, err := repo.run(ctx, "rebase", "--quiet", "origin/"+branch); err != nil {

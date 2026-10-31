@@ -10,6 +10,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // trackedV3Snapshot reads only paths tracked by Git. Every path and envelope
@@ -208,7 +209,7 @@ func (s Syncer) publishBlocks(ctx context.Context, lineage string, known []recor
 		paths = append(paths, filepath.ToSlash(filepath.Join(directory, block.Hash+".block")))
 		if added {
 			count += len(block.Objects)
-			recordsync.RecordWork(ctx, "published_block_bytes", int64(len(block.Bytes)))
+			syncwork.RecordWork(ctx, "published_block_bytes", int64(len(block.Bytes)))
 		}
 	}
 	return paths, count, inventory, nil

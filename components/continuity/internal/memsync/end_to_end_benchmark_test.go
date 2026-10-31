@@ -14,6 +14,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/resource"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"github.com/llewm/llewm/components/continuity/internal/trackplan"
 )
 
@@ -164,9 +165,9 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 					m.sync(b, OutcomeSynced)
 				}
 				b.StartTimer()
-				var metrics *recordsync.WorkMetrics
+				var metrics *syncwork.WorkMetrics
 				pprof.Do(ctx, pprof.Labels("sync_phase", "measured"), func(measured context.Context) {
-					measured, metrics = recordsync.WithWorkMetrics(measured)
+					measured, metrics = syncwork.WithWorkMetrics(measured)
 					result, err := receiver.syncer.Sync(measured)
 					if err != nil || result.Outcome != OutcomeSynced {
 						b.Fatalf("sync: %+v %v", result, err)

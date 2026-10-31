@@ -1,4 +1,4 @@
-package recordsync
+package syncwork
 
 import (
 	"context"

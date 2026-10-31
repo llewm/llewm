@@ -2,9 +2,8 @@ package memsync
 
 import (
 	"context"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"testing"
-
-	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
 
 func TestHistorySyncWorkMetricsMeasureOnlySelectedCycle(t *testing.T) {
@@ -16,13 +15,13 @@ func TestHistorySyncWorkMetricsMeasureOnlySelectedCycle(t *testing.T) {
 		m.sync(t, OutcomeSynced)
 	}
 	m.decide(t, "arrival", "New observation")
-	ctx, metrics := recordsync.WithWorkMetrics(context.Background())
+	ctx, metrics := syncwork.WithWorkMetrics(context.Background())
 	result, err := m.syncer.Sync(ctx)
 	if err != nil || result.Outcome != OutcomeSynced || result.ExportedRecords != 1 || result.ImportedRecords != 0 {
 		t.Fatalf("measured cycle changed behavior: %+v %v", result, err)
 	}
 	counts := metrics.Counts()
-	for _, name := range []string{"published_block_bytes", "block_read_bytes", "inventory_records_checked", "archive_record_paths_visited", "archive_metadata_entries_visited", "git_tree_entries_visited"} {
+	for _, name := range []string{"operational_specs_loaded", "snapshot_envelope_encodes", "published_block_bytes", "block_read_bytes", "inventory_records_checked", "archive_record_paths_visited", "archive_metadata_entries_visited", "git_tree_entries_visited"} {
 		if counts[name] <= 0 {
 			t.Errorf("missing observed work %s: %v", name, counts)
 		}

@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 type dependencyIdentity struct{ kind, id string }
@@ -111,7 +112,7 @@ func traverseDependencies(ctx context.Context, objects, changed []portable.Encod
 			return nil, false
 		}
 		byHash[e.EnvelopeSHA256] = position
-		RecordWork(ctx, "dependency_membership_records", 1)
+		syncwork.RecordWork(ctx, "dependency_membership_records", 1)
 		key := dependencyIdentity{e.RecordType, e.RecordID}
 		identities[key] = append(identities[key], position)
 	}
@@ -209,7 +210,7 @@ func traverseDependencies(ctx context.Context, objects, changed []portable.Encod
 		}
 	}
 	sort.Strings(queue)
-	RecordWork(ctx, "dependency_selected_records", int64(len(queue)))
+	syncwork.RecordWork(ctx, "dependency_selected_records", int64(len(queue)))
 	result := make([]portable.EncodedEnvelope, 0, len(queue))
 	for _, hash := range queue {
 		result = append(result, objects[byHash[hash]])

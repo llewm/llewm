@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // The memory repository stores each immutable envelope once, at a path derived
@@ -110,7 +111,7 @@ func encodeMemoryExport(ctx context.Context, db *sql.DB, projectID string, readO
 		return MemoryExport{}, err
 	}
 	for _, spec := range specs {
-		encoded, err := validated.encode(spec)
+		encoded, err := validated.encode(ctx, spec)
 		if err != nil {
 			return MemoryExport{}, fmt.Errorf("encode %s %s: %w", spec.RecordType, spec.RecordID, err)
 		}
@@ -121,6 +122,7 @@ func encodeMemoryExport(ctx context.Context, db *sql.DB, projectID string, readO
 				if err := tx.Rollback(); err != nil {
 					return MemoryExport{}, err
 				}
+				syncwork.RecordWork(ctx, "fallback_export_writer_retry", 1)
 				return encodeMemoryExport(ctx, db, projectID, false)
 			}
 			if err := retainEnvelope(ctx, tx, projectID, "export", encoded); err != nil {

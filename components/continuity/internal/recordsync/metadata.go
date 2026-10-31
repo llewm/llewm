@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"io/fs"
 	"path/filepath"
 )
@@ -58,7 +60,7 @@ func directoryChangeSnapshot(ctx context.Context, directory string, retain bool)
 			return fs.SkipDir
 		}
 		entries++
-		RecordWork(ctx, "archive_metadata_entries_visited", 1)
+		syncwork.RecordWork(ctx, "archive_metadata_entries_visited", 1)
 		if entries > MaxScanEntries {
 			return fmt.Errorf("archive metadata exceeds bounds")
 		}

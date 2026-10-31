@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 func TestReadPublicationChecksInventoryOnceAndRepairs(t *testing.T) {
@@ -51,7 +52,7 @@ func TestReadPublicationChecksInventoryOnceAndRepairs(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			measured, metrics := WithWorkMetrics(ctx)
+			measured, metrics := syncwork.WithWorkMetrics(ctx)
 			got, err := index.ReadPublication(measured, root, path, archive, endpoint)
 			if err != nil || !bytes.Equal(got.Bytes, block.Bytes) || !got.matchesValidatedContents(lineage) {
 				t.Fatalf("read observation lost exact snapshot: %+v %v", got, err)
