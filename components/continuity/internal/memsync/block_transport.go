@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -44,11 +45,26 @@ func (s Syncer) trackedV3Snapshot(ctx context.Context, repo git, lineage string)
 
 // trackedBlocks never discovers untracked files in the working tree.
 func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]recordsync.Block, error) {
-	return s.readTrackedBlocks(ctx, repo, lineage, true)
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
+	return s.readTrackedBlocks(ctx, repo, lineage, func(root *os.Root, path string) (recordsync.Block, error) {
+		return index.ReadBlock(ctx, root, path)
+	})
+}
+
+// trackedPublications records provenance as each verified block is read,
+// avoiding a second reconstruction of the same inventory for observation.
+func (s Syncer) trackedPublications(ctx context.Context, repo git, lineage string) ([]recordsync.Block, error) {
+	if s.Archive == nil || s.Archive.Lineage != lineage {
+		return nil, fmt.Errorf("matching history archive is required for block observation")
+	}
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
+	return s.readTrackedBlocks(ctx, repo, lineage, func(root *os.Root, path string) (recordsync.Block, error) {
+		return index.ReadPublication(ctx, root, path, *s.Archive, s.Endpoint())
+	})
 }
 
 // readTrackedBlocks can bypass the derived index when reconstructing it.
-func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string, indexed bool) ([]recordsync.Block, error) {
+func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string, read func(*os.Root, string) (recordsync.Block, error)) ([]recordsync.Block, error) {
 	directory, err := recordsync.BlockDirectory(lineage)
 	if err != nil {
 		return nil, err
@@ -63,18 +79,12 @@ func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string,
 	}
 	defer root.Close()
 	var blocks []recordsync.Block
-	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
 	count, total := 0, 0
 	for _, path := range paths {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		var block recordsync.Block
-		if indexed {
-			block, err = index.ReadBlock(ctx, root, filepath.FromSlash(path))
-		} else {
-			block, err = recordsync.ReadBlock(root, lineage, filepath.FromSlash(path))
-		}
+		block, err := read(root, filepath.FromSlash(path))
 		if err != nil {
 			return nil, fmt.Errorf("invalid tracked history block: %w", err)
 		}
@@ -122,7 +132,9 @@ func (s Syncer) RebuildInventory(ctx context.Context, other func(context.Context
 	if len(legacy.Objects) != 0 {
 		return fmt.Errorf("format-3 observations require explicit conversion before inventory rebuild")
 	}
-	blocks, err := s.readTrackedBlocks(ctx, repo, identity.LineageID, false)
+	blocks, err := s.readTrackedBlocks(ctx, repo, identity.LineageID, func(root *os.Root, path string) (recordsync.Block, error) {
+		return recordsync.ReadBlock(root, identity.LineageID, path)
+	})
 	if err != nil {
 		return err
 	}
@@ -226,7 +238,7 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return recordsync.ImportResult{}, fmt.Errorf("matching history archive is required for block import")
 	}
-	blocks, err := s.trackedBlocks(ctx, repo, lineage)
+	blocks, err := s.trackedPublications(ctx, repo, lineage)
 	if err != nil {
 		return recordsync.ImportResult{}, err
 	}
@@ -243,9 +255,6 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 	}
 	complete := snapshot != nil
 	for _, block := range blocks {
-		if _, err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
-			return recordsync.ImportResult{}, err
-		}
 		for _, object := range block.Objects {
 			if !bytes.Equal(known[object.Envelope.EnvelopeSHA256], object.Bytes) {
 				complete = false

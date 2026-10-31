@@ -73,15 +73,9 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	// Rebuild receipt membership and provenance from already tracked local
 	// history before classifying operational records as locally originated or
 	// planning publication. This also repairs damaged entries that are present.
-	tracked, err := s.trackedBlocks(local, repo, identity.LineageID)
+	tracked, err := s.trackedPublications(local, repo, identity.LineageID)
 	if err != nil {
 		return result, err
-	}
-	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID, Now: s.Now}
-	for _, block := range tracked {
-		if _, err := index.ObservePublication(local, *s.Archive, s.Endpoint(), block); err != nil {
-			return result, err
-		}
 	}
 	old, err := s.trackedV3Snapshot(local, repo, identity.LineageID)
 	if err != nil {

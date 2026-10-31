@@ -9,11 +9,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
 
 var errPublicationChanged = errors.New("publication membership changed during archive scan")
+
+// ReadPublication verifies a destination block and its inventory once, then
+// records its archive provenance and membership before returning the snapshot.
+// The objects are handed directly from ReadBlock, never from caller-owned
+// parsed fields or a snapshot retained across a later inventory mutation.
+func (s Index) ReadPublication(ctx context.Context, root *os.Root, path string, archive Archive, endpoint string) (Block, error) {
+	if endpoint == "" || archive.Lineage != s.Lineage {
+		return Block{}, fmt.Errorf("publication endpoint and matching lineage are required")
+	}
+	block, err := s.ReadBlock(ctx, root, path)
+	if err != nil {
+		return Block{}, err
+	}
+	if _, err := s.observePublicationObjects(ctx, archive, endpoint, block.Hash, block.Objects); err != nil {
+		return Block{}, err
+	}
+	return block, nil
+}
 
 type publicationReader interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -68,6 +87,13 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 	if err != nil {
 		return 0, err
 	}
+	return s.observePublicationObjects(ctx, archive, endpoint, block.Hash, objects)
+}
+
+// Both callers supply objects just reconstructed from the exact block bytes
+// and checked against the derived inventory. Keep the membership writer lock
+// and stale-version guard shared with the standalone observation path.
+func (s Index) observePublicationObjects(ctx context.Context, archive Archive, endpoint, hash string, objects []portable.EncodedEnvelope) (int, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -77,7 +103,7 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 		return 0, err
 	}
 	var stale int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND block_hash=? AND index_version<>?`, s.ProjectID, block.Hash, IndexVersion).Scan(&stale); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND block_hash=? AND index_version<>?`, s.ProjectID, hash, IndexVersion).Scan(&stale); err != nil {
 		return 0, err
 	}
 	if stale != 0 {
@@ -101,7 +127,7 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 			addedCount++
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, Hash(endpoint), block.Hash); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, Hash(endpoint), hash); err != nil {
 		return addedCount, err
 	}
 	return addedCount, tx.Commit()

@@ -514,6 +514,10 @@ missing files; it is not network traffic or globally new knowledge.
 reads. Inventory, archive path, dependency verification, dependency snapshot
 membership and Git tree entry counters count visits, including repeated visits
 to the same history. `dependency_selected_records/op` counts closure output.
+Git tracked-block observation verifies each block's inventory once while reading
+it, then records archive provenance and publication membership from that exact
+snapshot. It repeats the read after fetching; this reduces duplicate inventory
+verification within an observation but still visits the tracked history.
 `fallback_*` counters name observed fallback categories (such as changed local
 generation, unavailable completion proof, inventory repair and full semantic
 import); they do not yet cover every fallback branch or every local-state scan.
