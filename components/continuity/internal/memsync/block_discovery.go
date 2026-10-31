@@ -25,7 +25,7 @@ type blockTreeDiscovery struct {
 	cacheHits int
 }
 
-type blockTreeEntry struct{ name, kind, oid string }
+type blockTreeEntry struct{ name, kind, oid, mode string }
 
 func (s Syncer) trackedBlockPaths(ctx context.Context, repo git, directory string) ([]string, error) {
 	directory = filepath.ToSlash(directory)

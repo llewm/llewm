@@ -116,6 +116,25 @@ rows cannot be silently replaced as cache repair. Activation of this protocol an
 replacement of the loose-file archive require the supported, backup-gated storage
 migration; creating the schema alone does not switch the runtime storage path.
 
+The legacy migration reader opens an existing archive without creating it. It
+requires the exact lineage marker, canonical file framing, and at least one
+valid origin marker per envelope. It rejects orphan provenance, abandoned staging
+files and unaccounted authoritative entries. Two complete content/provenance
+inventories must agree; this is portable and does not depend on inode timestamps.
+Endpoint status files are disposable. Repeated staging preserves the same bytes
+and origins, and never activates or deletes source files. The coordinator still
+must stop writers, verify backups, and fence the old storage route before
+activation. Reading a stable snapshot alone is not writer coordination.
+
+The private Git object transport foundation reads bounded, hash-verified blobs
+and trees without an index or working tree. Tree entries retain their modes;
+selected transport blobs must be regular non-executable files. A tree delta
+skips equal subtree identities. Three-way merging reuses unchanged trees and
+rejects conflicting immutable leaves instead of text-merging record bytes.
+Namespace policy and new-object protocol validation must precede publication.
+These primitives do not by themselves convert or activate an existing managed
+clone, change its remote, or replace the current sync route.
+
 ### Unchanged syncs
 
 Migration 081 adds device-local completion proofs for Git sync. SQL triggers

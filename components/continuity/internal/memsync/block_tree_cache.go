@@ -33,13 +33,18 @@ func openBlockTreeCache(archive string) (*os.Root, error) {
 	return root.OpenRoot("status/git-trees")
 }
 
-type boundedTreeBuffer struct{ bytes.Buffer }
+// Do not embed bytes.Buffer: its promoted ReadFrom would let io.Copy (used by
+// os/exec) bypass Write and defeat the limit on subprocess output.
+type boundedTreeBuffer struct{ buffer bytes.Buffer }
+
+func (b *boundedTreeBuffer) Len() int      { return b.buffer.Len() }
+func (b *boundedTreeBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
 func (b *boundedTreeBuffer) Write(p []byte) (int, error) {
 	if len(p) > maxCachedTreeBytes-b.Len() {
 		return 0, fmt.Errorf("Git tree exceeds cache bound")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 
 func (d *blockTreeDiscovery) treeEntries(ctx context.Context, repo git, oid string) ([]blockTreeEntry, error) {
@@ -114,7 +119,7 @@ func decodeGitTree(oid string, raw []byte) ([]blockTreeEntry, error) {
 		default:
 			return nil, fmt.Errorf("unsupported Git tree mode")
 		}
-		entries = append(entries, blockTreeEntry{name: name, kind: kind, oid: hex.EncodeToString(raw[:size])})
+		entries = append(entries, blockTreeEntry{name: name, kind: kind, oid: hex.EncodeToString(raw[:size]), mode: mode})
 		raw = raw[size:]
 	}
 	return entries, nil

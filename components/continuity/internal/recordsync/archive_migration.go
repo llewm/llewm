@@ -139,10 +139,14 @@ func readArchiveMigration(ctx context.Context, directory, lineage string) (archi
 		if !ok || entry.IsDir() != isDir || entry.Type()&fs.ModeSymlink != 0 {
 			return fmt.Errorf("legacy archive contains an unaccounted entry")
 		}
+		delete(allowed, path)
 		return nil
 	})
 	if err != nil {
 		return source, err
+	}
+	if len(allowed) != 0 {
+		return source, fmt.Errorf("legacy archive entries disappeared during inventory")
 	}
 	var hashes []string
 	for hash := range source.origins {
