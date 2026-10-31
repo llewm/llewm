@@ -45,7 +45,7 @@ func TestBlockIndexVersionsDependentsAndRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	index := Index{DB: db, ProjectID: project, Lineage: lineage}
-	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_index_record BEFORE INSERT ON history_index_records WHEN NEW.record_id='dependent' BEGIN SELECT RAISE(ABORT,'injected failure'); END`); err != nil {
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_index_record BEFORE INSERT ON history_index_envelopes WHEN NEW.record_id='dependent' BEGIN SELECT RAISE(ABORT,'injected failure'); END`); err != nil {
 		t.Fatal(err)
 	}
 	if err := index.AddBlock(ctx, first); err == nil {
@@ -104,10 +104,10 @@ func TestBlockInventoryRejectsDamagedIdentityAndReferences(t *testing.T) {
 	}
 	index := Index{DB: db, ProjectID: project, Lineage: lineage}
 	for _, mutation := range []string{
-		`UPDATE history_index_records SET record_id='wrong'`,
-		`UPDATE history_index_records SET envelope_json=replace(envelope_json,'"payload":{}','"payload":{"changed":true}')`,
+		`UPDATE history_index_envelopes SET record_id='wrong'`,
+		`UPDATE history_index_envelopes SET envelope_json=replace(envelope_json,'"payload":{}','"payload":{"changed":true}')`,
 		`DELETE FROM history_index_refs`,
-		`INSERT INTO history_index_refs(project_id,block_hash,envelope_hash,ref_kind,ref_id) SELECT project_id,block_hash,envelope_hash,'decision','extra' FROM history_index_records`,
+		`INSERT INTO history_index_refs(project_id,envelope_hash,ref_kind,ref_id) SELECT project_id,envelope_hash,'decision','extra' FROM history_index_envelopes`,
 	} {
 		if err := index.Clear(ctx); err != nil {
 			t.Fatal(err)
@@ -145,7 +145,7 @@ func TestImportRebuildRequestPreservesPublicationMembership(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?)`, project, Hash("other endpoint"), block.Hash); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='corrupt' WHERE project_id=?`, project); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET record_id='corrupt' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := index.ImportBlocks(ctx, []Block{block}); errors.Is(err, ErrIndexRebuild) {
@@ -185,7 +185,7 @@ func TestIndexedReadRejectsDamagedInventory(t *testing.T) {
 			t.Fatalf("indexed read %d: %+v %v", i, read, err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='wrong' WHERE project_id=?`, project); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET record_id='wrong' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
 	if repaired, err := index.ReadBlock(ctx, root, path); err != nil || repaired.Hash != block.Hash {
@@ -212,7 +212,7 @@ func TestRepairBlockPreservesOtherEndpointMembership(t *testing.T) {
 	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {block}, "git:b": {block}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='wrong' WHERE project_id=?`, project); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET record_id='wrong' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
 	bad := block
@@ -253,7 +253,7 @@ func TestRepairStoredIsAtomicAndPreservesMembership(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, project, second.Hash); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, project, second.Hash); err != nil {
 		t.Fatal(err)
 	}
 	if err := index.RepairStored(ctx); !errors.Is(err, ErrIndexRebuild) {
@@ -263,7 +263,7 @@ func TestRepairStoredIsAtomicAndPreservesMembership(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND index_version=0`, project).Scan(&stale); err != nil || stale != 2 {
 		t.Fatalf("partial repair committed: %d %v", stale, err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json=? WHERE project_id=? AND block_hash=?`, string(secondObject.Bytes), project, second.Hash); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json=? WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, string(secondObject.Bytes), project, second.Hash); err != nil {
 		t.Fatal(err)
 	}
 	if err := index.RepairStored(ctx); err != nil {
@@ -313,7 +313,7 @@ func TestRebuildRestoresEndpointMembershipAtomically(t *testing.T) {
 		t.Fatalf("valid staged block not preserved: %v", err)
 	}
 	check()
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
 	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {}, "git:b": {}}); !errors.Is(err, ErrIndexRebuild) {
@@ -333,4 +333,51 @@ func TestRebuildRestoresEndpointMembershipAtomically(t *testing.T) {
 		t.Fatal("ignored injected failure")
 	}
 	check()
+}
+
+func TestOverlappingBlocksShareBodiesAndReferences(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "shared-envelopes")
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	encode := func(id string) portable.EncodedEnvelope {
+		t.Helper()
+		e, err := portable.EncodeEnvelope(portable.EnvelopeSpec{LineageID: lineage, RecordType: "decision", RecordSchemaVersion: 1, RecordRevision: 1, RecordID: id, RecordedAt: time.Now().UTC(), Authority: "caller_asserted", Payload: []byte(`{}`), Refs: []portable.Reference{{Kind: "decision", ID: "target"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	shared := encode("shared")
+	other := encode("other")
+	first, err := EncodeBlock(lineage, []portable.EncodedEnvelope{shared})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := EncodeBlock(lineage, []portable.EncodedEnvelope{shared, other})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, block := range []Block{first, second} {
+		if err := index.AddBlock(ctx, block); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var bodies, members, refs int
+	if err := db.QueryRow(`SELECT (SELECT count(*) FROM history_index_envelopes),(SELECT count(*) FROM history_index_block_members),(SELECT count(*) FROM history_index_refs)`).Scan(&bodies, &members, &refs); err != nil || bodies != 2 || members != 3 || refs != 2 {
+		t.Fatalf("duplicated content: bodies%d members%d refs%d %v", bodies, members, refs, err)
+	}
+	if _, err := db.Exec(`UPDATE history_index_envelopes SET envelope_json='{}' WHERE envelope_hash=?`, shared.Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.RepairBlock(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.blockObjects(ctx, []Block{second}); err != nil {
+		t.Fatalf("shared repair damaged another block: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM history_index_blocks WHERE block_hash=?`, first.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.blockObjects(ctx, []Block{second}); err != nil {
+		t.Fatalf("shared body collected early: %v", err)
+	}
 }

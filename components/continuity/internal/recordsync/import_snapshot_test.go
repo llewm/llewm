@@ -52,7 +52,7 @@ func TestImportSnapshotPreservesPrivateContents(t *testing.T) {
 	}
 	// A sealed import needs no second inventory read, even if that inventory
 	// changed after the scan. The next scan remains responsible for repair.
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET record_id='damaged' WHERE project_id=?`, project); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET record_id='damaged' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
 	got, err := index.importBlockObjects(ctx, []Block{read, read})

@@ -81,7 +81,7 @@ func TestGitFolderCoordinatorRecoversTrackedStagedBlock(t *testing.T) {
 	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash); err != nil {
+	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, application.ProjectID, staged[0].Hash); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runHistorySync(ctx, application, false, false); err != nil {
@@ -139,7 +139,7 @@ func TestFolderOnlyCoordinatorRecoversFromAnotherEndpoint(t *testing.T) {
 	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash); err != nil {
+	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, application.ProjectID, staged[0].Hash); err != nil {
 		t.Fatal(err)
 	}
 	markerPath := filepath.Join(endpoints[1].Directory, foldersync.MarkerFile)

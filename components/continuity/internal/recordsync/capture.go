@@ -181,7 +181,7 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID strin
 func captureMetadataOnly(changes []database.SyncChange) bool {
 	for _, change := range changes {
 		switch change.Table {
-		case "history_index_blocks", "history_index_publications", "history_index_records", "history_index_refs":
+		case "history_index_blocks", "history_index_publications", "history_index_envelopes", "history_index_block_members", "history_index_refs":
 		default:
 			return false
 		}

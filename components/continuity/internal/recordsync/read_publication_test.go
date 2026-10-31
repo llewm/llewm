@@ -41,9 +41,9 @@ func TestReadPublicationChecksInventoryOnceAndRepairs(t *testing.T) {
 	endpoint := "git:observed"
 	for _, damage := range []string{
 		"",
-		`UPDATE history_index_records SET envelope_json='{}'`,
+		`UPDATE history_index_envelopes SET envelope_json='{}'`,
 		`DELETE FROM history_index_refs`,
-		`DELETE FROM history_index_records`,
+		`DELETE FROM history_index_envelopes`,
 		`UPDATE history_index_blocks SET index_version=0`,
 	} {
 		t.Run(damage, func(t *testing.T) {

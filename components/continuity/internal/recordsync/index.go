@@ -16,7 +16,7 @@ import (
 // IndexVersion identifies the derived inventory schema and interpretation.
 // Change it whenever block validation, semantic validation, or record and
 // reference indexing semantics change.
-const IndexVersion = 5
+const IndexVersion = 6
 
 // ErrIndexRebuild means the derived inventory cannot be trusted and must be
 // reconstructed from validated transport blocks.
@@ -86,11 +86,49 @@ func (s Index) addBlockWithin(ctx context.Context, tx *sql.Tx, verified Block) e
 func (s Index) insertBlockObjects(ctx context.Context, tx *sql.Tx, verified Block) error {
 	for _, object := range verified.Objects {
 		e := object.Envelope
-		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_records(project_id,block_hash,envelope_hash,record_type,record_id,record_revision,envelope_json) VALUES(?,?,?,?,?,?,?)`, s.ProjectID, verified.Hash, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, string(object.Bytes)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,envelope_json) VALUES(?,?,?,?,?,?)
+ ON CONFLICT(project_id,envelope_hash) DO UPDATE SET record_type=excluded.record_type,record_id=excluded.record_id,record_revision=excluded.record_revision,envelope_json=excluded.envelope_json
+ WHERE history_index_envelopes.record_type IS NOT excluded.record_type OR history_index_envelopes.record_id IS NOT excluded.record_id OR history_index_envelopes.record_revision IS NOT excluded.record_revision OR history_index_envelopes.envelope_json IS NOT excluded.envelope_json`, s.ProjectID, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, string(object.Bytes)); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_block_members(project_id,block_hash,envelope_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, verified.Hash, e.EnvelopeSHA256); err != nil {
+			return err
+		}
+		// References belong to immutable envelope content, not each block copy.
+		// A verified transport block can also repair a damaged shared entry.
+		expected := make(map[portable.Reference]bool, len(e.Refs))
 		for _, ref := range e.Refs {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_refs(project_id,block_hash,envelope_hash,ref_kind,ref_id) VALUES(?,?,?,?,?)`, s.ProjectID, verified.Hash, e.EnvelopeSHA256, ref.Kind, ref.ID); err != nil {
+			expected[ref] = true
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT ref_kind,ref_id FROM history_index_refs WHERE project_id=? AND envelope_hash=?`, s.ProjectID, e.EnvelopeSHA256)
+		if err != nil {
+			return err
+		}
+		matches, count := true, 0
+		for rows.Next() {
+			var ref portable.Reference
+			if err := rows.Scan(&ref.Kind, &ref.ID); err != nil {
+				rows.Close()
+				return err
+			}
+			count++
+			if !expected[ref] {
+				matches = false
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if matches && count == len(expected) {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_refs WHERE project_id=? AND envelope_hash=?`, s.ProjectID, e.EnvelopeSHA256); err != nil {
+			return err
+		}
+		for ref := range expected {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_refs(project_id,envelope_hash,ref_kind,ref_id) VALUES(?,?,?,?)`, s.ProjectID, e.EnvelopeSHA256, ref.Kind, ref.ID); err != nil {
 				return err
 			}
 		}
@@ -112,10 +150,7 @@ func (s Index) RepairBlock(ctx context.Context, block Block) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_refs WHERE project_id=? AND block_hash=?`, s.ProjectID, verified.Hash); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_records WHERE project_id=? AND block_hash=?`, s.ProjectID, verified.Hash); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_block_members WHERE project_id=? AND block_hash=?`, s.ProjectID, verified.Hash); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,?) ON CONFLICT(project_id,block_hash) DO UPDATE SET index_version=excluded.index_version`, s.ProjectID, verified.Hash, IndexVersion); err != nil {
@@ -161,7 +196,7 @@ func (s Index) repairStoredWithArchive(ctx context.Context, endpoint string, arc
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT b.block_hash,r.envelope_hash,r.envelope_json FROM history_index_blocks b LEFT JOIN history_index_records r ON r.project_id=b.project_id AND r.block_hash=b.block_hash WHERE b.project_id=? AND (?='' OR EXISTS (SELECT 1 FROM history_index_publications p WHERE p.project_id=b.project_id AND p.block_hash=b.block_hash AND p.endpoint_hash=?)) ORDER BY b.block_hash,r.envelope_json`, s.ProjectID, endpoint, Hash(endpoint))
+	rows, err := tx.QueryContext(ctx, `SELECT b.block_hash,r.envelope_hash,r.envelope_json FROM history_index_blocks b LEFT JOIN history_index_block_members m ON m.project_id=b.project_id AND m.block_hash=b.block_hash LEFT JOIN history_index_envelopes r ON r.project_id=m.project_id AND r.envelope_hash=m.envelope_hash WHERE b.project_id=? AND (?='' OR EXISTS (SELECT 1 FROM history_index_publications p WHERE p.project_id=b.project_id AND p.block_hash=b.block_hash AND p.endpoint_hash=?)) ORDER BY b.block_hash,r.envelope_json`, s.ProjectID, endpoint, Hash(endpoint))
 	if err != nil {
 		return err
 	}
@@ -232,7 +267,7 @@ func (s Index) repairStoredWithArchive(ctx context.Context, endpoint string, arc
 		}
 	}
 	for _, block := range verified {
-		for _, table := range []string{"history_index_refs", "history_index_records"} {
+		for _, table := range []string{"history_index_block_members"} {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=? AND block_hash=?`, s.ProjectID, block.Hash); err != nil {
 				return err
 			}
@@ -255,7 +290,7 @@ func (s Index) Clear(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
+	for _, table := range []string{"history_index_publications", "history_index_block_members", "history_index_refs", "history_index_envelopes", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
@@ -350,7 +385,7 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 			return fmt.Errorf("%w: rebuild memberships exceed bounds", ErrIndexRebuild)
 		}
 		if _, ok := verified[member.block]; !ok {
-			stored, err := tx.QueryContext(ctx, `SELECT envelope_json FROM history_index_records WHERE project_id=? AND block_hash=? ORDER BY envelope_json`, s.ProjectID, member.block)
+			stored, err := tx.QueryContext(ctx, `SELECT e.envelope_json FROM history_index_block_members m JOIN history_index_envelopes e USING(project_id,envelope_hash) WHERE m.project_id=? AND m.block_hash=? ORDER BY e.envelope_json`, s.ProjectID, member.block)
 			if err != nil {
 				return err
 			}
@@ -387,7 +422,7 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 		}
 		provided[member.endpoint][member.block] = true
 	}
-	for _, table := range []string{"history_index_publications", "history_index_refs", "history_index_records", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
+	for _, table := range []string{"history_index_publications", "history_index_block_members", "history_index_refs", "history_index_envelopes", "history_index_blocks", "history_index_valid_sets", "history_index_narrative_tip", "history_index_mixed_tip"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id=?`, s.ProjectID); err != nil {
 			return err
 		}
@@ -410,12 +445,12 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 // Versions returns all indexed envelopes for one record revision, including
 // competing versions. A block or transport is not treated as the identity.
 func (s Index) Versions(ctx context.Context, kind, id string, revision int) ([]portable.EncodedEnvelope, error) {
-	return s.lookup(ctx, `SELECT DISTINCT envelope_json FROM history_index_records WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=? ORDER BY envelope_json`, s.ProjectID, kind, id, revision)
+	return s.lookup(ctx, `SELECT DISTINCT envelope_json FROM history_index_envelopes WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=? ORDER BY envelope_json`, s.ProjectID, kind, id, revision)
 }
 
 // Dependents returns indexed envelopes that refer to the supplied identity.
 func (s Index) Dependents(ctx context.Context, kind, id string) ([]portable.EncodedEnvelope, error) {
-	return s.lookup(ctx, `SELECT DISTINCT r.envelope_json FROM history_index_refs f JOIN history_index_records r ON r.project_id=f.project_id AND r.block_hash=f.block_hash AND r.envelope_hash=f.envelope_hash WHERE f.project_id=? AND f.ref_kind=? AND f.ref_id=? ORDER BY r.envelope_json`, s.ProjectID, kind, id)
+	return s.lookup(ctx, `SELECT DISTINCT r.envelope_json FROM history_index_refs f JOIN history_index_envelopes r ON r.project_id=f.project_id AND r.envelope_hash=f.envelope_hash WHERE f.project_id=? AND f.ref_kind=? AND f.ref_id=? ORDER BY r.envelope_json`, s.ProjectID, kind, id)
 }
 
 func (s Index) lookup(ctx context.Context, query string, args ...any) ([]portable.EncodedEnvelope, error) {

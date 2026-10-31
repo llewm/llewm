@@ -263,7 +263,7 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 	if stale != 0 {
 		return nil, fmt.Errorf("%w: version changed", ErrIndexRebuild)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT p.block_hash,r.envelope_hash,r.envelope_json FROM history_index_publications p LEFT JOIN history_index_records r ON r.project_id=p.project_id AND r.block_hash=p.block_hash WHERE p.project_id=? AND p.endpoint_hash=? ORDER BY p.block_hash,r.envelope_json`, s.ProjectID, endpointHash)
+	rows, err := tx.QueryContext(ctx, `SELECT p.block_hash,r.envelope_hash,r.envelope_json FROM history_index_publications p LEFT JOIN history_index_block_members m ON m.project_id=p.project_id AND m.block_hash=p.block_hash LEFT JOIN history_index_envelopes r ON r.project_id=m.project_id AND r.envelope_hash=m.envelope_hash WHERE p.project_id=? AND p.endpoint_hash=? ORDER BY p.block_hash,r.envelope_json`, s.ProjectID, endpointHash)
 	if err != nil {
 		return nil, err
 	}

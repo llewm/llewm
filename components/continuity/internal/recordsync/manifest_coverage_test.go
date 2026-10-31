@@ -63,7 +63,7 @@ func TestManifestCoveragePersistsAndValidatesWorkingBytes(t *testing.T) {
 	index = Index{DB: db, ProjectID: project, Lineage: lineage}
 	assertScan(true, 0)
 	// A receipt must not hide disposable index corruption.
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
 	assertScan(true, 0)

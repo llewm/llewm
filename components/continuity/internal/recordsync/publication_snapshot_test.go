@@ -40,7 +40,7 @@ func TestForeignSnapshotRecoveryAndOriginChange(t *testing.T) {
 	}
 	initial := plan()
 	for _, damage := range []string{
-		`UPDATE history_index_records SET envelope_json='{}'`,
+		`UPDATE history_index_envelopes SET envelope_json='{}'`,
 		`UPDATE history_index_blocks SET index_version=0`,
 	} {
 		if _, err := db.Exec(damage); err != nil {
@@ -109,13 +109,13 @@ func testPublicationSnapshotPreservesIndexedMembership(t *testing.T, origin stri
 			t.Fatal("foreign snapshot membership authorized outbound publication")
 		}
 		var before, after, unique, blocks int
-		if err = db.QueryRow(`SELECT COUNT(*) FROM history_index_records`).Scan(&before); err != nil {
+		if err = db.QueryRow(`SELECT COUNT(*) FROM history_index_envelopes`).Scan(&before); err != nil {
 			t.Fatal(err)
 		}
 		if _, err = index.blockObjects(ctx, snapshot); err != nil {
 			t.Fatal(err)
 		}
-		if err = db.QueryRow(`SELECT COUNT(*),COUNT(DISTINCT envelope_hash) FROM history_index_records`).Scan(&after, &unique); err != nil {
+		if err = db.QueryRow(`SELECT COUNT(*),COUNT(DISTINCT envelope_hash) FROM history_index_envelopes`).Scan(&after, &unique); err != nil {
 			t.Fatal(err)
 		}
 		if err = db.QueryRow(`SELECT COUNT(*) FROM history_index_blocks`).Scan(&blocks); err != nil {

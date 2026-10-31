@@ -116,7 +116,7 @@ func selectExportChanges(project string, changes []database.SyncChange) (map[str
 	seen := map[string]bool{}
 	for _, change := range changes {
 		switch change.Table {
-		case "history_index_blocks", "history_index_publications", "history_index_records", "history_index_refs":
+		case "history_index_blocks", "history_index_publications", "history_index_envelopes", "history_index_block_members", "history_index_refs":
 			continue
 		}
 		if change.Operation != "insert" {

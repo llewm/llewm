@@ -196,7 +196,7 @@ func TestBlockImportMatchesFullScan(t *testing.T) {
 			selected = edgeOnly // Its dependencies arrive in the next round.
 		}
 		if round == 3 {
-			if _, err := indexed.ExecContext(ctx, `DELETE FROM history_index_records WHERE project_id=? AND block_hash=?`, indexedID, blocks[0].Hash); err != nil {
+			if _, err := indexed.ExecContext(ctx, `DELETE FROM history_index_block_members WHERE project_id=? AND block_hash=?`, indexedID, blocks[0].Hash); err != nil {
 				t.Fatal(err)
 			}
 		}

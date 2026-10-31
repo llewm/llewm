@@ -269,7 +269,7 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	if err != nil || len(blocks) != 1 {
 		t.Fatalf("initial plan: %+v %v", blocks, err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
@@ -318,7 +318,7 @@ func TestPublicationRepairIgnoresCorruptOtherEndpoint(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=0 WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, project, b.Hash); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, project, b.Hash); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); err != nil {
@@ -410,7 +410,7 @@ func TestPublicationRepairsDamagedStagedBlockFromArchive(t *testing.T) {
 	}
 	damage := func() {
 		t.Helper()
-		if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=? AND envelope_hash=?`, project, block.Hash, first.Envelope.EnvelopeSHA256); err != nil {
+		if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?) AND envelope_hash=?`, project, block.Hash, first.Envelope.EnvelopeSHA256); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -431,7 +431,7 @@ func TestPublicationRepairsDamagedStagedBlockFromArchive(t *testing.T) {
 		t.Fatalf("missing archive object was accepted: %v", err)
 	}
 	var damaged string
-	if err := db.QueryRowContext(ctx, `SELECT envelope_json FROM history_index_records WHERE project_id=? AND block_hash=? AND envelope_hash=?`, project, block.Hash, first.Envelope.EnvelopeSHA256).Scan(&damaged); err != nil || damaged != "{}" {
+	if err := db.QueryRowContext(ctx, `SELECT envelope_json FROM history_index_envelopes WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?) AND envelope_hash=?`, project, block.Hash, first.Envelope.EnvelopeSHA256).Scan(&damaged); err != nil || damaged != "{}" {
 		t.Fatalf("failed repair changed inventory: %q %v", damaged, err)
 	}
 }
@@ -454,7 +454,7 @@ func TestArchiveRepairDoesNotAuthorizeRelay(t *testing.T) {
 	if err := index.Rebuild(ctx, map[string][]Block{"folder:a": {block}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, project, block.Hash); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, project, block.Hash); err != nil {
 		t.Fatal(err)
 	}
 	planned, err := index.PlanPublication(ctx, archive, "folder:a", false)

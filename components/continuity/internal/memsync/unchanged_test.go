@@ -166,7 +166,7 @@ func TestUnchangedSyncIgnoresReplayProofRefresh(t *testing.T) {
 		t.Fatalf("canonical addition skipped: %+v", got)
 	}
 	warmUnchanged(t, m)
-	if _, err := m.db.Exec(`UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, m.project); err != nil {
+	if _, err := m.db.Exec(`UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=?`, m.project); err != nil {
 		t.Fatal(err)
 	}
 	if m.sync(t, OutcomeSynced).Unchanged {

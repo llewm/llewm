@@ -452,7 +452,7 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 		// This catches missing, added, or changed rows without revalidating each
 		// envelope until the semantic importer needs it. IndexVersion must change
 		// whenever block validation rules change.
-		rows, err := s.DB.QueryContext(ctx, `SELECT envelope_json,envelope_hash,record_type,record_id,record_revision FROM history_index_records WHERE project_id=? AND block_hash=? ORDER BY envelope_json`, s.ProjectID, block.Hash)
+		rows, err := s.DB.QueryContext(ctx, `SELECT e.envelope_json,e.envelope_hash,e.record_type,e.record_id,e.record_revision FROM history_index_block_members m JOIN history_index_envelopes e USING(project_id,envelope_hash) WHERE m.project_id=? AND m.block_hash=? ORDER BY e.envelope_json`, s.ProjectID, block.Hash)
 		if err != nil {
 			return nil, err
 		}
@@ -491,7 +491,7 @@ func (s Index) blockObjects(ctx context.Context, blocks []Block) ([]portable.Enc
 		if !bytes.Equal(reconstructed.Bytes(), block.Bytes) {
 			return nil, fmt.Errorf("%w: inventory differs from block", ErrIndexRebuild)
 		}
-		refs, err := s.DB.QueryContext(ctx, `SELECT envelope_hash,ref_kind,ref_id FROM history_index_refs WHERE project_id=? AND block_hash=?`, s.ProjectID, block.Hash)
+		refs, err := s.DB.QueryContext(ctx, `SELECT r.envelope_hash,r.ref_kind,r.ref_id FROM history_index_block_members m JOIN history_index_refs r USING(project_id,envelope_hash) WHERE m.project_id=? AND m.block_hash=?`, s.ProjectID, block.Hash)
 		if err != nil {
 			return nil, err
 		}

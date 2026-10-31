@@ -85,7 +85,7 @@ func TestGitSyncRepairsStagedInventoryFromArchive(t *testing.T) {
 	if err != nil || len(staged) == 0 {
 		t.Fatalf("stage publication: %d %v", len(staged), err)
 	}
-	if _, err := source.db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=? AND envelope_hash=?`, source.project, staged[0].Hash, staged[0].Objects[0].Envelope.EnvelopeSHA256); err != nil {
+	if _, err := source.db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?) AND envelope_hash=?`, source.project, staged[0].Hash, staged[0].Objects[0].Envelope.EnvelopeSHA256); err != nil {
 		t.Fatal(err)
 	}
 	source.sync(t, OutcomeSynced)
@@ -287,7 +287,7 @@ func TestRebuildInventoryUsesTrackedGitAndPreservesOtherIntent(t *testing.T) {
 	if err != nil || len(staged) != 1 {
 		t.Fatalf("stage other endpoint: %d %v", len(staged), err)
 	}
-	if _, err := a.db.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=?`, a.project, staged[0].Hash); err != nil {
+	if _, err := a.db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, a.project, staged[0].Hash); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.syncer.RebuildInventory(ctx, func(context.Context) (map[string][]recordsync.Block, error) {
@@ -296,7 +296,7 @@ func TestRebuildInventoryUsesTrackedGitAndPreservesOtherIntent(t *testing.T) {
 		t.Fatal("unavailable endpoint permitted rebuilding")
 	}
 	var body string
-	if err := a.db.QueryRowContext(ctx, `SELECT envelope_json FROM history_index_records WHERE project_id=? AND block_hash=? LIMIT 1`, a.project, staged[0].Hash).Scan(&body); err != nil || body != "{}" {
+	if err := a.db.QueryRowContext(ctx, `SELECT envelope_json FROM history_index_envelopes WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?) LIMIT 1`, a.project, staged[0].Hash).Scan(&body); err != nil || body != "{}" {
 		t.Fatalf("failed rebuild changed inventory: %q %v", body, err)
 	}
 	if err := a.syncer.RebuildInventory(ctx, func(context.Context) (map[string][]recordsync.Block, error) {

@@ -239,8 +239,20 @@ a device-local `local-snapshot:` membership in the derived publication catalog,
 so one foreign arrival adds a block for the new records instead of repacking
 old history. This membership never grants transport provenance or relay
 permission. Snapshots still validate archive bytes and indexed references;
-damaged inventories follow the existing repair path. Existing duplicate derived
-rows are not pruned by this change.
+damaged inventories follow the existing repair path.
+
+Migration 089 stores one immutable envelope body and reference set per project
+and envelope hash. Blocks contain only membership rows; overlapping blocks share
+content. Removing the last membership collects its body and references, while
+repairing one block preserves other blocks and endpoint publication intent.
+The migration removes only obsolete unpublished blocks whose every exact envelope
+is covered by current published inventory. Uncovered data and all staged intent
+survive. Conflicting content for one hash aborts the migration. Semantic proofs
+are invalidated; canonical observations and transport format remain unchanged.
+This schema requires writer API 136: drain old writers on every active host before
+migration, retain verified backups, and verify fresh clients after the cutover.
+Physical database compaction is a separate SQLite maintenance operation after
+logical cleanup; free pages alone do not shrink the file.
 
 Tracked-path discovery reuses immutable Git tree nodes across locked block
 cycles. The tree is taken from the index, including staged additions and

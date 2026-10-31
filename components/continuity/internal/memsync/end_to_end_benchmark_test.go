@@ -227,7 +227,7 @@ func BenchmarkHistorySyncForeignResidual(b *testing.B) {
 				m.sync(b, OutcomeSynced)
 			}
 			var before int
-			if err := m.db.QueryRow(`SELECT COUNT(*) FROM history_index_records`).Scan(&before); err != nil {
+			if err := m.db.QueryRow(`SELECT COUNT(*) FROM history_index_envelopes`).Scan(&before); err != nil {
 				b.Fatal(err)
 			}
 			b.ResetTimer()
@@ -245,7 +245,7 @@ func BenchmarkHistorySyncForeignResidual(b *testing.B) {
 			}
 			b.StopTimer()
 			var rows, unique int
-			if err := m.db.QueryRow(`SELECT COUNT(*),COUNT(DISTINCT envelope_hash) FROM history_index_records`).Scan(&rows, &unique); err != nil {
+			if err := m.db.QueryRow(`SELECT COUNT(*),COUNT(DISTINCT envelope_hash) FROM history_index_envelopes`).Scan(&rows, &unique); err != nil {
 				b.Fatal(err)
 			}
 			b.ReportMetric(float64(rows-before)/float64(b.N), "index_rows/arrival")

@@ -142,7 +142,7 @@ func TestBlockFolderCycleRetainsDependenciesAndRejectsIncompleteInventory(t *tes
 	if err != nil || len(manifest) != len(hashes) {
 		t.Fatalf("published catalog incomplete: %v", err)
 	}
-	if _, err := source.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=?`, source.ProjectID); err != nil {
+	if _, err := source.DB.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=?`, source.ProjectID); err != nil {
 		t.Fatal(err)
 	}
 	if inventory, err := source.Inventory(ctx); err != nil || len(inventory) == 0 {
@@ -190,7 +190,7 @@ func TestFolderSyncRepairsStagedInventoryFromArchive(t *testing.T) {
 	if err != nil || len(staged) == 0 {
 		t.Fatalf("stage publication: %d %v", len(staged), err)
 	}
-	if _, err := source.DB.ExecContext(ctx, `UPDATE history_index_records SET envelope_json='{}' WHERE project_id=? AND block_hash=? AND envelope_hash=?`, source.ProjectID, staged[0].Hash, staged[0].Objects[0].Envelope.EnvelopeSHA256); err != nil {
+	if _, err := source.DB.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?) AND envelope_hash=?`, source.ProjectID, staged[0].Hash, staged[0].Objects[0].Envelope.EnvelopeSHA256); err != nil {
 		t.Fatal(err)
 	}
 	if result, err := source.Sync(ctx); err != nil || result.PublishedRecords != len(objects) {
