@@ -580,6 +580,13 @@ the corresponding `recovery_*` counters cover recovery substitutions. These do
 not count every encoder/decoder elsewhere in transport or canonical importing.
 The context-scoped collector lives in `internal/syncwork`, shared by portable
 loading, archive validation and transport; it persists no measurements.
+`publication_envelopes_reused/op` counts staged publication entries whose exact
+bytes match the permitted, validated archive snapshot. Those entries reuse its
+parsed envelopes while retaining complete block reconstruction and hash checks.
+`publication_envelope_decodes/op` counts identity decode attempts for entries
+outside that exact snapshot, including entries no longer permitted for relay.
+Neither counter implies that publication membership or archive scans are bounded
+by the new arrivals.
 Missing counters mean zero observed events. Metrics exclude fixture setup and
 warm-up, contain no record contents or identities, and do not authorize reuse.
 Use the same fixture shape and iteration count when comparing histories; these

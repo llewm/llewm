@@ -8,7 +8,59 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
+
+func TestPublicationReusesOnlyPermittedExactEnvelopes(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "publication-envelope-reuse")
+	archive, err := OpenArchive(t.TempDir(), lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := fixture(t)
+	if _, err := archive.Put(object, "folder:independent"); err != nil {
+		t.Fatal(err)
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	const endpoint = "git:destination"
+	initial, err := index.PlanPublication(ctx, archive, endpoint, true)
+	if err != nil || len(initial) != 1 {
+		t.Fatalf("initial relay: %+v %v", initial, err)
+	}
+	for _, relay := range []bool{true, false} {
+		measured, metrics := syncwork.WithWorkMetrics(ctx)
+		blocks, err := index.PlanPublication(measured, archive, endpoint, relay)
+		counts := metrics.Counts()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if relay {
+			if len(blocks) != 1 || blocks[0].Hash != initial[0].Hash || !bytes.Equal(blocks[0].Bytes, initial[0].Bytes) || !blocks[0].matchesValidatedContents(lineage) || counts["publication_envelopes_reused"] != 1 || counts["publication_envelope_decodes"] != 0 {
+				t.Fatalf("exact snapshot not reused: %+v %v", blocks, counts)
+			}
+		} else if len(blocks) != 0 || counts["publication_envelopes_reused"] != 0 || counts["publication_envelope_decodes"] != 1 {
+			t.Fatalf("restricted envelope reused: %+v %v", blocks, counts)
+		}
+	}
+	// A damaged entry is neither authorized by its hash column nor hidden by
+	// removing relay permission. Use the planner without recovery to observe
+	// rejection before the public path repairs it from the archive.
+	if _, err := db.Exec(`UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	for _, relay := range []bool{true, false} {
+		_, err := index.planPublication(ctx, archive, endpoint, relay, nil, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+			return archive.objects(ctx, endpoint, relay)
+		})
+		if !errors.Is(err, ErrIndexRebuild) {
+			t.Fatalf("damaged publication accepted (relay=%t): %v", relay, err)
+		}
+	}
+	repaired, err := index.PlanPublication(ctx, archive, endpoint, true)
+	if err != nil || len(repaired) != 1 || repaired[0].Hash != initial[0].Hash || !bytes.Equal(repaired[0].Bytes, initial[0].Bytes) {
+		t.Fatalf("repair lost publication: %+v %v", repaired, err)
+	}
+}
 
 func TestPublicationSnapshotPreservesIndexedMembership(t *testing.T) {
 	for _, origin := range []string{"local", "folder:independent"} {

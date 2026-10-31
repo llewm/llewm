@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 var errPublicationChanged = errors.New("publication membership changed during archive scan")
@@ -325,15 +326,22 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 			}
 			body.WriteString(item.body)
 			body.WriteByte('\n')
-			var envelope portable.Envelope
-			if err := json.Unmarshal([]byte(item.body), &envelope); err != nil || envelope.EnvelopeSHA256 != item.hash || envelope.LineageID != s.Lineage {
-				return nil, fmt.Errorf("%w: invalid publication entry", ErrIndexRebuild)
-			}
 			existing, ok := byHash[item.hash]
 			if !ok || !bytes.Equal(existing.Bytes, []byte(item.body)) {
+				// Entries outside the validated, permitted archive snapshot still
+				// need their own identity check, even when not being published.
+				syncwork.RecordWork(ctx, "publication_envelope_decodes", 1)
+				var envelope portable.Envelope
+				if err := json.Unmarshal([]byte(item.body), &envelope); err != nil || envelope.EnvelopeSHA256 != item.hash || envelope.LineageID != s.Lineage {
+					return nil, fmt.Errorf("%w: invalid publication entry", ErrIndexRebuild)
+				}
 				permitted = false
 				continue
 			}
+			// Exact bytes from this scan already carry a validated identity.
+			// Reuse its parsed envelope; the complete block hash below still
+			// checks membership and ordering against the staged intent.
+			syncwork.RecordWork(ctx, "publication_envelopes_reused", 1)
 			objects = append(objects, existing)
 			if !covered[item.hash] {
 				addsRecord = true
