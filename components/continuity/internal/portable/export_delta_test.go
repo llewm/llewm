@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
+	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/procedures"
@@ -55,7 +56,13 @@ func TestMemoryDeltaMatchesFullExportAndConsumesRetention(t *testing.T) {
 	if ok, err := database.RememberSyncCursor(ctx, db, c, "archive"); err != nil || !ok {
 		t.Fatalf("baseline receipt: %t %v", ok, err)
 	}
+	previousCheckpoint := ""
 	for cycle := 0; cycle < 3; cycle++ {
+		saved, err := (checkpoint.Service{DB: db}).CreateWithActions(ctx, checkpoint.Checkpoint{ProjectID: project, TaskID: "delta", PredecessorCheckpointID: previousCheckpoint, Task: "Qualification", Status: "in_progress", Summary: "New checkpoint", NextAction: "Continue"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		previousCheckpoint = saved.Checkpoint.ID
 		appendDecision(fmt.Sprintf("arrival-%d", cycle))
 		at := time.Date(2020, 1, 1, 0, 0, cycle, 0, time.UTC) // late historical timestamps
 		for _, item := range []struct{ id, parent string }{{fmt.Sprintf("parent-%d", cycle), ""}, {fmt.Sprintf("actor-%d", cycle), fmt.Sprintf("parent-%d", cycle)}} {

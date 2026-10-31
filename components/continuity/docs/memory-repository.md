@@ -111,6 +111,13 @@ Changes in another known project no longer invalidate the proof. Missing tokens
 fail closed; journal edits or deletions invalidate proofs globally. The journal
 contains no record bodies and is not portable history or a peer receipt.
 
+Migration 090 resolves checkpoint action transition ownership through its parent
+action, matching the portable export reader. Appending or carrying an action
+therefore invalidates only its project and can use selected capture. Reassigning
+a transition journals both owners; updates and deletions still require complete
+export. Missing parent ownership retains global invalidation. Existing history,
+cursor receipts and the wire format are unchanged.
+
 Migration 087 adds durable, checksummed consumer cursors. Reads are bounded by
 an ingestion sequence in one database snapshot; acknowledgement compares that
 snapshot's generation atomically, after successful materialization. Interrupted
