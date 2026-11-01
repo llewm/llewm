@@ -32,6 +32,15 @@ func defaultCloneStoragePaths(clone string) (cloneStoragePaths, error) {
 	}).normalized()
 }
 
+func checkStandaloneBareStore(root *os.Root) error {
+	for _, name := range []string{"commondir", "shallow", "info/grafts", "objects/info/alternates", "objects/info/http-alternates"} {
+		if _, err := root.Lstat(filepath.FromSlash(name)); !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("bare history storage contains an unsupported dependency or ancestry override: %s", name)
+		}
+	}
+	return nil
+}
+
 // openBareRepository gates normal use on a completed migration, when the clone
 // has a migration owner. It never converts storage or infers a missing source
 // to be empty. Native bare clones have no cutover receipt or owner marker.
@@ -56,6 +65,9 @@ func openBareRepository(ctx context.Context, clone, remote string, access Access
 		return empty, fmt.Errorf("bare history object store is missing: %w", err)
 	}
 	objects.Close()
+	if err := checkStandaloneBareStore(root); err != nil {
+		return empty, err
+	}
 	repo := access.git(p.Root)
 	repo.Durable = true
 	bare, err := repo.run(ctx, "rev-parse", "--is-bare-repository")

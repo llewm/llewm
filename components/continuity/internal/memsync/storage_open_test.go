@@ -87,7 +87,18 @@ func TestNativeBareCloneDoesNotShareObjectFilesWithLocalRemote(t *testing.T) {
 	source := newMachine(t, "native-source", remote)
 	source.decide(t, "retained", "Independent durable objects")
 	source.sync(t, OutcomeSynced)
+	template := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(template, "objects", "info"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(template, "objects", "info", "alternates"), []byte(filepath.Join(remote, "objects")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_TEMPLATE_DIR", template)
 	peer := newMachine(t, "native-copy", remote)
+	if _, err := os.Lstat(filepath.Join(peer.syncer.Clone, "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("native clone inherited a template object dependency: %v", err)
+	}
 	compared := 0
 	err := filepath.WalkDir(filepath.Join(remote, "objects"), func(name string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {

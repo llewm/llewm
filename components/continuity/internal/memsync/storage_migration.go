@@ -93,6 +93,9 @@ func completedCloneStorage(ctx context.Context, p cloneStoragePaths, r cloneStor
 		return false, err
 	}
 	defer root.Close()
+	if err := checkStandaloneBareStore(root); err != nil {
+		return false, err
+	}
 	if err := cloneReceiptAtRoot(root, bareStorageOwner, r.sealed()); err != nil {
 		return false, err
 	}
@@ -193,7 +196,7 @@ func prepareBareClone(ctx context.Context, paths cloneStoragePaths, remote strin
 	if err := writeBarePrivateConfig(ctx, stageRepo, source.Config); err != nil {
 		return receipt, err
 	}
-	if _, err := stageRepo.run(ctx, "init", "--quiet", "--bare", "--object-format="+source.ObjectFormat, "."); err != nil {
+	if _, err := stageRepo.run(ctx, "init", "--quiet", "--bare", "--template=", "--object-format="+source.ObjectFormat, "."); err != nil {
 		return receipt, err
 	}
 	if err := verifyLocalCloneSource(ctx, stageRepo, original); err != nil {
@@ -340,6 +343,15 @@ func fsckClone(ctx context.Context, repo git) error {
 }
 
 func validateBareSnapshot(ctx context.Context, path string, r cloneStorageReceipt, source cloneSnapshot, remote string, access Access) error {
+	root, err := recordsync.OpenRoot(path)
+	if err != nil {
+		return err
+	}
+	err = checkStandaloneBareStore(root)
+	root.Close()
+	if err != nil {
+		return err
+	}
 	repo := access.git(path)
 	staged, err := snapshotClone(ctx, repo, remote, false)
 	if err != nil {

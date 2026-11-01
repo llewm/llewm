@@ -363,7 +363,7 @@ func TestBareCloneStorageRefusesDirtyOrActiveSourceWithoutReceipt(t *testing.T) 
 }
 
 func TestBareCloneStorageRefusesChangedRecoveryInputs(t *testing.T) {
-	for _, mode := range []string{"source-config", "stage-config", "stage-owner", "stage-ref", "stage-object", "receipt", "competing-root"} {
+	for _, mode := range []string{"source-config", "stage-config", "stage-owner", "stage-ref", "stage-object", "stage-alternates", "receipt", "competing-root"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, p, remote, access, _ := cloneStorageFixture(t)
 			if _, err := prepareBareClone(ctx, p, remote, access); err != nil {
@@ -380,6 +380,13 @@ func TestBareCloneStorageRefusesChangedRecoveryInputs(t *testing.T) {
 				}
 			case "stage-owner":
 				if err := os.WriteFile(filepath.Join(p.Stage, bareStorageOwner), []byte("wrong preparation"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "stage-alternates":
+				if err := os.MkdirAll(filepath.Join(p.Stage, "objects", "info"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(p.Stage, "objects", "info", "alternates"), []byte(filepath.Join(p.Root, ".git", "objects")+"\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "stage-ref":

@@ -34,10 +34,13 @@ func (e *MigrationRequiredError) Error() string {
 }
 
 type MigrateOptions struct {
-	From            string
-	To              string
-	BackupPath      string
-	BackupRetention *BackupRetentionOptions
+	From       string
+	To         string
+	BackupPath string
+	// VerifiedBackupSHA256 explicitly reuses an already prepared, immutable
+	// backup. Empty retains the ordinary create-a-new-backup behavior.
+	VerifiedBackupSHA256 string
+	BackupRetention      *BackupRetentionOptions
 }
 
 type MigrateResult struct {
@@ -47,6 +50,7 @@ type MigrateResult struct {
 	BackupPath           string               `json:"backup_path"`
 	BackupMigration      string               `json:"backup_migration"`
 	BackupIntegrity      string               `json:"backup_integrity"`
+	BackupSHA256         string               `json:"backup_sha256"`
 	AppliedMigrations    []string             `json:"applied_migrations"`
 	DatabaseIntegrity    string               `json:"database_integrity"`
 	ForeignKeyViolations int                  `json:"foreign_key_violations"`
@@ -59,6 +63,7 @@ type BackupResult struct {
 	BackupPath      string `json:"backup_path"`
 	BackupMigration string `json:"backup_migration"`
 	BackupIntegrity string `json:"backup_integrity"`
+	BackupSHA256    string `json:"backup_sha256"`
 }
 
 // NextBackupPath returns a generated name that does not currently exist.
@@ -108,6 +113,30 @@ func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("database schema is %s: applied %s, compiled %s", status.State, status.AppliedMigration, status.CompiledMigration)
 	}
 	return openReadOnly(ctx, path)
+}
+
+// OpenForMigrationInspection is a read-only maintenance route for fields whose
+// schema the migration planner explicitly supports. It requires the exact
+// applied version and never migrates or raises a writer floor. Normal callers
+// must continue using OpenReadOnly's current-schema contract.
+func OpenForMigrationInspection(ctx context.Context, path, expectedApplied string) (*sql.DB, error) {
+	status, err := Inspect(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if expectedApplied == "" || status.AppliedMigration != expectedApplied || (status.State != "pending" && status.State != "current") {
+		return nil, fmt.Errorf("migration inspection requires the exact supported applied schema")
+	}
+	db, err := openReadOnly(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	actual, err := LatestMigration(ctx, db)
+	if err != nil || actual != expectedApplied {
+		db.Close()
+		return nil, fmt.Errorf("database schema changed before migration inspection")
+	}
+	return db, nil
 }
 
 // Initialize creates a new database and applies the embedded schema. Existing
@@ -212,6 +241,9 @@ func Backup(ctx context.Context, path, backupPath string) (BackupResult, error) 
 	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, absBackup); err != nil {
 		return result, fmt.Errorf("create consistent backup: %w", err)
 	}
+	if err := syncBackup(absBackup); err != nil {
+		return result, fmt.Errorf("persist consistent backup: %w", err)
+	}
 	result.BackupPath = absBackup
 	backupDB, err := openReadOnly(ctx, absBackup)
 	if err != nil {
@@ -231,6 +263,10 @@ func Backup(ctx context.Context, path, backupPath string) (BackupResult, error) 
 	if result.BackupMigration != status.AppliedMigration {
 		return result, fmt.Errorf("backup migration is %s, expected %s", result.BackupMigration, status.AppliedMigration)
 	}
+	result.BackupSHA256, err = backupDigest(ctx, absBackup)
+	if err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
@@ -248,13 +284,19 @@ func Migrate(ctx context.Context, path string, options MigrateOptions) (MigrateR
 	if options.From != status.AppliedMigration || options.To != status.CompiledMigration {
 		return result, fmt.Errorf("migration confirmation mismatch: actual from/to is %s -> %s", status.AppliedMigration, status.CompiledMigration)
 	}
-	backupResult, err := Backup(ctx, path, options.BackupPath)
+	var backupResult BackupResult
+	if options.VerifiedBackupSHA256 == "" {
+		backupResult, err = Backup(ctx, path, options.BackupPath)
+	} else {
+		backupResult, err = VerifyBackup(ctx, options.BackupPath, status.AppliedMigration, options.VerifiedBackupSHA256)
+	}
 	if err != nil {
 		return result, err
 	}
 	result.BackupPath = backupResult.BackupPath
 	result.BackupMigration = backupResult.BackupMigration
 	result.BackupIntegrity = backupResult.BackupIntegrity
+	result.BackupSHA256 = backupResult.BackupSHA256
 	if result.BackupMigration != status.AppliedMigration {
 		return result, fmt.Errorf("migration source changed before backup: now %s, confirmed %s", result.BackupMigration, status.AppliedMigration)
 	}

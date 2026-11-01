@@ -162,7 +162,7 @@ func Init(ctx context.Context, remote, clone string, access Access, setup Setup)
 			return err
 		}
 	}
-	if _, err := runner.run(ctx, "clone", "--quiet", "--bare", "--no-hardlinks", remote, clone); err != nil {
+	if _, err := runner.run(ctx, "clone", "--quiet", "--bare", "--no-hardlinks", "--template=", remote, clone); err != nil {
 		return err
 	}
 	repo, err := openBareRepository(ctx, clone, remote, access)

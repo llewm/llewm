@@ -159,6 +159,7 @@ incomplete records refuse conversion before removal.`,
 	convert.Flags().BoolVar(&writersStopped, "writers-stopped", false, "confirm all older sync writers are stopped")
 	convert.Flags().StringVar(&convertOutput, "output", "text", "text or json")
 	parent.AddCommand(convert)
+	parent.AddCommand(syncStorageCommand())
 	parent.AddCommand(syncRedactionRecoveryCommand())
 
 	var remote, clone, askpass, sshKey, credentialHelper, lineageID string
@@ -386,15 +387,7 @@ func projectSyncer(application *app.App) (memsync.Syncer, error) {
 			return memsync.Syncer{}, err
 		}
 	}
-	syncer := memsync.Syncer{DB: application.DB, ProjectID: application.ProjectID, Remote: settings.Remote, Clone: clone, Askpass: settings.Askpass, SSHKey: settings.SSHKey}
-	if _, err := os.Stat(filepath.Join(config.StateDir(application.Root), "history", "lineage")); err == nil {
-		archive, err := projectArchive(application)
-		if err != nil {
-			return memsync.Syncer{}, err
-		}
-		syncer.Archive = &archive
-		syncer.Relay = settings.RelayToGit
-	}
+	syncer := memsync.Syncer{DB: application.DB, ProjectID: application.ProjectID, Remote: settings.Remote, Clone: clone, Askpass: settings.Askpass, SSHKey: settings.SSHKey, Relay: settings.RelayToGit}
 	if application.Config.Leases.Remote {
 		leases := application.Leases
 		leases.Remote = nil

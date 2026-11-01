@@ -137,7 +137,7 @@ and origins, and never activates or deletes source files. The coordinator still
 must stop writers, verify backups, and fence the old storage route before
 activation. Reading a stable snapshot alone is not writer coordination.
 
-The private cutover coordinator records immutable, checksummed preparation in
+The cutover coordinator records immutable, checksummed preparation in
 the archive state. It creates a non-overwriting SQLite backup, checks its
 integrity, foreign keys and project identity, and hashes the verified backup.
 Source staging and its recovery receipt commit together. Completion verifies
@@ -162,7 +162,7 @@ storage migration; normal opening never converts them or initializes replacement
 history. A migrated clone requires its exact owner, preparation and completion
 receipts before use. Reading an incomplete cutover fails closed.
 
-The private bare-clone cutover coordinator takes nonblocking migration and
+The bare-clone cutover coordinator takes nonblocking migration and
 legacy sync locks and inventories the clean source, all resolved refs, immediate
 symbolic-ref links, object format and private configuration. It refuses dangling
 or unsupported loose refs rather than losing refs omitted by Git's listing.
@@ -175,9 +175,40 @@ Both configured fetch/push URLs and the local source route must remain exact.
 Strict object checks and a second source inventory precede activation. The
 original working clone is retained, namespace switches and completion are
 durable, and interrupted retirement/switch/completion can resume. No index or
-object alternates connect the bare clone to the original. This coordinator is
-not yet a public migration command or the normal sync backend. Its runtime
+object alternates connect the bare clone to the original. Native clones and
+conversion stages ignore Git templates; normal opening refuses alternate object
+stores, shallow boundaries, grafts and shared common directories. Runtime
 qualification is on Linux; Windows lock code is compile checked only.
+
+The supported local interface is `llewm sync storage`:
+
+- `plan --save FILE` inspects source storage without changing it and exclusively
+  saves a device-private, checksummed recovery plan. Without `--save`, it only
+  prints the plan. A bound portable project identity is required. The plan binds
+  the physical project root, database schema transition, configuration, lineage,
+  backup destinations and primary Git clone; keep it outside managed storage.
+- After draining **every** writer using that database, archive or shared clone,
+  `prepare --plan FILE --writers-stopped` stages Git locally, creates and verifies
+  the pre-schema backup and its durable `.verified` receipt, explicitly applies
+  the exact planned schema migration, then backs up and stages the archive.
+  Schema migration affects the entire configured database; the plan reports its
+  project count. Archive migration covers only the selected project.
+- `complete --plan FILE --writers-stopped` rechecks the backup and Git source,
+  retains and fences the old archive, switches the owned bare clone, and performs
+  full local audits. Repeat the same command with the same plan after an
+  interruption. Retained sources, verified backups and receipts are preserved.
+- `audit` verifies active archive bodies, origins, journal coverage and counts,
+  all reachable Git objects and refs, and the selected lineage's current blocks.
+  It does not contact remotes or certify peer delivery or semantic import.
+
+These commands do not stop processes or authorize a live cutover. Ordinary
+`database.Open` and read-only opening never migrate a pending schema. Planning
+uses a narrowly scoped read-only migration inspection path; preparation is the
+explicit backup-gated transition. A prepared backup is bound by SHA-256 as well
+as SQLite integrity and schema checks. If a crash leaves a backup without its
+published verification receipt, retain it and create a fresh plan instead of
+inferring ownership. Do not remove recovery evidence to force normal opening.
+The audit may acquire a local clone coordination lock; it does not alter history.
 
 Private commit primitives independently verify bounded commit bytes before
 using tree/parent identities. A merge requires namespace policy validation,
