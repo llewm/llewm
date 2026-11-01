@@ -278,6 +278,17 @@ The existing flat block directory still needs listing when changed; these
 primitives are not a complete-cycle scaling result. The current cycle still
 reconstructs complete block/provenance inventories and semantic snapshots.
 
+Private radix-tree primitives stage the replacement for flat Git block trees.
+Leaf buckets hold at most 64 full-hash block names; larger buckets branch on
+successive hash bytes, with at most 256 children per node and 32 levels. Appends
+split only overflowing buckets. Delta validation permits structural relocation
+only when every existing hash retains its exact Git blob identity, and rejects
+removal, replacement, mixed nodes and noncanonical bucket sizes. New subtrees
+receive complete structural validation; previously verified unchanged subtrees
+are reused by identity. These primitives do not yet change the active wire
+format, conversion command or runtime. Concurrent merge normalization and explicit
+conversion must land before the runtime uses them.
+
 ### Unchanged syncs
 
 Migration 081 adds device-local completion proofs for Git sync. SQL triggers
