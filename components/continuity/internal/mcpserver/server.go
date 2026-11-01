@@ -57,11 +57,11 @@ func optionalRFC3339(value string) (*time.Time, error) {
 // BootstrapInput selects a checkpoint, task, or session, plus the caller's own
 // current session, which lets an empty selection prefer its live task presence.
 type BootstrapInput struct {
-	CheckpointID     string `json:"checkpoint_id,omitempty" jsonschema:"select this checkpoint"`
-	TaskID           string `json:"task_id,omitempty" jsonschema:"select this task"`
-	SessionID        string `json:"session_id,omitempty" jsonschema:"select this session's checkpoint"`
-	CurrentSessionID string `json:"current_session_id,omitempty" jsonschema:"your current client session ID; prefers its live task presence"`
-	Full             bool   `json:"full,omitempty" jsonschema:"return the packet even if unchanged since SessionStart"`
+	CheckpointID     string `json:"checkpoint_id,omitempty" jsonschema:"checkpoint selector"`
+	TaskID           string `json:"task_id,omitempty"`
+	SessionID        string `json:"session_id,omitempty" jsonschema:"session selector"`
+	CurrentSessionID string `json:"current_session_id,omitempty" jsonschema:"prefer live session task"`
+	Full             bool   `json:"full,omitempty"`
 }
 
 type BootstrapOutput struct {
@@ -71,12 +71,12 @@ type BootstrapOutput struct {
 }
 
 type CheckpointInput struct {
-	SessionID               string                    `json:"session_id,omitempty" jsonschema:"bootstrap's This session ID"`
-	ResumeAfterRestart      bool                      `json:"resume_after_restart,omitempty" jsonschema:"resume after client restart"`
-	TaskID                  string                    `json:"task_id" jsonschema:"new ID starts a task"`
-	PredecessorCheckpointID string                    `json:"predecessor_checkpoint_id,omitempty" jsonschema:"current task tip"`
+	SessionID               string                    `json:"session_id,omitempty" jsonschema:"real session ID"`
+	ResumeAfterRestart      bool                      `json:"resume_after_restart,omitempty"`
+	TaskID                  string                    `json:"task_id"`
+	PredecessorCheckpointID string                    `json:"predecessor_checkpoint_id,omitempty"`
 	ReviewsTaskID           string                    `json:"reviews_task_id,omitempty" jsonschema:"task this work reviews or repairs"`
-	RequestKey              string                    `json:"request_key,omitempty" jsonschema:"retry key"`
+	RequestKey              string                    `json:"request_key,omitempty"`
 	Task                    string                    `json:"task"`
 	Status                  string                    `json:"status,omitempty"`
 	Summary                 string                    `json:"summary"`
@@ -85,11 +85,11 @@ type CheckpointInput struct {
 	Changes                 []string                  `json:"changes,omitempty"`
 	Verified                []string                  `json:"verified,omitempty"`
 	Attempts                []checkpoint.Attempt      `json:"attempts,omitempty"`
-	EvidenceRefs            []string                  `json:"evidence_refs,omitempty" jsonschema:"refs such as commit:HASH or decision:ID"`
-	ActionUpdates           []checkpoint.ActionUpdate `json:"action_updates,omitempty" jsonschema:"reconcile actions"`
-	CarryForwardActionIDs   []string                  `json:"carry_forward_action_ids,omitempty" jsonschema:"unfinished action IDs"`
-	DryRun                  bool                      `json:"dry_run,omitempty" jsonschema:"validate without saving"`
-	LeaseHolder             string                    `json:"lease_holder,omitempty" jsonschema:"lease holder"`
+	EvidenceRefs            []string                  `json:"evidence_refs,omitempty"`
+	ActionUpdates           []checkpoint.ActionUpdate `json:"action_updates,omitempty"`
+	CarryForwardActionIDs   []string                  `json:"carry_forward_action_ids,omitempty"`
+	DryRun                  bool                      `json:"dry_run,omitempty"`
+	LeaseHolder             string                    `json:"lease_holder,omitempty"`
 	LeaseSession            string                    `json:"lease_session,omitempty"`
 	LeaseToken              int64                     `json:"lease_token,omitempty"`
 }
@@ -113,9 +113,9 @@ type CheckpointOutput struct {
 
 // CheckpointGetInput exports one checkpoint by ID or finds checkpoints by text.
 type CheckpointGetInput struct {
-	ID       string `json:"id,omitempty" jsonschema:"checkpoint to export"`
+	ID       string `json:"id,omitempty"`
 	MaxBytes int    `json:"max_bytes,omitempty"`
-	Query    string `json:"query,omitempty" jsonschema:"literal text to find"`
+	Query    string `json:"query,omitempty"`
 	Limit    int    `json:"limit,omitempty"`
 	Cursor   string `json:"cursor,omitempty"`
 }
@@ -127,15 +127,15 @@ type CheckpointGetResult struct {
 }
 
 type CheckpointActionInput struct {
-	TaskID string `json:"task_id,omitempty" jsonschema:"your task; refuses others' actions"`
+	TaskID string `json:"task_id,omitempty"`
 	ID     string `json:"id"`
 	Status string `json:"status" jsonschema:"completed or superseded"`
 	Reason string `json:"reason,omitempty"`
 }
 
 type CheckpointActionsInput struct {
-	TaskID string `json:"task_id,omitempty" jsonschema:"list this task's actions"`
-	All    bool   `json:"all,omitempty" jsonschema:"every task's actions"`
+	TaskID string `json:"task_id,omitempty"`
+	All    bool   `json:"all,omitempty"`
 }
 
 type CheckpointActionsOutput struct {
@@ -143,7 +143,7 @@ type CheckpointActionsOutput struct {
 }
 
 type ProcedureShowInput struct {
-	ID       string `json:"id,omitempty" jsonschema:"omit to list"`
+	ID       string `json:"id,omitempty"`
 	Revision int    `json:"revision,omitempty"`
 	Kind     string `json:"kind,omitempty"`
 	Status   string `json:"status,omitempty"`
@@ -158,7 +158,7 @@ type ProcedureResult struct {
 }
 
 type ResourceShowInput struct {
-	ID       string `json:"id,omitempty" jsonschema:"omit to list"`
+	ID       string `json:"id,omitempty"`
 	Revision int    `json:"revision,omitempty"`
 	Notes    int    `json:"notes,omitempty"`
 	Kind     string `json:"kind,omitempty"`
@@ -174,12 +174,12 @@ type ResourceShowResult struct {
 }
 
 type PinInput struct {
-	Target    string `json:"target,omitempty" jsonschema:"resource:, procedure:, decision:, or topic:ID; omit to list"`
-	Scope     string `json:"scope,omitempty" jsonschema:"project (default), topic:, roadmap_node:, or task:ID"`
+	Target    string `json:"target,omitempty" jsonschema:"resource:/procedure:/decision:/topic:ID"`
+	Scope     string `json:"scope,omitempty" jsonschema:"project, topic:, roadmap_node:, task:ID"`
 	Unpin     bool   `json:"unpin,omitempty"`
 	Creator   string `json:"creator,omitempty"`
 	Authority string `json:"authority,omitempty"`
-	Task      string `json:"task,omitempty" jsonschema:"list the pins this task's bootstrap shows"`
+	Task      string `json:"task,omitempty" jsonschema:"task bootstrap pins"`
 }
 
 // LeaseInput acquires, renews, or releases one local lease.
@@ -199,7 +199,7 @@ type LeaseResult = lease.Result
 // BriefInput names one plan item, or nothing for the items the current next
 // action names.
 type BriefInput struct {
-	Ref string `json:"ref,omitempty" jsonschema:"task:ID, slice label such as 4e or PLAN/ITEM; omit for the next action's items"`
+	Ref string `json:"ref,omitempty" jsonschema:"task:ID or PLAN/ITEM; omit for next action"`
 }
 
 // BriefResult holds one brief with its Markdown, or the named items' lines.
@@ -228,14 +228,14 @@ type RoadmapNodeInput struct {
 	TargetDate    string   `json:"target_date,omitempty"`
 	TargetRelease string   `json:"target_release,omitempty"`
 	TargetHorizon string   `json:"target_horizon,omitempty"`
-	EvidenceRefs  []string `json:"evidence_refs,omitempty" jsonschema:"exact evidence references; at most 64"`
+	EvidenceRefs  []string `json:"evidence_refs,omitempty"`
 }
 
 // RoadmapViewInput selects one read-only roadmap view.
 type RoadmapViewInput struct {
 	View   string `json:"view,omitempty" jsonschema:"status, overview, tree, coverage, history, render, check, releases, unreleased, changelog, or changelog_check"`
-	NodeID string `json:"node_id,omitempty" jsonschema:"node history or release history ID"`
-	Path   string `json:"path,omitempty" jsonschema:"check"`
+	NodeID string `json:"node_id,omitempty" jsonschema:"history ID"`
+	Path   string `json:"path,omitempty"`
 	Offset int    `json:"offset,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
 }
@@ -261,25 +261,25 @@ type ReleaseRecordInput struct {
 	Title       string          `json:"title"`
 	Status      string          `json:"status" jsonschema:"draft, reviewed, published, or superseded"`
 	Reviewer    string          `json:"reviewer,omitempty"`
-	PublishedAt string          `json:"published_at,omitempty" jsonschema:"RFC3339; published records only"`
-	Entries     []release.Entry `json:"entries" jsonschema:"ordered reviewed entries; at most 64"`
+	PublishedAt string          `json:"published_at,omitempty" jsonschema:"published only"`
+	Entries     []release.Entry `json:"entries"`
 }
 
 // WorkInput selects one read-only current-work view.
 type WorkInput struct {
 	View               string `json:"view,omitempty" jsonschema:"pulse (default), summary, list, item, check, freshness, or inventory"`
-	CheckpointID       string `json:"checkpoint_id,omitempty" jsonschema:"pulse, freshness"`
-	TaskID             string `json:"task_id,omitempty" jsonschema:"pulse, freshness"`
-	SessionID          string `json:"session_id,omitempty" jsonschema:"pulse, freshness"`
+	CheckpointID       string `json:"checkpoint_id,omitempty"`
+	TaskID             string `json:"task_id,omitempty"`
+	SessionID          string `json:"session_id,omitempty"`
 	List               string `json:"list,omitempty" jsonschema:"current (default), open, active, next, blocked, stale, actions, all, or everything"`
 	Identifier         string `json:"identifier,omitempty" jsonschema:"item: node or task ID"`
 	Scope              string `json:"scope,omitempty" jsonschema:"check: current (default) or all"`
-	RemindAfterSeconds int64  `json:"remind_after_seconds,omitempty" jsonschema:"freshness"`
-	RemindAfterEvents  int    `json:"remind_after_events,omitempty" jsonschema:"freshness"`
+	RemindAfterSeconds int64  `json:"remind_after_seconds,omitempty"`
+	RemindAfterEvents  int    `json:"remind_after_events,omitempty"`
 	Filter             string `json:"filter,omitempty" jsonschema:"inventory: open, all, everything (adds finished unbound tasks), current_focus, active, resumable, blocked, anomalous, stale, or actions"`
-	RoadmapNodeID      string `json:"roadmap_node_id,omitempty" jsonschema:"inventory"`
-	Offset             int    `json:"offset,omitempty" jsonschema:"inventory"`
-	RefLimit           int    `json:"ref_limit,omitempty" jsonschema:"inventory"`
+	RoadmapNodeID      string `json:"roadmap_node_id,omitempty"`
+	Offset             int    `json:"offset,omitempty"`
+	RefLimit           int    `json:"ref_limit,omitempty"`
 	Limit              int    `json:"limit,omitempty"`
 }
 
@@ -314,7 +314,7 @@ type PresenceInput struct {
 	FocusRoadmap  string `json:"focus_roadmap_node,omitempty"`
 	FocusWorktree string `json:"focus_worktree,omitempty"`
 	FocusBranch   string `json:"focus_branch,omitempty"`
-	Cleanup       bool   `json:"cleanup,omitempty" jsonschema:"inspect linked worktrees without changing them"`
+	Cleanup       bool   `json:"cleanup,omitempty"`
 }
 
 type DecisionRecordInput struct {
@@ -322,31 +322,31 @@ type DecisionRecordInput struct {
 	Title        string          `json:"title"`
 	Rationale    string          `json:"rationale" jsonschema:"the user's reasons"`
 	Disposition  string          `json:"disposition"`
-	Actor        string          `json:"actor" jsonschema:"the deciding person"`
-	ActorType    string          `json:"actor_type" jsonschema:"human"`
+	Actor        string          `json:"actor"`
+	ActorType    string          `json:"actor_type"`
 	Authority    string          `json:"authority" jsonschema:"user_reported or caller_asserted"`
-	ReviewSource string          `json:"review_source,omitempty" jsonschema:"where the user decided; required for user_reported"`
+	ReviewSource string          `json:"review_source,omitempty" jsonschema:"user decision source"`
 	SupersedesID string          `json:"supersedes_id,omitempty"`
 	Links        []decision.Link `json:"links,omitempty" jsonschema:"up to 16 links: subject, supports, opposes, resulted_in"`
 }
 
 type HistorySearchInput struct {
-	SourceURL string   `json:"source_url,omitempty" jsonschema:"exact source URL: observations and citing claims"`
+	SourceURL string   `json:"source_url,omitempty" jsonschema:"source/citations"`
 	State     string   `json:"state,omitempty" jsonschema:"narrative/decision correction state: current (default), superseded, or all"`
 	Query     string   `json:"query,omitempty" jsonschema:"terms are ANDed; trailing * for prefix"`
 	Topic     string   `json:"topic,omitempty" jsonschema:"topic ID or alias, or roadmap node ID"`
-	Kinds     []string `json:"kinds,omitempty" jsonschema:"claim kinds such as intent or decision"`
+	Kinds     []string `json:"kinds,omitempty"`
 	Families  []string `json:"families,omitempty"`
-	Since     string   `json:"since,omitempty" jsonschema:"RFC 3339"`
-	Until     string   `json:"until,omitempty" jsonschema:"RFC 3339, exclusive"`
-	Linked    string   `json:"linked,omitempty" jsonschema:"commit:HASH, roadmap_node:ID, file:PATH: narratives anchored to it, decisions linking to it"`
+	Since     string   `json:"since,omitempty"`
+	Until     string   `json:"until,omitempty"`
+	Linked    string   `json:"linked,omitempty" jsonschema:"commit:HASH, file:PATH, etc."`
 	Limit     int      `json:"limit,omitempty"`
 	Offset    int      `json:"offset,omitempty"`
 	MaxBytes  int      `json:"max_bytes,omitempty"`
 }
 
 type HistoryShowInput struct {
-	Refs     []string `json:"refs" jsonschema:"1-20 refs such as narrative:ID, decision:ID, checkpoint:ID"`
+	Refs     []string `json:"refs" jsonschema:"exact history refs"`
 	MaxBytes int      `json:"max_bytes,omitempty"`
 }
 
@@ -354,7 +354,7 @@ type HistoryShowInput struct {
 type UsageInput struct {
 	By     string `json:"by,omitempty" jsonschema:"session, day, model (default), client, task, tool, or family"`
 	Since  string `json:"since,omitempty" jsonschema:"YYYY-MM-DD or RFC 3339"`
-	Until  string `json:"until,omitempty" jsonschema:"exclusive"`
+	Until  string `json:"until,omitempty"`
 	Days   int    `json:"days,omitempty"`
 	Client string `json:"client,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
@@ -372,9 +372,9 @@ type NarrativeRecordInput struct {
 	Creator             string                 `json:"creator"`
 	CreatorInvocationID string                 `json:"creator_invocation_id,omitempty"`
 	SupersedesID        string                 `json:"supersedes_id,omitempty"`
-	Commit              string                 `json:"commit,omitempty" jsonschema:"needs outcome, intent, verification, and limitation claims; writes the commit's Git note"`
+	Commit              string                 `json:"commit,omitempty" jsonschema:"needs outcome/intent/verification/limitation"`
 	SkipNote            bool                   `json:"skip_note,omitempty"`
-	Repo                string                 `json:"repo,omitempty" jsonschema:"workspace member holding commit"`
+	Repo                string                 `json:"repo,omitempty" jsonschema:"commit repository"`
 }
 
 type ItemCaptureInput struct {
@@ -390,24 +390,24 @@ type ItemCaptureInput struct {
 	TaskID        string   `json:"task_id,omitempty"`
 	CheckpointID  string   `json:"checkpoint_id,omitempty"`
 	RoadmapNodeID string   `json:"roadmap_node_id,omitempty"`
-	From          string   `json:"from,omitempty" jsonschema:"work_item:ID to promote, or friction:ID to track"`
+	From          string   `json:"from,omitempty" jsonschema:"work_item:ID or friction:ID"`
 	Creator       string   `json:"creator"`
 	Model         string   `json:"model,omitempty"`
 }
 
 type ItemInput struct {
-	Report        bool   `json:"report,omitempty" jsonschema:"prepare bug report"`
+	Report        bool   `json:"report,omitempty"`
 	Expected      string `json:"expected,omitempty"`
-	Hypothesis    string `json:"hypothesis,omitempty" jsonschema:"unverified"`
-	ID            string `json:"id,omitempty" jsonschema:"omit to list"`
+	Hypothesis    string `json:"hypothesis,omitempty"`
+	ID            string `json:"id,omitempty"`
 	Kind          string `json:"kind,omitempty"`
-	Status        string `json:"status,omitempty" jsonschema:"open or a disposition"`
+	Status        string `json:"status,omitempty"`
 	Tag           string `json:"tag,omitempty"`
 	TaskID        string `json:"task_id,omitempty"`
 	RoadmapNodeID string `json:"roadmap_node_id,omitempty"`
 	Limit         int    `json:"limit,omitempty"`
-	Audit         bool   `json:"audit,omitempty" jsonschema:"pending bodies"`
-	Friction      bool   `json:"friction,omitempty" jsonschema:"failure/recovery candidates"`
+	Audit         bool   `json:"audit,omitempty"`
+	Friction      bool   `json:"friction,omitempty" jsonschema:"friction candidates"`
 	MinCount      int    `json:"min_count,omitempty"`
 	MaxBytes      int    `json:"max_bytes,omitempty"`
 }
@@ -425,37 +425,37 @@ type ItemDispositionInput struct {
 	ID         string   `json:"id"`
 	Status     string   `json:"status"`
 	Reason     string   `json:"reason"`
-	TargetRefs []string `json:"target_refs,omitempty" jsonschema:"required for accepted, integrated, merged"`
+	TargetRefs []string `json:"target_refs,omitempty" jsonschema:"accepted/integrated/merged require refs"`
 	Creator    string   `json:"creator"`
 	Model      string   `json:"model,omitempty"`
 }
 
 type TrackPlanRecordInput struct {
-	BaseRevision  int              `json:"base_revision,omitempty" jsonschema:"exact latest revision; required for autonomous writes"`
+	BaseRevision  int              `json:"base_revision,omitempty" jsonschema:"latest; agent writes require it"`
 	ID            string           `json:"id"`
 	Revision      int              `json:"revision,omitempty"`
-	RoadmapNodeID string           `json:"roadmap_node_id,omitempty" jsonschema:"required with items"`
+	RoadmapNodeID string           `json:"roadmap_node_id,omitempty" jsonschema:"with items: required"`
 	TaskID        string           `json:"task_id,omitempty"`
-	Title         string           `json:"title,omitempty" jsonschema:"required with items"`
-	Summary       string           `json:"summary,omitempty" jsonschema:"required with items"`
+	Title         string           `json:"title,omitempty" jsonschema:"with items: required"`
+	Summary       string           `json:"summary,omitempty" jsonschema:"with items: required"`
 	Status        string           `json:"status"`
 	Creator       string           `json:"creator"`
-	Model         string           `json:"model,omitempty" jsonschema:"model identity for agent writes"`
+	Model         string           `json:"model,omitempty"`
 	WorkItemIDs   []string         `json:"work_item_ids,omitempty"`
-	Items         []trackplan.Item `json:"items,omitempty" jsonschema:"full item set; omit for human review"`
-	LeaseHolder   string           `json:"lease_holder,omitempty" jsonschema:"holder of your lease on this scope"`
+	Items         []trackplan.Item `json:"items,omitempty" jsonschema:"omit for human review"`
+	LeaseHolder   string           `json:"lease_holder,omitempty"`
 	LeaseSession  string           `json:"lease_session,omitempty"`
 	LeaseToken    int64            `json:"lease_token,omitempty"`
 }
 
 type TrackPlanShowInput struct {
-	Policy        bool   `json:"policy,omitempty" jsonschema:"read effective policy for roadmap_node_id"`
-	ID            string `json:"id,omitempty" jsonschema:"omit to list"`
+	Policy        bool   `json:"policy,omitempty"`
+	ID            string `json:"id,omitempty"`
 	Revision      int    `json:"revision,omitempty"`
 	History       bool   `json:"history,omitempty"`
-	Detail        bool   `json:"detail,omitempty" jsonschema:"include item detail and evidence"`
-	Item          string `json:"item,omitempty" jsonschema:"one item in full"`
-	Ready         bool   `json:"ready,omitempty" jsonschema:"dependency-ready items"`
+	Detail        bool   `json:"detail,omitempty"`
+	Item          string `json:"item,omitempty"`
+	Ready         bool   `json:"ready,omitempty"`
 	Status        string `json:"status,omitempty"`
 	RoadmapNodeID string `json:"roadmap_node_id,omitempty"`
 	TaskID        string `json:"task_id,omitempty"`
@@ -476,8 +476,8 @@ type TrackPlanResult struct {
 }
 
 type InfoInput struct {
-	Checks              bool     `json:"checks,omitempty" jsonschema:"add the readiness report"`
-	Probes              []string `json:"probes,omitempty" jsonschema:"narrative:ID probes"`
+	Checks              bool     `json:"checks,omitempty"`
+	Probes              []string `json:"probes,omitempty"`
 	SourceVerifications []string `json:"source_verifications,omitempty"`
 	CheckIntegrity      bool     `json:"check_integrity,omitempty"`
 }
@@ -524,6 +524,7 @@ func ToolNames(ctx context.Context, application *app.App) ([]string, error) {
 // schema inferred from its result type: clients do not show output schemas to
 // the model, and the inferred ones were most of every tools/list response.
 func addTool[In, Out any](server *mcp.Server, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, Out]) {
+	tool.InputSchema = inputSchema[In]()
 	tool.OutputSchema = &jsonschema.Schema{Type: "object"}
 	mcp.AddTool(server, tool, handler)
 }
@@ -563,7 +564,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			return next(ctx, method, request)
 		}
 	})
-	addTool(server, &mcp.Tool{Name: "continuity_info", Description: "Report the running server's build, MCP API, and database schema. checks, probes, or check_integrity add the operational-readiness report."},
+	addTool(server, &mcp.Tool{Name: "continuity_info", Description: "Read runtime identity; checks/probes add readiness."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input InfoInput) (*mcp.CallToolResult, InfoOutput, error) {
 			migration, err := database.LatestMigration(ctx, application.DB)
 			if err != nil {
@@ -579,7 +580,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, output, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_procedure", Description: "Return one reviewed procedure (check or runbook), or without id list the latest revision of each."},
+	addTool(server, &mcp.Tool{Name: "continuity_procedure", Description: "Read a reviewed procedure; omit id to list."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ProcedureShowInput) (*mcp.CallToolResult, ProcedureResult, error) {
 			if input.ID == "" {
 				values, err := application.Procedures.List(ctx, application.ProjectID, procedures.ListOptions{Kind: input.Kind, Status: input.Status, Limit: input.Limit})
@@ -597,7 +598,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, ProcedureResult{Procedure: value}, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_resource", Description: "Return one resource with recent state notes, or without id list resources."},
+	addTool(server, &mcp.Tool{Name: "continuity_resource", Description: "Read a resource with notes; omit id to list."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ResourceShowInput) (*mcp.CallToolResult, ResourceShowResult, error) {
 			if input.ID == "" {
 				values, err := application.Resources.List(ctx, application.ProjectID, input.Kind, input.Status, input.Limit)
@@ -609,7 +610,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, ResourceShowResult{Detail: &detail}, nil
 		})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_pin", Description: "Pin/unpin context for bootstrap scope; without a target, list pins."},
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_pin", Description: "Pin/unpin bootstrap context; omit target to list."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input PinInput) (*mcp.CallToolResult, PinResult, error) {
 			if input.Target == "" {
 				lines, err := pin.Current(ctx, application.DB, application.ProjectID)
@@ -638,7 +639,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, PinResult{Pin: &value}, nil
 		})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_lease", Description: "Acquire, renew, or release an advisory lease saying which agent works on a task, roadmap node, or track plan; cross-machine when the project sets [leases] remote. Acquire fails naming the holder when someone else holds it; renew and release need the token."},
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_lease", Description: "Manage advisory work leases; renew/release require token. Conflicting acquire names holder."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input LeaseInput) (*mcp.CallToolResult, LeaseResult, error) {
 			kind, id, err := lease.ParseScope(input.Scope)
 			if err != nil {
@@ -658,7 +659,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, LeaseResult{}, fmt.Errorf("lease action must be acquire, renew, or release, not %q", input.Action)
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_brief", Description: "Compact task:ID brief: saved state, verification, attempts, decisions and named items. Plan-item refs return goal, dependencies, paths and procedures. Without ref, one-line next-action items."},
+	addTool(server, &mcp.Tool{Name: "continuity_brief", Description: "Read task:ID or plan-item brief; omit ref for next-action items."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BriefInput) (*mcp.CallToolResult, BriefResult, error) {
 			if ref := strings.TrimSpace(input.Ref); ref != "" {
 				if taskID, ok := strings.CutPrefix(ref, "task:"); ok {
@@ -689,7 +690,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, result, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_usage", Description: "Report exact tokens and estimated cost with rate provenance; group usage by session/day/model/client/task/tool and report context sizes."},
+	addTool(server, &mcp.Tool{Name: "continuity_usage", Description: "Read exact tokens and estimated cost with rate provenance."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, usage.Report, error) {
 			options := usage.Options{By: input.By, Client: input.Client, Limit: input.Limit}
 			for target, value := range map[*time.Time]string{&options.Since: input.Since, &options.Until: input.Until} {
@@ -710,7 +711,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			report, err := usage.Reporter{DB: application.DB, ProjectID: application.ProjectID, Prices: usage.Prices{Overrides: application.Config.Usage.Prices}}.Report(ctx, options)
 			return nil, report, err
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_work", Description: "Read work: pulse (default), summary, list, item, check, freshness, or inventory. Views preserve task/node/action status separately."},
+	addTool(server, &mcp.Tool{Name: "continuity_work", Description: "Read work views; task, node and action statuses remain separate."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input WorkInput) (*mcp.CallToolResult, WorkResult, error) {
 			var result WorkResult
 			var err error
@@ -751,7 +752,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, result, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_presence", Description: "Read local session presence, scope overlap, and cleanup candidates; presence is not a lock or proof of process liveness."},
+	addTool(server, &mcp.Tool{Name: "continuity_presence", Description: "Read local presence/overlap/cleanup candidates; never proves process liveness."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input PresenceInput) (*mcp.CallToolResult, presence.Snapshot, error) {
 			now := time.Now().UTC()
 			report, err := application.Presence.List(ctx, application.ProjectID, presence.Query{
@@ -770,7 +771,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, result, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_bootstrap", Description: "Return the continuity bootstrap for the project. The SessionStart hook already delivers it; with no selection, an unchanged packet returns a one-line notice unless full is set."},
+	addTool(server, &mcp.Tool{Name: "continuity_bootstrap", Description: "Read SessionStart bootstrap; unchanged returns a notice unless full."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BootstrapInput) (*mcp.CallToolResult, BootstrapOutput, error) {
 			selection := checkpoint.Selection{CheckpointID: input.CheckpointID, TaskID: input.TaskID, SessionID: input.SessionID}
 			inferredSession := false
@@ -809,7 +810,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, BootstrapOutput{Markdown: markdown, RuntimeWarning: warning}, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_checkpoint", Description: "Save a handoff; reconcile predecessor actions. dry_run checks budgets. An incompatible stale writer stages deferred recovery instead of saving."},
+	addTool(server, &mcp.Tool{Name: "continuity_checkpoint", Description: "Save handoff and reconcile actions; dry_run previews budgets. Stale writes stage recovery."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input CheckpointInput) (*mcp.CallToolResult, CheckpointOutput, error) {
 			value := checkpoint.Checkpoint{
 				SessionID: input.SessionID, TaskID: input.TaskID, PredecessorCheckpointID: input.PredecessorCheckpointID, ReviewsTaskID: input.ReviewsTaskID, RequestKey: input.RequestKey, Task: input.Task,
@@ -855,17 +856,17 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, CheckpointOutput{ID: created.Checkpoint.ID, Lease: created.Lease, SessionLease: created.SessionLease, CarriedForward: created.CarriedForward, Reconciled: created.Reconciled, ActionCreated: created.ActionCreated, UnnarratedCommits: application.UnnarratedCommits(ctx), ResearchCapture: application.ResearchCapture(ctx, value)}, nil
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_checkpoint_actions", Description: "List a task's unresolved checkpoint actions; without task_id or all, refuses when several tasks have actions."},
+	addTool(server, &mcp.Tool{Name: "continuity_checkpoint_actions", Description: "List task's unresolved actions; select task_id or all when ambiguous."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input CheckpointActionsInput) (*mcp.CallToolResult, CheckpointActionsOutput, error) {
 			actions, err := application.Checkpoints.ListActions(ctx, application.ProjectID, input.TaskID, input.All)
 			return nil, CheckpointActionsOutput{Actions: actions}, err
 		})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_checkpoint_action_update", Description: "Mark one checkpoint action completed or superseded."},
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_checkpoint_action_update", Description: "Complete or supersede one action owned by task_id."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input CheckpointActionInput) (*mcp.CallToolResult, Receipt, error) {
 			action, err := application.Checkpoints.TransitionAction(ctx, application.ProjectID, input.TaskID, input.ID, input.Status, input.Reason)
 			return nil, actionReceipt(action), err
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_checkpoint_get", Description: "Read earlier handoffs: with id, export one checkpoint; with query, find checkpoints by literal text."},
+	addTool(server, &mcp.Tool{Name: "continuity_checkpoint_get", Description: "Read exact checkpoint by id or search literal query."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input CheckpointGetInput) (*mcp.CallToolResult, CheckpointGetResult, error) {
 			if (input.ID == "") == (input.Query == "") {
 				return nil, CheckpointGetResult{}, errors.New("give exactly one of id and query")
@@ -895,7 +896,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			node, err := application.Roadmap.AppendNode(ctx, roadmap.Node{ProjectID: application.ProjectID, ID: input.ID, Revision: input.Revision, Title: input.Title, Status: input.Status, Priority: priority, Kind: input.Kind, TargetDate: input.TargetDate, TargetRelease: input.TargetRelease, TargetHorizon: input.TargetHorizon, EvidenceRefs: input.EvidenceRefs, SourcePath: input.SourcePath, SourceRef: input.SourceRef})
 			return nil, roadmapNodeReceipt(node), err
 		})
-	addTool(server, &mcp.Tool{Name: "continuity_roadmap_view", Description: "Read deterministic roadmap, release, and changelog views; rendering and checks never write or publish."},
+	addTool(server, &mcp.Tool{Name: "continuity_roadmap_view", Description: "Read roadmap/release/changelog views; never publish."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input RoadmapViewInput) (*mcp.CallToolResult, RoadmapViewResult, error) {
 			var result RoadmapViewResult
 			var err error
@@ -952,7 +953,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, result, nil
 		})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_release_record", Description: "Append a release revision. Published content must match its latest review; nothing is published externally."},
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_release_record", Description: "Record release revision; publishing requires matching review. No external publication."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ReleaseRecordInput) (*mcp.CallToolResult, release.Record, error) {
 			publishedAt, err := optionalRFC3339(input.PublishedAt)
 			if err != nil {
@@ -961,19 +962,19 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			value, err := application.Releases.Append(ctx, release.Record{ProjectID: application.ProjectID, ID: input.ID, Revision: input.Revision, Version: input.Version, Title: input.Title, Status: input.Status, Reviewer: input.Reviewer, PublishedAt: publishedAt, Entries: input.Entries})
 			return nil, value, err
 		})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_decision_record", Description: "Record a decision the user explicitly made, with links to what it concerns."}, func(ctx context.Context, _ *mcp.CallToolRequest, input DecisionRecordInput) (*mcp.CallToolResult, Receipt, error) {
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_decision_record", Description: "Record an explicit user decision with typed links."}, func(ctx context.Context, _ *mcp.CallToolRequest, input DecisionRecordInput) (*mcp.CallToolResult, Receipt, error) {
 		value, err := application.Decisions.Append(ctx, decision.Record{ID: input.ID, ProjectID: application.ProjectID, Title: input.Title, Rationale: input.Rationale, Disposition: input.Disposition, Actor: input.Actor, ActorType: input.ActorType, Authority: input.Authority, ReviewSource: input.ReviewSource, SupersedesID: input.SupersedesID, Links: input.Links})
 		return nil, decisionReceipt(value), err
 	})
-	addTool(server, &mcp.Tool{Name: "continuity_history_search", Description: "Search history before diagnosis/redesign. Returns bounded snippets; expand relevant refs with history_show, then verify current evidence. No useful match means proceed to code."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistorySearchInput) (*mcp.CallToolResult, history.SearchPage, error) {
+	addTool(server, &mcp.Tool{Name: "continuity_history_search", Description: "Search history before diagnosis/redesign; expand refs with history_show and verify current evidence."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistorySearchInput) (*mcp.CallToolResult, history.SearchPage, error) {
 		page, err := application.History.Search(ctx, application.ProjectID, history.SearchOptions{SourceURL: input.SourceURL, State: input.State, Query: input.Query, Topic: input.Topic, Kinds: input.Kinds, Families: input.Families, Since: input.Since, Until: input.Until, Linked: input.Linked, Limit: input.Limit, Offset: input.Offset, MaxBytes: input.MaxBytes})
 		return nil, page, err
 	})
-	addTool(server, &mcp.Tool{Name: "continuity_history_show", Description: "Expand exact history references within a byte budget."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistoryShowInput) (*mcp.CallToolResult, history.ShowPage, error) {
+	addTool(server, &mcp.Tool{Name: "continuity_history_show", Description: "Expand exact history refs within byte budget."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistoryShowInput) (*mcp.CallToolResult, history.ShowPage, error) {
 		page, err := application.History.Show(ctx, application.ProjectID, input.Refs, input.MaxBytes)
 		return nil, page, err
 	})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_narrative_record", Description: "Record a work narrative: ordered claims with authority, plus anchors. With commit, it is the commit's record and writes its Git note."}, func(ctx context.Context, _ *mcp.CallToolRequest, input NarrativeRecordInput) (*mcp.CallToolResult, Receipt, error) {
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_narrative_record", Description: "Record ordered claims/anchors; commit also writes its Git note."}, func(ctx context.Context, _ *mcp.CallToolRequest, input NarrativeRecordInput) (*mcp.CallToolResult, Receipt, error) {
 		from, err := optionalRFC3339(input.OccurredFrom)
 		if err != nil {
 			return nil, Receipt{}, fmt.Errorf("occurred_from: %w", err)
@@ -990,7 +991,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		record, note, err := application.Narratives.RecordCommit(ctx, value, input.Commit, input.Repo, input.SkipNote)
 		return nil, narrativeReceipt(worknarrative.RecordResult{Record: record, Note: &note}), err
 	})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_track_plan_record", Description: "Record revisions under progress/delegation policy. Without items, record explicit human review."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanRecordInput) (*mcp.CallToolResult, Receipt, error) {
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_track_plan_record", Description: "Record plan progress/intent under policy; omit items for explicit human review."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanRecordInput) (*mcp.CallToolResult, Receipt, error) {
 		if input.Items == nil {
 			value, err := application.AcceptPlan(ctx, input.ID, input.Status, input.Creator, lease.Claim{Holder: input.LeaseHolder, SessionID: input.LeaseSession, Token: input.LeaseToken})
 			return nil, planReceipt(value), err
@@ -998,7 +999,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		value, err := application.AppendPlan(ctx, trackplan.Plan{Fence: lease.Fence{Claim: lease.Claim{Holder: input.LeaseHolder, SessionID: input.LeaseSession, Token: input.LeaseToken}}, ProjectID: application.ProjectID, ID: input.ID, Revision: input.Revision, BaseRevision: input.BaseRevision, RoadmapNodeID: input.RoadmapNodeID, TaskID: input.TaskID, Title: input.Title, Summary: input.Summary, Status: input.Status, Creator: input.Creator, Model: input.Model, WorkItemIDs: input.WorkItemIDs, Items: input.Items})
 		return nil, planReceipt(value), err
 	})
-	addTool(server, &mcp.Tool{Name: "continuity_track_plan", Description: "Read plans: outline by default; detail/item/history expand. Without id list plans; ready reads dependency-ready items; policy reads delegation."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanShowInput) (*mcp.CallToolResult, TrackPlanResult, error) {
+	addTool(server, &mcp.Tool{Name: "continuity_track_plan", Description: "Read plan outline; detail/item/history expand; omit id to list; policy reads delegation."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanShowInput) (*mcp.CallToolResult, TrackPlanResult, error) {
 		if input.Policy {
 			if input.ID != "" || input.Ready || input.History || input.Item != "" {
 				return nil, TrackPlanResult{}, fmt.Errorf("policy read does not select plan content")
@@ -1045,11 +1046,11 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		outline := value.Outline()
 		return nil, TrackPlanResult{Outline: &outline}, nil
 	})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_item_capture", Description: "Capture a pending idea, bug, task or research question without changing active work."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemCaptureInput) (*mcp.CallToolResult, Receipt, error) {
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_item_capture", Description: "Capture pending idea/bug/task/research; active work unchanged."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemCaptureInput) (*mcp.CallToolResult, Receipt, error) {
 		v, err := application.WorkItems.Capture(ctx, workitem.Capture{Item: workitem.Item{ID: input.ID, ProjectID: application.ProjectID, Kind: input.Kind, Title: input.Title, Body: input.Body, Observed: input.Observed, Reproduction: input.Reproduction, Environment: input.Environment, Severity: input.Severity, Tags: input.Tags, TaskID: input.TaskID, CheckpointID: input.CheckpointID, RoadmapNodeID: input.RoadmapNodeID, Creator: input.Creator, Model: input.Model}, From: input.From})
 		return nil, itemReceipt(v), err
 	})
-	addTool(server, &mcp.Tool{Name: "continuity_item", Description: "Read items: id for one; id+report for a redacted bug draft (no submission). Otherwise list metadata, audit pending bodies, or inspect friction."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemInput) (*mcp.CallToolResult, ItemResult, error) {
+	addTool(server, &mcp.Tool{Name: "continuity_item", Description: "Read item by id; report drafts bug without submission; otherwise list/audit/friction."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemInput) (*mcp.CallToolResult, ItemResult, error) {
 		if input.Report {
 			if input.ID == "" || input.Audit || input.Friction {
 				return nil, ItemResult{}, fmt.Errorf("report requires id and cannot be combined with audit or friction")
@@ -1080,7 +1081,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		v, err := application.WorkItems.ListPage(ctx, application.ProjectID, workitem.ListOptions{Kind: input.Kind, Status: input.Status, Tag: input.Tag, TaskID: input.TaskID, RoadmapNodeID: input.RoadmapNodeID, Limit: input.Limit})
 		return nil, ItemResult{Page: &v}, err
 	})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_item_disposition", Description: "Review an item: accepted/deferred stay open; integrated/discarded/merged/answered close it. answered needs research findings."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemDispositionInput) (*mcp.CallToolResult, Receipt, error) {
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_item_disposition", Description: "Review item; accepted/deferred stay open; answered needs research findings."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemDispositionInput) (*mcp.CallToolResult, Receipt, error) {
 		v, err := application.WorkItems.Dispose(ctx, workitem.Disposition{ProjectID: application.ProjectID, ItemID: input.ID, Status: input.Status, Reason: input.Reason, TargetRefs: input.TargetRefs, Creator: input.Creator, Model: input.Model})
 		return nil, dispositionReceipt(v), err
 	})

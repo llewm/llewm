@@ -42,7 +42,7 @@ func (s Service) Show(ctx context.Context, projectID string, refs []string, maxB
 	if maxBytes == 0 {
 		maxBytes = DefaultMaxBytes
 	}
-	if maxBytes < 256 || maxBytes > MaxMaxBytes {
+	if maxBytes < MinMaxBytes || maxBytes > MaxMaxBytes {
 		return ShowPage{}, fmt.Errorf("max bytes must be between 256 and %d", MaxMaxBytes)
 	}
 	if len(refs) == 0 || len(refs) > MaxShowRefs {

@@ -434,6 +434,30 @@ Tool-result byte counts cannot measure all schema, skill, or host-envelope costs
 A cached token still occupies context; a byte-derived token estimate is not a
 provider-reported token count.
 
+### Input constraints
+
+MCP API 139 advertises service constraints in `tools/list` input schemas:
+allowed values (including nested narrative anchors and citations), bounded lists,
+pagination and byte-budget ranges, defaults, and date/time formats. History search
+keeps its 50-result page limit; advance `offset` for another page. Explicit zero
+retains each service's default. Nullable optional lists retain their existing
+meaning, including `items: null` for human plan review. Roadmap limits depend on
+the selected view, so they appear in conditional schemas.
+
+Service checks remain authoritative for redaction, UTF-8 byte totals, permissions,
+record existence, state and cross-field relationships. JSON Schema string lengths
+count Unicode characters; they do not replace byte checks. Format annotations
+advertise date/RFC3339 input; runtime parsers still validate supported timestamps.
+Some read filters and ignored selector fields intentionally accept unrestricted
+text or normalize values rather than reject them; the schema does not invent
+limits for them. Schema changes advance the MCP API, not the writer floor when
+storage semantics are unchanged.
+
+Exported-schema regressions compare history and narrative boundaries with actual
+service validation and check conditional/nullable inputs. Error-path tests check
+`IsError` before interpreting structured success content, for both schema failures
+and service failures. Consumers must follow that order as well.
+
 ### Budget verification
 
 The MCP definition-budget test checks serialized model-visible tool metadata

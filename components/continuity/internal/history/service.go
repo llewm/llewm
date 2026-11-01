@@ -21,6 +21,7 @@ const (
 	SchemaVersion      = 1
 	DefaultSearchLimit = 20
 	MaxSearchLimit     = 50
+	MinMaxBytes        = 256
 	DefaultMaxBytes    = 8 << 10
 	MaxMaxBytes        = 64 << 10
 	SnippetBytes       = 200
@@ -417,7 +418,7 @@ func (s Service) Search(ctx context.Context, projectID string, options SearchOpt
 	if options.Limit < 1 || options.Limit > MaxSearchLimit {
 		return SearchPage{}, fmt.Errorf("limit must be between 1 and %d", MaxSearchLimit)
 	}
-	if options.MaxBytes < 256 || options.MaxBytes > MaxMaxBytes {
+	if options.MaxBytes < MinMaxBytes || options.MaxBytes > MaxMaxBytes {
 		return SearchPage{}, fmt.Errorf("max bytes must be between 256 and %d", MaxMaxBytes)
 	}
 	if options.Offset < 0 || options.Offset > MaxOffset {

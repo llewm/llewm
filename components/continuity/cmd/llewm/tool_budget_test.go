@@ -19,18 +19,7 @@ import (
 const toolDefinitionBudget = 20 << 10
 
 func TestMCPToolDefinitionsFitTheBudget(t *testing.T) {
-	root := testProject(t)
-	runCLI(t, "", "init")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
-	child.Dir = t.TempDir()
-	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "budget", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Close()
+	ctx, session, _ := toolSchemaSession(t)
 	list, err := session.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -58,4 +47,21 @@ func TestMCPToolDefinitionsFitTheBudget(t *testing.T) {
 	if total > toolDefinitionBudget {
 		t.Fatalf("tool definitions are %d bytes, over the %d-byte budget", total, toolDefinitionBudget)
 	}
+}
+
+func toolSchemaSession(t *testing.T) (context.Context, *mcp.ClientSession, string) {
+	t.Helper()
+	root := testProject(t)
+	runCLI(t, "", "init")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child.Dir = t.TempDir()
+	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "budget", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { session.Close() })
+	return ctx, session, root
 }

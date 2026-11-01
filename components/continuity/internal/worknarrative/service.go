@@ -31,6 +31,21 @@ var claimKinds = map[string]bool{"intent": true, "outcome": true, "constraint": 
 var anchorKinds = map[string]bool{"checkpoint": true, "task": true, "roadmap_node": true, "commit": true, "file": true, "region": true, "invocation": true, "verification": true, "portable_evidence": true}
 var authorities = map[string]bool{"machine_observed": true, "caller_asserted": true, "user_reported": true}
 
+// These lists come from the same sets used by live and portable validation.
+// Return copies so interface generation cannot change the validator's vocabulary.
+func Triggers() []string    { return sortedKeys(triggers) }
+func ClaimKinds() []string  { return sortedKeys(claimKinds) }
+func AnchorKinds() []string { return sortedKeys(anchorKinds) }
+func Authorities() []string { return sortedKeys(authorities) }
+func sortedKeys(values map[string]bool) []string {
+	result := make([]string, 0, len(values))
+	for k := range values {
+		result = append(result, k)
+	}
+	sort.Strings(result)
+	return result
+}
+
 type Service struct {
 	DB   *sql.DB
 	Root string

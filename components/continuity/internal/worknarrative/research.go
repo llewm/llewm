@@ -12,7 +12,17 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
-const MaxCitations = 16
+const (
+	MaxCitations            = 16
+	MaxSourceURLBytes       = 4096
+	MaxSourceMetadataBytes  = 512
+	MaxCitationIDBytes      = 256
+	MaxCitationLocatorBytes = 1024
+)
+
+var citationRelations = map[string]bool{"supports": true, "contradicts": true, "context": true}
+
+func CitationRelations() []string { return sortedKeys(citationRelations) }
 
 var privateURLKey = regexp.MustCompile(`(?i)(token|password|secret|signature|credential|api.?key|authorization|^x-amz-|^x-goog-)`)
 
@@ -23,7 +33,7 @@ func NormalizeResearch(source *Source, claims []Claim) (*Source, []Claim, error)
 		v := *source
 		v.URL = strings.TrimSpace(v.URL)
 		u, err := url.Parse(v.URL)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || len(v.URL) > 4096 || redact.String(v.URL) != v.URL || strings.ContainsAny(v.URL, "\r\n\x00") {
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || len(v.URL) > MaxSourceURLBytes || redact.String(v.URL) != v.URL || strings.ContainsAny(v.URL, "\r\n\x00") {
 			return nil, nil, fmt.Errorf("source URL must be an HTTP(S) reference without credentials")
 		}
 		query, err := url.ParseQuery(u.RawQuery)
@@ -45,7 +55,7 @@ func NormalizeResearch(source *Source, claims []Claim) (*Source, []Claim, error)
 		}
 		for _, field := range []*string{&v.Publisher, &v.PublishedAt, &v.Version} {
 			*field = strings.TrimSpace(redact.String(*field))
-			if len(*field) > 512 || strings.ContainsAny(*field, "\x00\r\n") {
+			if len(*field) > MaxSourceMetadataBytes || strings.ContainsAny(*field, "\x00\r\n") {
 				return nil, nil, fmt.Errorf("source metadata must be one line of at most 512 bytes")
 			}
 		}
@@ -72,14 +82,14 @@ func NormalizeResearch(source *Source, claims []Claim) (*Source, []Claim, error)
 			c := &result[i].Citations[j]
 			c.Source = strings.TrimSpace(c.Source)
 			id := strings.TrimPrefix(c.Source, "narrative:")
-			if id == c.Source || id == "" || len(id) > 256 || strings.ContainsAny(id, "#\r\n\x00") || redact.String(id) != id {
+			if id == c.Source || id == "" || len(id) > MaxCitationIDBytes || strings.ContainsAny(id, "#\r\n\x00") || redact.String(id) != id {
 				return nil, nil, fmt.Errorf("citation source must be an exact narrative:ID observation")
 			}
-			if c.Relation != "supports" && c.Relation != "contradicts" && c.Relation != "context" {
+			if !citationRelations[c.Relation] {
 				return nil, nil, fmt.Errorf("citation relation must be supports, contradicts, or context")
 			}
 			c.Locator = strings.TrimSpace(redact.String(c.Locator))
-			if len(c.Locator) > 1024 || strings.ContainsAny(c.Locator, "\x00\r\n") {
+			if len(c.Locator) > MaxCitationLocatorBytes || strings.ContainsAny(c.Locator, "\x00\r\n") {
 				return nil, nil, fmt.Errorf("citation locator must be one line of at most 1024 bytes")
 			}
 			if seen[*c] {
