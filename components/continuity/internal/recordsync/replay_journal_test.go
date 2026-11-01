@@ -463,3 +463,32 @@ func TestSemanticJournalRecoverySideEffectRollsBackBeforeGraphReuseCommits(t *te
 		t.Fatalf("guarded retry did not reuse graph: %+v %v %v", result, err, metrics.Counts())
 	}
 }
+
+func TestSemanticJournalFullReplayReusesOnlyExactEnvelopeDecodes(t *testing.T) {
+	f := newReplayFixture(t)
+	f.arrive(t, "retained")
+	f.stage(t)
+	if result, err := f.replay(t); err != nil || result.ImportedRecords != 1 {
+		t.Fatalf("baseline: %+v %v", result, err)
+	}
+	// Lose disposable proofs without changing canonical records or archive bytes.
+	if _, err := f.store.DB.Exec(`DELETE FROM history_archive_status WHERE project_id=? AND consumer=?`, f.store.ProjectID, Hash(replayJournalKey(f.scope.Consumer))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB.Exec(`DELETE FROM history_index_valid_sets WHERE project_id=?`, f.store.ProjectID); err != nil {
+		t.Fatal(err)
+	}
+	var metrics *syncwork.WorkMetrics
+	f.ctx, metrics = syncwork.WithWorkMetrics(context.Background())
+	if result, err := f.replay(t); err != nil || result.ImportedRecords != 0 || result.Collisions != 0 {
+		t.Fatalf("full replay: %+v %v", result, err)
+	}
+	counts := metrics.Counts()
+	if counts["fallback_semantic_journal_full"] != 1 || counts["fallback_full_semantic_import"] != 1 || counts["snapshot_decode_cache_hits"] == 0 || counts["operational_full_loads"] == 0 {
+		t.Fatalf("replay skipped validation or failed to reuse exact bytes: %v", counts)
+	}
+	f.ctx, metrics = syncwork.WithWorkMetrics(context.Background())
+	if result, err := f.replay(t); err != nil || result.ImportedRecords != 0 || metrics.Counts()["semantic_journal_delta_cycles"] != 1 || metrics.Counts()["snapshot_decode_cache_hits"] != 0 {
+		t.Fatalf("delta replay: %+v %v %v", result, err, metrics.Counts())
+	}
+}

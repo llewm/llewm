@@ -261,6 +261,7 @@ func TestSnapshotEncodingReuseRejectsInvalidRetention(t *testing.T) {
 	for _, mutation := range []string{"envelope hash", "content hash", "payload", "noncanonical", "duplicate key", "unknown field", "lineage", "identity"} {
 		t.Run(mutation, func(t *testing.T) {
 			ctx, db, id := operationalProject(t, "invalid-retained")
+			ctx = WithEnvelopeDecodeCache(ctx)
 			lineage := "lineage:abababababababababababababababab"
 			if _, err := (Service{DB: db}).Initialize(ctx, id, lineage); err != nil {
 				t.Fatal(err)
@@ -275,6 +276,9 @@ func TestSnapshotEncodingReuseRejectsInvalidRetention(t *testing.T) {
 			spec := loaded.Records[0]
 			encoded, err := EncodeEnvelope(spec)
 			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := decodeSnapshotEnvelope(ctx, encoded.Bytes); err != nil {
 				t.Fatal(err)
 			}
 			body := string(encoded.Bytes)

@@ -42,9 +42,9 @@ func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID str
 		if err := rows.Scan(&kind, &id, &revision, &body); err != nil {
 			return nil, err
 		}
-		syncwork.RecordWork(ctx, "retained_envelopes_decoded", 1)
-		syncwork.RecordWork(ctx, "retained_envelope_bytes_decoded", int64(len(body)))
-		spec, encoded, err := decodeMemoryEnvelope([]byte(body))
+		syncwork.RecordWork(ctx, "retained_envelopes_checked", 1)
+		syncwork.RecordWork(ctx, "retained_envelope_bytes_checked", int64(len(body)))
+		spec, encoded, err := decodeSnapshotEnvelope(ctx, []byte(body))
 		if err != nil {
 			return nil, fmt.Errorf("retained portable envelope: %w", err)
 		}
@@ -99,9 +99,9 @@ func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID str
 		}
 		if original, ok := recovered[hash]; ok {
 			var encoded EncodedEnvelope
-			syncwork.RecordWork(ctx, "recovery_envelopes_decoded", 1)
-			syncwork.RecordWork(ctx, "recovery_envelope_bytes_decoded", int64(len(original.Bytes)))
-			specs[i], encoded, err = decodeMemoryEnvelope(original.Bytes)
+			syncwork.RecordWork(ctx, "recovery_envelopes_checked", 1)
+			syncwork.RecordWork(ctx, "recovery_envelope_bytes_checked", int64(len(original.Bytes)))
+			specs[i], encoded, err = decodeSnapshotEnvelope(ctx, original.Bytes)
 			if err != nil {
 				return nil, err
 			}

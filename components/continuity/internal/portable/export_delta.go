@@ -285,8 +285,8 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		var encoded EncodedEnvelope
 		if err == nil {
 			var retained EnvelopeSpec
-			syncwork.RecordWork(ctx, "retained_envelopes_decoded", 1)
-			syncwork.RecordWork(ctx, "retained_envelope_bytes_decoded", int64(len(body)))
+			syncwork.RecordWork(ctx, "retained_envelopes_checked", 1)
+			syncwork.RecordWork(ctx, "retained_envelope_bytes_checked", int64(len(body)))
 			retained, encoded, err = decodeMemoryEnvelope([]byte(body))
 			if err == nil && (retained.LineageID != identity.LineageID || retained.RecordType != spec.RecordType || retained.RecordID != spec.RecordID || retained.RecordRevision != spec.RecordRevision) {
 				err = fmt.Errorf("retained portable envelope identity mismatch")

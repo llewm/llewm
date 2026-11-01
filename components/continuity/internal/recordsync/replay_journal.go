@@ -50,6 +50,7 @@ func (s Index) ImportArchiveJournal(ctx context.Context, a Archive, scope Journa
 	if !errors.Is(err, errReplayJournalFull) {
 		return result, err
 	}
+	ctx = portable.WithEnvelopeDecodeCache(ctx)
 	syncwork.RecordWork(ctx, "fallback_semantic_journal_full", 1)
 	plan, err := materialize(ctx)
 	if err != nil {

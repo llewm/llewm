@@ -864,14 +864,23 @@ before assembly are not included. `snapshot_envelope_encodes/op` counts fresh
 encoding attempts of assembled specifications, and `snapshot_encoding_reuses/op`
 counts reuse of an encoding already validated in the same snapshot. Encoding
 performed while validating a retained or recovered envelope is covered by the
-decode counters instead.
+retained/recovery check counters instead.
 `export_writer_snapshot_reuses/op` counts complete export snapshots reused after
 the same-connection writer guard. `fallback_export_writer_retry/op` counts full
 reconstructions after that guard detects a commit or cannot prove equality.
-`retained_envelopes_decoded/op` and `retained_envelope_bytes_decoded/op` count
-retained overlay decode attempts and input bytes, including failed validation;
+`retained_envelopes_checked/op` and `retained_envelope_bytes_checked/op` count
+retained overlay validation requests and input bytes, including failed validation;
 the corresponding `recovery_*` counters cover recovery substitutions. These do
 not count every encoder/decoder elsewhere in transport or canonical importing.
+During complete semantic journal replay, a call-scoped cache can reuse the pure
+canonical/hash decode of an exact retained envelope. It is limited to 8,192
+entries and a conservative 64 MiB decoded-storage charge; a full cache uses the
+ordinary decoder. `snapshot_decode_cache_misses/op` counts successful fresh
+validations and `snapshot_decode_cache_hits/op` counts exact byte reuse. Every
+snapshot still rereads its operational and retained rows, checks identity and
+lineage, resolves recovery, and runs its normal semantic/transaction guards.
+Cached results own private buffers; callers receive independent copies. The
+cache is discarded after this replay call and provides no local-state proof.
 The context-scoped collector lives in `internal/syncwork`, shared by portable
 loading, archive validation and transport; it persists no measurements.
 `publication_envelopes_reused/op` counts staged publication entries whose exact

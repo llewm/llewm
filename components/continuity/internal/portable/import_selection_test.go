@@ -48,7 +48,7 @@ func verifyImportSelections(t *testing.T, ctx context.Context, db *sql.DB, proje
 			t.Fatalf("selected identity differs from full reader: %s %v", recordKey(object.Envelope), err)
 		}
 		counts := metrics.Counts()
-		if counts["operational_full_loads"] != 0 || counts["operational_selected_loads"] != 1 || counts["retained_envelopes_decoded"] != 1 {
+		if counts["operational_full_loads"] != 0 || counts["operational_selected_loads"] != 1 || counts["retained_envelopes_checked"] != 1 {
 			t.Fatalf("selection scanned unrelated retained history: %v", counts)
 		}
 	}
@@ -103,7 +103,7 @@ func TestImportSelectionPlansMatchCompleteSnapshot(t *testing.T) {
 				t.Fatalf("selected plan differs: %+v/%+v %v", got, want, err)
 			}
 			counts := work.Counts()
-			if len(snapshot) != 100 || counts["operational_full_loads"] != 0 || counts["retained_envelopes_decoded"] > 1 || counts["operational_specs_loaded"] > 1 {
+			if len(snapshot) != 100 || counts["operational_full_loads"] != 0 || counts["retained_envelopes_checked"] > 1 || counts["operational_specs_loaded"] > 1 {
 				t.Fatalf("unexpected selection work: snapshot=%d %v", len(snapshot), counts)
 			}
 		})

@@ -107,26 +107,6 @@ func loadTrackPlan(ctx context.Context, source queryer, projectID, id string, re
 			rows.Close()
 			return value, err
 		}
-		dependencyRows, err := source.QueryContext(ctx, `SELECT depends_on_item_id FROM track_plan_item_dependencies WHERE project_id=? AND plan_id=? AND plan_revision=? AND item_id=? ORDER BY depends_on_item_id`, projectID, id, revision, item.ID)
-		if err != nil {
-			rows.Close()
-			return value, err
-		}
-		for dependencyRows.Next() {
-			var dependency string
-			if err := dependencyRows.Scan(&dependency); err != nil {
-				dependencyRows.Close()
-				rows.Close()
-				return value, err
-			}
-			item.DependsOn = append(item.DependsOn, dependency)
-		}
-		if err := dependencyRows.Err(); err != nil {
-			dependencyRows.Close()
-			rows.Close()
-			return value, err
-		}
-		dependencyRows.Close()
 		value.Items = append(value.Items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -134,6 +114,32 @@ func loadTrackPlan(ctx context.Context, source queryer, projectID, id string, re
 		return value, err
 	}
 	rows.Close()
+	// Load a revision's dependency edges once. Keep the same per-item lexical
+	// ordering and ignore edges for absent items, just as the individual queries
+	// did. The caller's snapshot and all payload validation remain unchanged.
+	dependencyRows, err := source.QueryContext(ctx, `SELECT item_id,depends_on_item_id FROM track_plan_item_dependencies WHERE project_id=? AND plan_id=? AND plan_revision=? ORDER BY item_id,depends_on_item_id`, projectID, id, revision)
+	if err != nil {
+		return value, err
+	}
+	dependencies := make(map[string][]string)
+	for dependencyRows.Next() {
+		var itemID, dependency string
+		if err := dependencyRows.Scan(&itemID, &dependency); err != nil {
+			dependencyRows.Close()
+			return value, err
+		}
+		dependencies[itemID] = append(dependencies[itemID], dependency)
+	}
+	if err := dependencyRows.Err(); err != nil {
+		dependencyRows.Close()
+		return value, err
+	}
+	if err := dependencyRows.Close(); err != nil {
+		return value, err
+	}
+	for i := range value.Items {
+		value.Items[i].DependsOn = dependencies[value.Items[i].ID]
+	}
 	itemRows, err := source.QueryContext(ctx, `SELECT item_id FROM track_plan_work_items WHERE project_id=? AND plan_id=? AND plan_revision=? ORDER BY item_id`, projectID, id, revision)
 	if err != nil {
 		return value, err

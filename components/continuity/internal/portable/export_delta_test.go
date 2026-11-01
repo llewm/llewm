@@ -126,7 +126,7 @@ func TestMemoryDeltaMatchesFullExportAndConsumesRetention(t *testing.T) {
 		if deltaCounts["operational_delta_loads"] != 1 || deltaCounts["operational_full_loads"] != 0 || deltaCounts["operational_specs_loaded"] != int64(len(export.Envelopes)) || deltaCounts["snapshot_envelope_encodes"] == 0 {
 			t.Fatalf("missing selected export work: %v", deltaCounts)
 		}
-		if fullCounts["operational_full_loads"] != 1 || fullCounts["operational_specs_loaded"] != int64(len(full.Envelopes)) || fullCounts["snapshot_encoding_reuses"] != int64(len(full.Envelopes)) || fullCounts["retained_envelopes_decoded"] != int64(len(full.Envelopes)) || fullCounts["retained_envelope_bytes_decoded"] == 0 {
+		if fullCounts["operational_full_loads"] != 1 || fullCounts["operational_specs_loaded"] != int64(len(full.Envelopes)) || fullCounts["snapshot_encoding_reuses"] != int64(len(full.Envelopes)) || fullCounts["retained_envelopes_checked"] != int64(len(full.Envelopes)) || fullCounts["retained_envelope_bytes_checked"] == 0 {
 			t.Fatalf("missing complete snapshot work: %v", fullCounts)
 		}
 		if len(full.Envelopes) != len(materialized) {
