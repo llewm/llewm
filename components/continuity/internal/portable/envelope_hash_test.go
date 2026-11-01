@@ -47,6 +47,7 @@ func FuzzEnvelopeHashMatchesTwoPassEncoding(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		assertTransportReference(t, encoded.Bytes)
 		if reference.EnvelopeSHA256 != encoded.Envelope.EnvelopeSHA256 || !bytes.Equal(want, encoded.Bytes) {
 			t.Fatalf("single-pass hash/bytes differ from two-pass reference")
 		}

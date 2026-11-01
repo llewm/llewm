@@ -872,6 +872,13 @@ reconstructions after that guard detects a commit or cannot prove equality.
 retained overlay validation requests and input bytes, including failed validation;
 the corresponding `recovery_*` counters cover recovery substitutions. These do
 not count every encoder/decoder elsewhere in transport or canonical importing.
+Transport decoding still fully canonicalizes untrusted payload and index JSON,
+validates routing metadata and reference order, and checks both hashes. It then
+reconstructs the fixed canonical envelope layout once, omits the outer hash member
+from the hash input, and compares the result with the received bytes. Duplicate
+fields, alternate escapes and unsupported integer representations remain invalid;
+unknown record schemas retain their existing transport-only handling. The generic
+canonical encoder remains the independent test reference.
 During complete semantic journal replay, a call-scoped cache can reuse the pure
 canonical/hash decode of an exact retained envelope. It is limited to 8,192
 entries and a conservative 64 MiB decoded-storage charge; a full cache uses the

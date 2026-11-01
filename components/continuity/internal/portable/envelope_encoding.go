@@ -2,12 +2,14 @@ package portable
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
 )
 
-// marshalCanonicalEnvelope writes the fixed envelope layout after EncodeEnvelope
+// marshalCanonicalEnvelope writes the fixed envelope layout after its caller
 // has canonicalized and validated its payload, index and references. It is not a
 // reader or a general canonicalizer: untrusted nested JSON must still go through
 // CanonicalizeJSON. Keep the generic encoder as the independent wire reference.
@@ -21,8 +23,10 @@ func marshalCanonicalEnvelope(e Envelope) ([]byte, error) {
 	if len(intermediate) > MaxCanonicalBytes {
 		return nil, fmt.Errorf("canonical JSON exceeds %d bytes", MaxCanonicalBytes)
 	}
-	if int64(e.RecordRevision) > 1<<53-1 {
-		return nil, fmt.Errorf("integer %d exceeds interoperable range", e.RecordRevision)
+	for _, value := range []int{e.FormatVersion, e.RecordRevision, e.RecordSchemaVersion} {
+		if int64(value) < -(1<<53-1) || int64(value) > 1<<53-1 {
+			return nil, fmt.Errorf("integer %d exceeds interoperable range", value)
+		}
 	}
 	var output bytes.Buffer
 	output.Grow(len(intermediate))
@@ -70,4 +74,19 @@ func marshalCanonicalEnvelope(e Envelope) ([]byte, error) {
 	}
 	output.WriteByte('}')
 	return output.Bytes(), nil
+}
+
+// hashCanonicalEnvelope removes the hash member from a fixed canonical layout.
+// It must never be used on untrusted wire bytes before canonical reconstruction.
+func hashCanonicalEnvelope(encoded []byte, value string) (string, int, error) {
+	const prefix = `,"envelope_sha256":"`
+	member := []byte(prefix + value + `"`)
+	start := bytes.Index(encoded, member)
+	if start < 0 {
+		return "", 0, fmt.Errorf("canonical envelope hash member is missing")
+	}
+	hash := sha256.New()
+	hash.Write(encoded[:start])
+	hash.Write(encoded[start+len(member):])
+	return hex.EncodeToString(hash.Sum(nil)), start + len(prefix), nil
 }

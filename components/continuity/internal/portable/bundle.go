@@ -219,22 +219,17 @@ func EncodeEnvelope(spec EnvelopeSpec) (EncodedEnvelope, error) {
 	// checks run once. Removing this member yields the canonical hash input:
 	// authority and content_sha256 precede it; all nested objects follow it.
 	const placeholder = "0000000000000000000000000000000000000000000000000000000000000000"
-	const hashMember = `,"envelope_sha256":"` + placeholder + `"`
 	value.EnvelopeSHA256 = placeholder
 	encoded, err := marshalCanonicalEnvelope(value)
 	if err != nil {
 		return EncodedEnvelope{}, err
 	}
-	memberStart := bytes.Index(encoded, []byte(hashMember))
-	if memberStart < 0 {
-		return EncodedEnvelope{}, fmt.Errorf("canonical envelope hash member is missing")
+	hash, hashStart, err := hashCanonicalEnvelope(encoded, placeholder)
+	if err != nil {
+		return EncodedEnvelope{}, err
 	}
-	hash := sha256.New()
-	hash.Write(encoded[:memberStart])
-	hash.Write(encoded[memberStart+len(hashMember):])
-	value.EnvelopeSHA256 = hex.EncodeToString(hash.Sum(nil))
-	hashStart := memberStart + len(`,"envelope_sha256":"`)
-	copy(encoded[hashStart:hashStart+len(placeholder)], value.EnvelopeSHA256)
+	value.EnvelopeSHA256 = hash
+	copy(encoded[hashStart:hashStart+len(placeholder)], hash)
 	return EncodedEnvelope{Envelope: value, Bytes: encoded}, nil
 }
 
@@ -417,51 +412,62 @@ func validateEnvelopeFormat(envelope Envelope, lineageID, format string, version
 	return validateEnvelopeStructure(envelope, lineageID, format, version, true)
 }
 
-func validateEnvelopeStructure(envelope Envelope, lineageID, format string, version int, requireSchema bool) error {
+// canonicalEnvelopeFields checks structure and payload integrity, returning
+// canonical nested JSON. Callers must independently verify the outer hash.
+func canonicalEnvelopeFields(envelope Envelope, lineageID, format string, version int, requireSchema bool) (Envelope, error) {
 	if envelope.Format != format || envelope.FormatVersion != version || envelope.LineageID != lineageID || !lineagePattern.MatchString(lineageID) {
-		return fmt.Errorf("unsupported record format, version, or lineage")
+		return Envelope{}, fmt.Errorf("unsupported record format, version, or lineage")
 	}
 	// Retired types remain valid historical observations during explicit
 	// transport conversion, although ordinary current-format imports skip them.
 	retiredConversion := version == 2 && RetiredRecordType(envelope.RecordType) && envelope.RecordSchemaVersion == 1
 	if requireSchema && !supportedRecordSchema(envelope.RecordType, envelope.RecordSchemaVersion) && !retiredConversion {
-		return fmt.Errorf("unsupported record schema %s version %d", envelope.RecordType, envelope.RecordSchemaVersion)
+		return Envelope{}, fmt.Errorf("unsupported record schema %s version %d", envelope.RecordType, envelope.RecordSchemaVersion)
 	}
 	if envelope.RecordID == "" || envelope.RecordRevision < 0 || envelope.Authority == "" || !isHash(envelope.ContentSHA256) || !isHash(envelope.EnvelopeSHA256) {
-		return fmt.Errorf("record has missing or invalid required fields")
+		return Envelope{}, fmt.Errorf("record has missing or invalid required fields")
 	}
 	if err := validateCanonicalTime(envelope.RecordedAt); err != nil {
-		return fmt.Errorf("recorded time: %w", err)
+		return Envelope{}, fmt.Errorf("recorded time: %w", err)
 	}
 	payload, err := canonicalObject("payload", envelope.Payload)
 	if err != nil {
-		return fmt.Errorf("payload validation failed: %w", err)
+		return Envelope{}, fmt.Errorf("payload validation failed: %w", err)
 	}
 	if len(payload) > MaxPayloadBytes {
-		return fmt.Errorf("payload exceeds %d bytes", MaxPayloadBytes)
+		return Envelope{}, fmt.Errorf("payload exceeds %d bytes", MaxPayloadBytes)
 	}
 	if envelope.ContentSHA256 != hashHex(payload) {
-		return fmt.Errorf("payload hash mismatch")
+		return Envelope{}, fmt.Errorf("payload hash mismatch")
 	}
+	envelope.Payload = payload
 	if len(envelope.Index) > 0 {
 		index, err := canonicalObject("index", envelope.Index)
 		if err != nil {
-			return fmt.Errorf("index validation failed: %w", err)
+			return Envelope{}, fmt.Errorf("index validation failed: %w", err)
 		}
 		if len(index) > MaxIndexBytes {
-			return fmt.Errorf("index exceeds %d bytes", MaxIndexBytes)
+			return Envelope{}, fmt.Errorf("index exceeds %d bytes", MaxIndexBytes)
 		}
 		if err := validateIndex(index); err != nil {
-			return err
+			return Envelope{}, err
 		}
+		envelope.Index = index
 	}
 	for index, reference := range envelope.Refs {
 		if reference.Kind == "" || reference.ID == "" {
-			return fmt.Errorf("reference kind and ID are required")
+			return Envelope{}, fmt.Errorf("reference kind and ID are required")
 		}
 		if index > 0 && !referenceLess(envelope.Refs[index-1], reference) {
-			return fmt.Errorf("references are duplicate or out of order")
+			return Envelope{}, fmt.Errorf("references are duplicate or out of order")
 		}
+	}
+	return envelope, nil
+}
+
+func validateEnvelopeStructure(envelope Envelope, lineageID, format string, version int, requireSchema bool) error {
+	if _, err := canonicalEnvelopeFields(envelope, lineageID, format, version, requireSchema); err != nil {
+		return err
 	}
 	want := envelope.EnvelopeSHA256
 	envelope.EnvelopeSHA256 = ""

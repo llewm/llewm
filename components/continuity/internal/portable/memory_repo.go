@@ -459,11 +459,19 @@ func DecodeTransportEnvelope(body []byte) (EncodedEnvelope, error) {
 	if !transportRecordTypePattern.MatchString(e.RecordType) || e.RecordSchemaVersion < 1 {
 		return EncodedEnvelope{}, fmt.Errorf("invalid transport record type/schema")
 	}
-	if err := validateEnvelopeStructure(e, e.LineageID, "llewm-portable-record", PortableFormatVersion, false); err != nil {
+	validated, err := canonicalEnvelopeFields(e, e.LineageID, "llewm-portable-record", PortableFormatVersion, false)
+	if err != nil {
 		return EncodedEnvelope{}, err
 	}
-	canonical, err := canonicalMarshal(e)
-	if err != nil || !bytes.Equal(canonical, line) {
+	canonical, err := marshalCanonicalEnvelope(validated)
+	if err != nil {
+		return EncodedEnvelope{}, fmt.Errorf("envelope hash mismatch")
+	}
+	hash, _, err := hashCanonicalEnvelope(canonical, e.EnvelopeSHA256)
+	if err != nil || hash != e.EnvelopeSHA256 {
+		return EncodedEnvelope{}, fmt.Errorf("envelope hash mismatch")
+	}
+	if !bytes.Equal(canonical, line) {
 		return EncodedEnvelope{}, fmt.Errorf("noncanonical transport envelope")
 	}
 	return EncodedEnvelope{Envelope: e, Bytes: canonical}, nil
