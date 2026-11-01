@@ -540,6 +540,20 @@ root-relative file access confines local I/O. Cached node reads, path enumeratio
 and complete content validation still visit old history. This reduces repeated
 Git discovery; it does not establish fixed-delta scaling or replace full recovery.
 
+Lease refreshes retain a disposable raw-commit receipt for each fetched scope
+tip in device-local archive status. Every reuse verifies the exact Git hashes,
+commit structure, empty tree, event schema, parent chain and scope/ref binding;
+decoded events alone are never trusted. Receipts contain at most 20 commits and
+64 KiB of serialized status. Missing, damaged, changed or oversized receipts
+fall back to Git. Cache write failures leave synchronization functional. One
+lazy `cat-file --batch` process serves all cache misses in a locked refresh,
+with bounded headers and object bodies, and is closed and reaped on exit.
+Scopes share the verified empty-tree read. The fetch still establishes ref
+freshness, and writes still compare-and-swap the exact remote tip. History and
+lease fetches remain separate: lease failures are advisory sync notes, whereas
+history-fetch failures stop history processing; independent lease operations
+also require their own fresh read.
+
 Folder publication writes bounded, content-addressed arrival segments after
 publishing its authorized blocks. The validated catalog from discovery supplies
 existing membership; only newly observed block identities enter new segments,

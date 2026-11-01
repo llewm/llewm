@@ -19,6 +19,7 @@ import (
 // an index or working tree and supplies the normal memory-clone route.
 // Its immutable tree merge never invokes text merge, hooks or repository code.
 type objectTransport struct {
+	commitBatch  *gitCommitBatch
 	repo         git
 	trees        blockTreeDiscovery
 	writtenTrees map[string]bool

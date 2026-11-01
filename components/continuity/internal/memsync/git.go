@@ -57,19 +57,7 @@ func (g git) run(ctx context.Context, args ...string) (string, error) {
 }
 
 func (g git) execOut(ctx context.Context, stdin io.Reader, stdout io.Writer, args []string) error {
-	base := []string{"--no-replace-objects", "-C", g.Dir}
-	if g.WorkTree != "" {
-		base = append(base, "--work-tree="+g.WorkTree)
-	}
-	base = append(base, g.config()...)
-	command := gitenv.Command(ctx, append(base, args...)...)
-	if !g.Interactive || g.NoPrompt {
-		// A separate process group cannot read the terminal, so a Git that may
-		// prompt keeps the default.
-		stopGently(command)
-	}
-	command.WaitDelay = 3 * time.Second
-	command.Env = g.env()
+	command := g.command(ctx, args)
 	command.Stdin = stdin
 	var stderr bytes.Buffer
 	command.Stdout, command.Stderr = stdout, &stderr
@@ -84,6 +72,25 @@ func (g git) execOut(ctx context.Context, stdin io.Reader, stdout io.Writer, arg
 		return &gitError{Args: args, Detail: detail, Err: err}
 	}
 	return nil
+}
+
+// command applies the same environment, process cleanup and no-execution
+// settings to one-shot and bounded streaming object readers.
+func (g git) command(ctx context.Context, args []string) *exec.Cmd {
+	base := []string{"--no-replace-objects", "-C", g.Dir}
+	if g.WorkTree != "" {
+		base = append(base, "--work-tree="+g.WorkTree)
+	}
+	base = append(base, g.config()...)
+	command := gitenv.Command(ctx, append(base, args...)...)
+	if !g.Interactive || g.NoPrompt {
+		// A separate process group cannot read the terminal, so a Git that may
+		// prompt keeps the default.
+		stopGently(command)
+	}
+	command.WaitDelay = 3 * time.Second
+	command.Env = g.env()
+	return command
 }
 
 // config is the -c options every command runs with.

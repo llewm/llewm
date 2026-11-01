@@ -16,7 +16,9 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // Cross-machine leases live in the memory repository as one ref per scope,
@@ -41,7 +43,8 @@ type leaseRefs struct {
 	clone  string
 	prefix string
 	// locked means the caller already holds the clone's sync lock.
-	locked bool
+	locked  bool
+	archive *recordsync.Archive
 }
 
 // LeaseRemote returns the cross-machine lease store for the syncer's project
@@ -87,7 +90,7 @@ func (s Syncer) leaseRefs(ctx context.Context, repo git, locked bool) (leaseRefs
 	if !lineageHex.MatchString(lineage) {
 		return leaseRefs{}, fmt.Errorf("lineage %q cannot name a lease ref", identity.LineageID)
 	}
-	return leaseRefs{repo: repo, remote: s.Remote, clone: s.Clone, prefix: "refs/continuity/leases/" + lineage + "/", locked: locked}, nil
+	return leaseRefs{repo: repo, remote: s.Remote, clone: s.Clone, prefix: "refs/continuity/leases/" + lineage + "/", locked: locked, archive: &recordsync.Archive{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID}}, nil
 }
 
 // repository opens the memory clone for Git commands: it must exist, point at
@@ -157,12 +160,15 @@ func (r leaseRefs) Scopes(ctx context.Context) (map[string]lease.RemoteScope, er
 		return nil, err
 	}
 	scopes := map[string]lease.RemoteScope{}
+	batch := &gitCommitBatch{repo: r.repo}
+	defer batch.Close()
+	transport := &objectTransport{repo: r.repo, commitBatch: batch}
 	for _, line := range strings.Split(listing, "\n") {
 		version, ref, ok := strings.Cut(strings.TrimSpace(line), " ")
 		if !ok {
 			continue
 		}
-		events, err := r.events(local, version)
+		events, err := r.cachedEvents(local, transport, ref, version)
 		if err != nil {
 			return nil, fmt.Errorf("read lease ref %s: %w", ref, err)
 		}
@@ -174,12 +180,42 @@ func (r leaseRefs) Scopes(ctx context.Context) (map[string]lease.RemoteScope, er
 	return scopes, nil
 }
 
-// events reads up to leaseHistory events ending at tip, newest first.
+// events is the uncached reader, also used to qualify malformed histories.
 func (r leaseRefs) events(ctx context.Context, tip string) ([]lease.RemoteEvent, error) {
-	transport := &objectTransport{repo: r.repo}
+	return readLeaseHistory(ctx, &objectTransport{repo: r.repo}, tip, nil, nil)
+}
+
+// readLeaseHistory always verifies exact commit bytes, the empty tree, event
+// schema and scope continuity. A receipt must contain the entire selected chain;
+// it cannot hide a missing parent by truncating the cached array.
+func readLeaseHistory(ctx context.Context, transport *objectTransport, tip string, cached [][]byte, capture *[][]byte) ([]lease.RemoteEvent, error) {
 	var events []lease.RemoteEvent
 	for tip != "" && len(events) < leaseHistory {
-		commit, err := transport.readCommit(ctx, tip)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var body []byte
+		var err error
+		if cached != nil {
+			if len(events) >= len(cached) {
+				return nil, fmt.Errorf("incomplete lease history receipt")
+			}
+			body = cached[len(events)]
+		} else {
+			if !validGitOID(tip) {
+				return nil, fmt.Errorf("invalid lease commit identity")
+			}
+			syncwork.RecordWork(ctx, "lease_history_git_reads", 1)
+			if transport.commitBatch != nil {
+				body, err = transport.commitBatch.Read(ctx, tip)
+			} else {
+				body, err = readGitBytes(ctx, transport.repo, maxTransportCommitBytes, "cat-file", "commit", tip)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		commit, err := decodeTransportCommit(tip, body)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +223,7 @@ func (r leaseRefs) events(ctx context.Context, tip string) ([]lease.RemoteEvent,
 		if err != nil || commit.Tree != empty || len(commit.Parents) > 1 {
 			return nil, fmt.Errorf("lease commit has a nonempty tree or multiple parents")
 		}
-		if _, err := transport.trees.read(ctx, r.repo, empty); err != nil {
+		if _, err := transport.trees.read(ctx, transport.repo, empty); err != nil {
 			return nil, err
 		}
 		lines := strings.Split(strings.TrimSpace(commit.Message), "\n")
@@ -207,12 +243,18 @@ func (r leaseRefs) events(ctx context.Context, tip string) ([]lease.RemoteEvent,
 		if len(events) != 0 && event.Scope() != events[0].Scope() {
 			return nil, fmt.Errorf("lease commit chain changes scope")
 		}
+		if capture != nil {
+			*capture = append(*capture, body)
+		}
 		event.Version = tip
 		events = append(events, event)
 		tip = ""
 		if len(commit.Parents) == 1 {
 			tip = commit.Parents[0]
 		}
+	}
+	if cached != nil && len(cached) != len(events) {
+		return nil, fmt.Errorf("excess lease history receipt entries")
 	}
 	return events, nil
 }
@@ -280,5 +322,3 @@ func (r leaseRefs) Write(ctx context.Context, expected string, event lease.Remot
 	}
 	return commit, nil
 }
-
-// output runs Git with input on standard input and returns its output.

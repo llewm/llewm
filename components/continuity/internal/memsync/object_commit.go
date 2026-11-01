@@ -163,6 +163,20 @@ func (t *objectTransport) readCommit(ctx context.Context, oid string) (transport
 	if err != nil {
 		return commit, err
 	}
+	commit, err = decodeTransportCommit(oid, body)
+	if err == nil {
+		syncwork.RecordWork(ctx, "transport_commits_read", 1)
+	}
+	return commit, err
+}
+
+// decodeTransportCommit accepts only bounded, exact hash-verified raw objects.
+// It is shared by Git reads and disposable lease-history receipts.
+func decodeTransportCommit(oid string, body []byte) (transportCommit, error) {
+	var commit transportCommit
+	if !validGitOID(oid) || len(body) > maxTransportCommitBytes {
+		return commit, fmt.Errorf("invalid transport commit identity or size")
+	}
 	actual, err := gitObjectIdentity("commit", body, len(oid))
 	if err != nil || actual != oid {
 		return commit, fmt.Errorf("Git commit content identity mismatch")
@@ -215,7 +229,6 @@ func (t *objectTransport) readCommit(ctx context.Context, oid string) (transport
 		return commit, fmt.Errorf("incomplete transport commit")
 	}
 	commit.Message = string(message)
-	syncwork.RecordWork(ctx, "transport_commits_read", 1)
 	return commit, nil
 }
 
