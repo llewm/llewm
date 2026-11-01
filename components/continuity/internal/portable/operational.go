@@ -649,7 +649,14 @@ func planValidatedOperationalImport(ctx context.Context, source queryer, project
 		return ImportPlan{}, err
 	}
 	validated := make(snapshotEncodings)
-	localSpecs, _, err := loadOperationalSpecs(ctx, source, projectID, projectRoot, identity.LineageID, true, validated)
+	var localSpecs []EnvelopeSpec
+	selected := false
+	if snapshot == nil {
+		localSpecs, selected, err = loadImportSelection(ctx, source, projectID, projectRoot, identity.LineageID, bundle.Records, validated)
+	}
+	if err == nil && !selected {
+		localSpecs, _, err = loadOperationalSpecs(ctx, source, projectID, projectRoot, identity.LineageID, true, validated)
+	}
 	if err != nil {
 		return ImportPlan{}, err
 	}

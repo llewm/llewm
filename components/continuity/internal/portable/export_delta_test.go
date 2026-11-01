@@ -132,6 +132,7 @@ func TestMemoryDeltaMatchesFullExportAndConsumesRetention(t *testing.T) {
 		if len(full.Envelopes) != len(materialized) {
 			t.Fatalf("missing delta records: full=%d materialized=%d", len(full.Envelopes), len(materialized))
 		}
+		verifyImportSelections(t, ctx, db, project, full.Envelopes)
 		for _, e := range full.Envelopes {
 			if !bytes.Equal(e.Bytes, materialized[recordKey(e.Envelope)]) {
 				t.Fatalf("reference mismatch: %s", recordKey(e.Envelope))
@@ -193,7 +194,7 @@ func TestExportDeltaSelectionUsesBoundIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A bound ID containing SQL punctuation must never widen the selection.
-	source := &deltaSource{queryer: db, keys: map[string][][]any{"decision_records": {{"x' OR 1=1 --"}}}}
+	source := &recordSelectionSource{queryer: db, keys: map[string][][]any{"decision_records": {{"x' OR 1=1 --"}}}}
 	rows, err := exportRows(ctx, source, "decision_records", `SELECT id FROM decision_records WHERE project_id=? ORDER BY id`, project)
 	if err != nil {
 		t.Fatal(err)

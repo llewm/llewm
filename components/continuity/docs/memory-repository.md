@@ -428,6 +428,13 @@ This membership never grants transport provenance or relay permission. Normal
 cycles validate catalog block frames; archive audits independently verify durable
 bytes. Damaged inventories follow the existing repair path.
 
+Canonical import planning compares small bundles against selected operational
+identities, using the same primary readers as journal export and validating
+their retained wire bytes. This comparison does not certify omitted local state.
+Callers requesting a complete snapshot, recovery graphs, unsupported selections
+and large bundles retain complete reads. Transaction reuse and apply-time
+dependency checks still protect the selected plan against concurrent writes.
+
 Migration 089 stores one immutable envelope body and reference set per project
 and envelope hash. Blocks contain only membership rows; overlapping blocks share
 content. Removing the last membership collects its body and references, while

@@ -26,7 +26,7 @@ func (validated snapshotEncodings) encode(ctx context.Context, spec EnvelopeSpec
 // these bytes avoids applying a destination host's redaction to imported prose,
 // and keeps local exports stable after a project move. It never creates records.
 func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID string, specs []EnvelopeSpec, validated snapshotEncodings) ([]EnvelopeSpec, error) {
-	rows, err := source.QueryContext(ctx, `SELECT record_type,record_id,record_revision,envelope_json FROM portable_envelopes WHERE project_id=?`, projectID)
+	rows, err := exportRetainedRows(ctx, source, `SELECT record_type,record_id,record_revision,envelope_json FROM portable_envelopes WHERE project_id=?`, projectID)
 	if err != nil {
 		return nil, err
 	}

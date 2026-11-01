@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
@@ -19,12 +20,18 @@ func TestAlreadyPresentImportSharesValidatedSnapshot(t *testing.T) {
 	if _, err := (worknarrative.Service{DB: db}).Append(ctx, worknarrative.Record{ID: "snapshot", ProjectID: project, Title: "Snapshot", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Observation", Authority: "caller_asserted"}}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: "omitted-from-bundle", Title: "Decision", Rationale: "Preserve the complete callback snapshot", Disposition: "accepted", Actor: "owner", ActorType: "human", Authority: "caller_asserted"}); err != nil {
+		t.Fatal(err)
+	}
 	export, err := EncodeMemoryExport(ctx, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var specs []EnvelopeSpec
 	for _, envelope := range export.Envelopes {
+		if envelope.Envelope.RecordType != "work_narrative" {
+			continue
+		}
 		spec, err := DecodeMemoryEnvelope(envelope.Bytes)
 		if err != nil {
 			t.Fatal(err)

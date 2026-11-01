@@ -15,9 +15,10 @@ import (
 // A selection applies only to explicitly marked primary export reads. Exact
 // child/dependency reads keep their ordinary semantics. Unknown journal tables,
 // updates and deletions require the complete exporter, not a guessed closure.
-type deltaSource struct {
+type recordSelectionSource struct {
 	queryer
-	keys map[string][][]any
+	keys         map[string][][]any
+	retainedKeys []Envelope
 }
 
 // primaryExportSource opts a package-owned single-table export reader into the
@@ -30,7 +31,7 @@ type primaryExportSource struct {
 }
 
 func selectedExportSource(source queryer, tables ...string) queryer {
-	if _, selected := source.(*deltaSource); !selected {
+	if _, selected := source.(*recordSelectionSource); !selected {
 		return source
 	}
 	return &primaryExportSource{queryer: source, tables: tables}
@@ -68,7 +69,7 @@ var deltaColumns = map[string][]string{
 }
 
 func exportRows(ctx context.Context, source queryer, table, query, project string) (*sql.Rows, error) {
-	selection, ok := source.(*deltaSource)
+	selection, ok := source.(*recordSelectionSource)
 	if !ok {
 		return source.QueryContext(ctx, query, project)
 	}
@@ -103,7 +104,20 @@ func exportRows(ctx context.Context, source queryer, table, query, project strin
 }
 
 func exportRetainedRows(ctx context.Context, source queryer, query, project string) (*sql.Rows, error) {
-	if _, selected := source.(*deltaSource); selected {
+	if selected, ok := source.(*recordSelectionSource); ok {
+		if selected.retainedKeys != nil {
+			var terms []string
+			args := []any{project}
+			for _, identity := range selected.retainedKeys {
+				terms = append(terms, "(record_type=? AND record_id=? AND record_revision=?)")
+				args = append(args, identity.RecordType, identity.RecordID, identity.RecordRevision)
+			}
+			predicate := "0"
+			if len(terms) != 0 {
+				predicate = strings.Join(terms, " OR ")
+			}
+			return selected.queryer.QueryContext(ctx, query+" AND ("+predicate+")", args...)
+		}
 		// Delta loaders reconstruct only selected operational rows. Overlay
 		// retained bytes by exact identity afterwards, without scanning history.
 		query += " AND 0"
@@ -235,28 +249,8 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 	if err = tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&result.DatabaseSchema); err != nil {
 		return MemoryExport{}, expected, false, err
 	}
-	source := &deltaSource{queryer: tx, keys: keys}
-	var specs []EnvelopeSpec
-	for _, load := range []func(context.Context, queryer, string, string, string) ([]EnvelopeSpec, error){loadCheckpointSpecs, loadLedgerSpecs, loadTrackPlanSpecs, loadProcedureSpecs, loadReviewSpecs, loadReleaseSpecs, loadLeaseSpecs, loadResourceSpecs, loadPinSpecs, loadCoverageCellSpecs, loadForkResolutionSpecs} {
-		values, e := load(ctx, source, expected.Project, root, identity.LineageID)
-		if e != nil {
-			return MemoryExport{}, expected, false, e
-		}
-		specs = append(specs, values...)
-	}
-	for _, load := range []func(context.Context, queryer, string, string) ([]EnvelopeSpec, error){loadCheckpointContextSpecs, loadCheckpointBranchesSpecs} {
-		values, e := load(ctx, source, expected.Project, identity.LineageID)
-		if e != nil {
-			return MemoryExport{}, expected, false, e
-		}
-		specs = append(specs, values...)
-	}
-	roadmap, invocations, err := loadRoadmapSpecs(ctx, source, expected.Project, root, identity.LineageID)
-	if err != nil {
-		return MemoryExport{}, expected, false, err
-	}
-	specs = append(specs, roadmap...)
-	narratives, missing, err := loadNarrativeAndInvocationSpecs(ctx, source, expected.Project, root, identity.LineageID, invocations, false)
+	source := &recordSelectionSource{queryer: tx, keys: keys}
+	specs, missing, err := loadSelectedOperationalSpecs(ctx, source, expected.Project, root, identity.LineageID, nil)
 	if err != nil {
 		return MemoryExport{}, expected, false, err
 	}
@@ -264,7 +258,6 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		syncwork.RecordWork(ctx, "fallback_delta_missing_actors", 1)
 		return MemoryExport{}, expected, false, nil
 	}
-	specs = append(specs, narratives...)
 	syncwork.RecordWork(ctx, "operational_delta_loads", 1)
 	syncwork.RecordWork(ctx, "operational_specs_loaded", int64(len(specs)))
 	for _, spec := range specs {
@@ -296,4 +289,40 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		return MemoryExport{}, expected, false, err
 	}
 	return result, current, true, tx.Commit()
+}
+
+// loadSelectedOperationalSpecs shares the opted-in primary readers between
+// journal export and identity-scoped import. Child and dependency reads retain
+// their ordinary semantics. Usage summaries and recovery graphs require their
+// complete readers and are deliberately excluded from this selection.
+func loadSelectedOperationalSpecs(ctx context.Context, source *recordSelectionSource, project, root, lineage string, actors map[string]struct{}) ([]EnvelopeSpec, []Reference, error) {
+	var specs []EnvelopeSpec
+	for _, load := range []func(context.Context, queryer, string, string, string) ([]EnvelopeSpec, error){loadCheckpointSpecs, loadLedgerSpecs, loadTrackPlanSpecs, loadProcedureSpecs, loadReviewSpecs, loadReleaseSpecs, loadLeaseSpecs, loadResourceSpecs, loadPinSpecs, loadCoverageCellSpecs, loadForkResolutionSpecs} {
+		values, e := load(ctx, source, project, root, lineage)
+		if e != nil {
+			return nil, nil, e
+		}
+		specs = append(specs, values...)
+	}
+	for _, load := range []func(context.Context, queryer, string, string) ([]EnvelopeSpec, error){loadCheckpointContextSpecs, loadCheckpointBranchesSpecs} {
+		values, e := load(ctx, source, project, lineage)
+		if e != nil {
+			return nil, nil, e
+		}
+		specs = append(specs, values...)
+	}
+	roadmap, invocations, err := loadRoadmapSpecs(ctx, source, project, root, lineage)
+	if err != nil {
+		return nil, nil, err
+	}
+	specs = append(specs, roadmap...)
+	for id := range actors {
+		invocations[id] = struct{}{}
+	}
+	narratives, missing, err := loadNarrativeAndInvocationSpecs(ctx, source, project, root, lineage, invocations, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	specs = append(specs, narratives...)
+	return specs, missing, nil
 }
