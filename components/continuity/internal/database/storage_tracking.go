@@ -9,14 +9,14 @@ import (
 	"sync"
 )
 
-// These two journal migrations use plain BEGIN/END trigger bodies, with no
-// nested CASE/END. Comparing the installed definitions with their embedded SQL
+// These tracking migrations use plain BEGIN/END trigger bodies. Comparing the
+// installed definitions with their embedded SQL
 // avoids trusting a missing or modified tracking trigger after recovery. Tests
 // compare every extracted definition to a freshly initialized database.
 var storageTriggerPattern = regexp.MustCompile(`(?ms)^CREATE TRIGGER ([a-z0-9_]+)\b.*?\bEND;`)
 var storageTriggerDefinitions = sync.OnceValues(func() (map[string]string, error) {
 	definitions := map[string]string{}
-	for _, name := range []string{"091_durable_history_archive.sql", "092_history_inventory_generation.sql"} {
+	for _, name := range []string{"091_durable_history_archive.sql", "092_history_inventory_generation.sql", "093_history_dependency_generation.sql"} {
 		body, err := migrations.ReadFile("migrations/" + name)
 		if err != nil {
 			return nil, err
@@ -39,7 +39,7 @@ func compactTriggerSQL(body string) string {
 	return strings.Join(strings.Fields(strings.TrimSuffix(strings.TrimSpace(body), ";")), " ")
 }
 
-// HistoryStorageTracking checks installed archive and inventory guards against
+// HistoryStorageTracking checks installed archive, inventory and dependency guards against
 // the embedded definitions, inside the caller's transaction. A false result
 // forbids delta receipts, but does not itself authorize schema repair.
 func HistoryStorageTracking(ctx context.Context, tx *sql.Tx) (bool, error) {
@@ -47,7 +47,7 @@ func HistoryStorageTracking(ctx context.Context, tx *sql.Tx) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT name,sql FROM sqlite_schema WHERE type='trigger' AND (name LIKE 'history_archive_%' OR name LIKE 'history_inventory_%')`)
+	rows, err := tx.QueryContext(ctx, `SELECT name,sql FROM sqlite_schema WHERE type='trigger' AND (name LIKE 'history_archive_%' OR name LIKE 'history_inventory_%' OR name LIKE 'history_dependency_%' OR tbl_name IN ('history_index_dependency_records','history_index_dependencies','history_index_dependency_generation'))`)
 	if err != nil {
 		return false, err
 	}

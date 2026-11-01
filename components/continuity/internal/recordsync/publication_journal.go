@@ -33,6 +33,7 @@ type JournalPublicationPlan struct {
 	Blocks, Snapshot []Block
 	Observed         ObservationStamp
 	Delta            bool
+	snapshot         *semanticSnapshotReceipt
 }
 
 type publicationJournal struct {
@@ -200,11 +201,11 @@ func (s Index) tryPublicationJournal(ctx context.Context, a Archive, scope Journ
 			if err != nil {
 				return err
 			}
-			var exists bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM history_index_publications p JOIN history_index_block_members m USING(project_id,block_hash) WHERE p.project_id=? AND p.endpoint_hash=? AND m.envelope_hash=?)`, s.ProjectID, Hash("local-snapshot:"+s.Lineage), hash).Scan(&exists); err != nil {
+			semanticExists, candidates, err := s.publicationMembershipWithin(ctx, tx, hash, scope.Endpoint)
+			if err != nil {
 				return err
 			}
-			if !exists {
+			if !semanticExists {
 				semantic = append(semantic, object)
 			}
 			allowed, err := a.store().authorizedWithin(ctx, tx, hash, Hash(scope.Endpoint), scope.Relay)
@@ -213,27 +214,6 @@ func (s Index) tryPublicationJournal(ctx context.Context, a Archive, scope Journ
 			}
 			if !allowed || covered[hash] {
 				continue
-			}
-			rows, err := tx.QueryContext(ctx, `SELECT p.block_hash FROM history_index_publications p JOIN history_index_block_members m USING(project_id,block_hash) WHERE p.project_id=? AND p.endpoint_hash=? AND m.envelope_hash=? ORDER BY p.block_hash LIMIT 257`, s.ProjectID, Hash(scope.Endpoint), hash)
-			if err != nil {
-				return err
-			}
-			var candidates []string
-			for rows.Next() {
-				var candidate string
-				if err := rows.Scan(&candidate); err != nil {
-					rows.Close()
-					return err
-				}
-				candidates = append(candidates, candidate)
-			}
-			err = rows.Err()
-			rows.Close()
-			if err != nil {
-				return err
-			}
-			if len(candidates) > 256 {
-				return errPublicationJournalFull
 			}
 			for _, candidate := range candidates {
 				present, err := scope.HasBlock(ctx, candidate)
@@ -294,6 +274,7 @@ func (s Index) tryPublicationJournal(ctx context.Context, a Archive, scope Journ
 			if err != nil {
 				return err
 			}
+			result.snapshot = s.sealSemanticSnapshot(scope.Consumer, next, after, result.Snapshot)
 		}
 		remembered, err := a.store().rememberWithin(ctx, tx, publicationJournalCursor(scope.Consumer), next)
 		if err != nil {
@@ -365,6 +346,9 @@ func (s Index) fullPublicationJournal(ctx context.Context, a Archive, scope Jour
 			return JournalPublicationPlan{}, err
 		}
 		result := JournalPublicationPlan{Snapshot: inventory}
+		if wantSnapshot {
+			result.snapshot = s.sealSemanticSnapshot(scope.Consumer, snapshot, ObservationStamp{}, inventory)
+		}
 		err = a.store().transact(ctx, func(tx *sql.Tx) error {
 			current, err := a.store().stampWithin(ctx, tx, "ready")
 			if err != nil {
@@ -408,6 +392,9 @@ func (s Index) fullPublicationJournal(ctx context.Context, a Archive, scope Jour
 					return nil
 				}
 				return err
+			}
+			if wantSnapshot {
+				result.snapshot = s.sealSemanticSnapshot(scope.Consumer, snapshot, after, inventory)
 			}
 			if advance && after.ArchiveEpoch == planned.ArchiveEpoch && after.Schema == planned.Schema {
 				result.Observed = after
@@ -607,4 +594,40 @@ func (s Index) PublicationJournalStamp(ctx context.Context, a Archive, scope Jou
 		return nil
 	})
 	return digest, err
+}
+
+// Drive from a bounded envelope membership range. An endpoint-first join lets
+// SQLite scan every block at that endpoint, even for an absent new envelope.
+const publicationMembershipQuery = `SELECT m.block_hash,
+ EXISTS(SELECT 1 FROM history_index_publications p WHERE p.project_id=m.project_id AND p.endpoint_hash=? AND p.block_hash=m.block_hash),
+ EXISTS(SELECT 1 FROM history_index_publications p WHERE p.project_id=m.project_id AND p.endpoint_hash=? AND p.block_hash=m.block_hash)
+ FROM history_index_block_members m INDEXED BY history_index_envelope_members
+ WHERE m.project_id=? AND m.envelope_hash=? ORDER BY m.block_hash LIMIT 257`
+
+func (s Index) publicationMembershipWithin(ctx context.Context, tx *sql.Tx, hash, endpoint string) (bool, []string, error) {
+	rows, err := tx.QueryContext(ctx, publicationMembershipQuery, Hash("local-snapshot:"+s.Lineage), Hash(endpoint), s.ProjectID, hash)
+	if err != nil {
+		return false, nil, err
+	}
+	defer rows.Close()
+	semantic := false
+	var candidates []string
+	count := 0
+	for rows.Next() {
+		var block string
+		var local, destination bool
+		if err := rows.Scan(&block, &local, &destination); err != nil {
+			return false, nil, err
+		}
+		count++
+		syncwork.RecordWork(ctx, "publication_membership_rows_read", 1)
+		if count > 256 {
+			return false, nil, errPublicationJournalFull
+		}
+		semantic = semantic || local
+		if destination {
+			candidates = append(candidates, block)
+		}
+	}
+	return semantic, candidates, rows.Err()
 }

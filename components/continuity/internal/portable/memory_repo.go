@@ -326,22 +326,10 @@ func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string
 		return ImportPlan{}, nil, err
 	}
 	defer conn.Close()
-	identity, err := identityFrom(ctx, conn, projectID)
-	if err != nil {
-		return ImportPlan{}, nil, err
-	}
-	var schema string
-	if err := conn.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&schema); err != nil {
-		return ImportPlan{}, nil, err
-	}
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	bundle, err := BuildBundle(BundleSpec{
-		ExportID: "sync:" + activity.NewID(), LineageID: identity.LineageID, SourceInstanceID: identity.InstanceID,
-		CreatedAt: at, SourceDatabaseSchema: schema, SelectionProfile: "curated-v1",
-		RedactionProfile: DefaultRedactionProfile(), Omissions: curatedV1Omissions,
-	}, specs)
+	bundle, err := memoryImportBundle(ctx, conn, projectID, specs, at)
 	if err != nil {
 		return ImportPlan{}, nil, err
 	}
@@ -370,6 +358,60 @@ func ImportMemoryRecordsWithin(ctx context.Context, db *sql.DB, projectID string
 		previous = newReusableImportPlan(plan, dataVersion, projectID, bundle.ManifestBytes, bundle.RecordsBytes)
 	}
 	applied, err := applyOperationalImportWithPlan(ctx, conn, projectID, bundle.ManifestBytes, bundle.RecordsBytes, at, hooks.Appended, previous)
+	return applied.Plan, applied.Receipt, err
+}
+
+func memoryImportBundle(ctx context.Context, source queryer, projectID string, specs []EnvelopeSpec, at time.Time) (Bundle, error) {
+	identity, err := identityFrom(ctx, source, projectID)
+	if err != nil {
+		return Bundle{}, err
+	}
+	var schema string
+	if err := source.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&schema); err != nil {
+		return Bundle{}, err
+	}
+	return BuildBundle(BundleSpec{
+		ExportID: "sync:" + activity.NewID(), LineageID: identity.LineageID, SourceInstanceID: identity.InstanceID,
+		CreatedAt: at, SourceDatabaseSchema: schema, SelectionProfile: "curated-v1",
+		RedactionProfile: DefaultRedactionProfile(), Omissions: curatedV1Omissions,
+	}, specs)
+}
+
+// ImportMemoryRecordsTx stages canonical records and their import receipt in
+// the caller's transaction, allowing a consumer to acknowledge its journal in
+// that same commit. It reserves the writer before planning and uses the shared
+// canonical apply implementation. Results are provisional until the caller
+// commits; the caller must roll back on error or when refusing the plan.
+func ImportMemoryRecordsTx(ctx context.Context, tx *sql.Tx, projectID string, specs []EnvelopeSpec, at time.Time) (ImportPlan, *ImportReceipt, error) {
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET name=name WHERE id=? AND 0`, projectID); err != nil {
+		return ImportPlan{}, nil, err
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	built, err := memoryImportBundle(ctx, tx, projectID, specs, at)
+	if err != nil {
+		return ImportPlan{}, nil, err
+	}
+	bundle, err := ValidateBundle(built.ManifestBytes, built.RecordsBytes)
+	if err != nil {
+		return invalidImportPlan(projectID, err), nil, nil
+	}
+	decoded, err := decodeOperationalBundle(bundle)
+	if err != nil {
+		return invalidImportPlan(projectID, err), nil, nil
+	}
+	plan, err := planValidatedOperationalImport(ctx, tx, projectID, bundle, nil)
+	if err != nil || !plan.ApplyAllowed {
+		return plan, nil, err
+	}
+	if err := validateApplyDependencies(ctx, tx, projectID, decoded, planAppendKeys(plan)); err != nil {
+		return invalidImportPlan(projectID, err), nil, nil
+	}
+	if plan.Counts[PlanAppend] == 0 {
+		return plan, nil, nil
+	}
+	applied, err := applyOperationalBundleWithin(ctx, tx, projectID, bundle, decoded, plan, at, nil)
 	return applied.Plan, applied.Receipt, err
 }
 

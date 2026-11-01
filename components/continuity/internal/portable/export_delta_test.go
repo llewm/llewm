@@ -133,6 +133,7 @@ func TestMemoryDeltaMatchesFullExportAndConsumesRetention(t *testing.T) {
 			t.Fatalf("missing delta records: full=%d materialized=%d", len(full.Envelopes), len(materialized))
 		}
 		verifyImportSelections(t, ctx, db, project, full.Envelopes)
+		verifyCanonicalJournalSelection(t, ctx, db, project, "export-test", "archive", export.Envelopes)
 		for _, e := range full.Envelopes {
 			if !bytes.Equal(e.Bytes, materialized[recordKey(e.Envelope)]) {
 				t.Fatalf("reference mismatch: %s", recordKey(e.Envelope))

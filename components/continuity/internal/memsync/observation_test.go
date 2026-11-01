@@ -32,8 +32,11 @@ func TestObservedGitCycleReadsOnlyNewBlocksAndRepairsDamagedInventory(t *testing
 	}
 	m.decide(t, "new", "New observation")
 	counts := measure()
-	if counts["archive_audit_envelopes"] != 0 || counts["archive_journal_rows_read"] != 3 || counts["archive_envelopes_read"] != 3 || counts["fallback_publication_journal_full"] != 0 {
+	if counts["archive_audit_envelopes"] != 0 || counts["archive_journal_rows_read"] != 6 || counts["archive_envelopes_read"] != 4 || counts["fallback_publication_journal_full"] != 0 {
 		t.Fatalf("known cycle scanned old archive: %v", counts)
+	}
+	if counts["semantic_journal_delta_cycles"] != 1 || counts["fallback_semantic_journal_full"] != 0 || counts["semantic_catalog_blocks_read"] != 0 || counts["dependency_membership_records"] != 1 || counts["operational_full_loads"] != 0 || counts["local_state_records_visited"] != 0 {
+		t.Fatalf("known cycle replayed old semantic state: %v", counts)
 	}
 	if counts["fallback_git_observation_full"] != 0 || counts["git_observation_blocks"] != 1 || counts["git_observation_delta"] < 2 {
 		t.Fatalf("old blocks reread: %v", counts)

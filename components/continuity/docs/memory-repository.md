@@ -215,6 +215,14 @@ metadata, references, memberships and publication intent. Canonical history
 changes leave these tokens alone; raw inventory changes, including moves between
 projects, invalidate them transactionally. Rollback restores the prior token.
 
+Schema 093 separately tracks dependency selector mutations. Selector maintenance
+does not invalidate canonical capture or transport completion proofs; semantic
+journal replay binds its own baseline to this token. Missing, changed or unknown
+triggers on the selector tables require complete semantic validation.
+Its covering envelope membership index also lets publication stream at most
+257 memberships before checking endpoint markers. A larger fanout requires
+reference materialization, including when none of those blocks has a marker.
+
 Git observation receipts bind the build, physical clone, endpoint, lineage,
 index interpretation, SQLite schema, inventory generation and durable archive
 epoch. Before reuse, installed archive/inventory tracking triggers must match
@@ -336,7 +344,27 @@ canonical changes, foreign arrivals, damaged tracking, unexpected filesystem
 changes or rollback leave the old receipt untouched. Unchanged observations
 perform no additional metadata walk. This avoids a full capture on the next
 consecutive local arrival without treating observation as semantic import proof.
-This does not yet enable affected-dependency import replay or journal pruning.
+Semantic import has an independent journal cursor. After a complete successful
+reference import, a private snapshot receipt can establish a baseline binding the
+archive position, canonical position, schema and dependency selector generation.
+The baseline is saved only if the verified raw projection and complete archive
+snapshot still match under the writer lock. A concurrent arrival remains pending.
+
+Subsequent eligible imports traverse indexed forward and reverse typed dependency
+ranges and read only reached archive bodies. Canonical journal selections must
+match exact archived bytes before and after application. Canonical rows, retained
+wire envelopes, import receipt, selector updates and both consumer cursors commit
+in one transaction; statement or commit failure leaves the previous baseline.
+Unexpected canonical, selector or raw projection side effects decline replay.
+
+Replay is bounded to 128 bodies and 4096 journal changes or dependency rows.
+Missing, damaged or crossed receipts, competing envelope versions, supersession
+changes, recovery records, unsupported input and larger closures use the complete
+reference importer. Baselines currently require exact canonical archive bytes
+and no supersession forks. Complete validation repairs disposable selectors and
+can resume replay afterward. These constraints preserve reference semantics at
+the cost of repeated full imports for histories outside the qualified subset.
+Journal pruning is not enabled.
 Existing proofs are discarded by
 migration 086; capture-v2 does not reuse earlier capture proofs.
 Migration 082 narrows attribution tracking: raw invocation activity invalidates

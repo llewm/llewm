@@ -214,14 +214,24 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 		if err != nil {
 			return recordsync.ImportResult{}, err
 		}
-		plan, err := index.PlanJournalPublication(ctx, *s.Archive, scope, true)
+		plan, err := index.PlanJournalPublication(ctx, *s.Archive, scope, false)
 		if err != nil {
 			return recordsync.ImportResult{}, err
 		}
 		if err := s.advanceObservedInventory(lineage, observed, plan.Observed); err != nil {
 			return recordsync.ImportResult{}, err
 		}
-		return index.ImportBlocks(ctx, plan.Snapshot)
+		scope.Observed = observed.Stamp
+		return index.ImportArchiveJournal(ctx, *s.Archive, scope, func(ctx context.Context) (recordsync.JournalPublicationPlan, error) {
+			complete, err := index.PlanJournalPublication(ctx, *s.Archive, scope, true)
+			if err != nil {
+				return recordsync.JournalPublicationPlan{}, err
+			}
+			if err := s.advanceObservedInventory(lineage, observed, complete.Observed); err != nil {
+				return recordsync.JournalPublicationPlan{}, err
+			}
+			return complete, nil
+		})
 	}
 	// The publication snapshot is complete at its scan time. Reuse it only
 	// when every fetched record was already present with the same bytes;

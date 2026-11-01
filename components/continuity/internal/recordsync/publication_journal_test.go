@@ -3,6 +3,7 @@ package recordsync
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -251,6 +252,82 @@ func TestPublicationJournalPreservesForeignAuthorizationAndSemanticCoverage(t *t
 	f.commit(t, relayed.Blocks)
 	f.plan(t, true)
 	if _, err := f.index.PublicationJournalStamp(f.ctx, f.archive, f.scope); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPublicationMembershipBoundsEnvelopeRangeBeforeEndpointFiltering(t *testing.T) {
+	f := journalFixture(t)
+	err := f.store.transact(f.ctx, func(tx *sql.Tx) error {
+		// These are query-only derived inventory fixtures, not verified block bytes.
+		for _, id := range []string{"selected", "unrelated", "hot"} {
+			object := archiveObject(t, id, `{"fixture":true}`)
+			if _, err := tx.Exec(`INSERT INTO history_index_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,envelope_json) VALUES(?,?,?,?,?,?)`, f.store.ProjectID, Hash(id), object.Envelope.RecordType, id, 0, string(object.Bytes)); err != nil {
+				return err
+			}
+		}
+		for n := 0; n < 760; n++ {
+			hash := Hash(fmt.Sprintf("membership-%d", n))
+			owner := "unrelated"
+			if n < 3 {
+				owner = "selected"
+			} else if n >= 503 {
+				owner = "hot"
+			}
+			for _, statement := range []struct {
+				q    string
+				args []any
+			}{
+				{`INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,?)`, []any{f.store.ProjectID, hash, IndexVersion}},
+				{`INSERT INTO history_index_block_members(project_id,block_hash,envelope_hash) VALUES(?,?,?)`, []any{f.store.ProjectID, hash, Hash(owner)}},
+			} {
+				if _, err := tx.Exec(statement.q, statement.args...); err != nil {
+					return err
+				}
+			}
+			endpoint := f.scope.Endpoint
+			if n == 0 {
+				endpoint = "local-snapshot:" + f.store.Lineage
+			}
+			if n < 2 || owner == "unrelated" {
+				if _, err := tx.Exec(`INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?)`, f.store.ProjectID, Hash(endpoint), hash); err != nil {
+					return err
+				}
+			}
+		}
+		ctx, metrics := syncwork.WithWorkMetrics(f.ctx)
+		semantic, candidates, err := f.index.publicationMembershipWithin(ctx, tx, Hash("selected"), f.scope.Endpoint)
+		if err != nil || !semantic || len(candidates) != 1 || metrics.Counts()["publication_membership_rows_read"] != 3 {
+			t.Fatalf("unrelated inventory visited: %t %v %v %v", semantic, candidates, err, metrics.Counts())
+		}
+		ctx, metrics = syncwork.WithWorkMetrics(f.ctx)
+		_, _, err = f.index.publicationMembershipWithin(ctx, tx, Hash("hot"), f.scope.Endpoint)
+		if !errors.Is(err, errPublicationJournalFull) || metrics.Counts()["publication_membership_rows_read"] != 257 {
+			t.Fatalf("unmarked hot membership bypassed bound: %v %v", err, metrics.Counts())
+		}
+		rows, err := tx.Query(`EXPLAIN QUERY PLAN `+publicationMembershipQuery, Hash("local-snapshot:"+f.store.Lineage), Hash(f.scope.Endpoint), f.store.ProjectID, Hash("selected"))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		bounded := false
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				return err
+			}
+			if strings.Contains(detail, "USE TEMP B-TREE") || strings.Contains(detail, "SCAN m") || (strings.Contains(detail, "SEARCH p ") && !strings.Contains(detail, "block_hash=?")) {
+				t.Fatalf("unbounded publication query plan: %s", detail)
+			}
+			bounded = bounded || strings.Contains(detail, "SEARCH m USING COVERING INDEX history_index_envelope_members (project_id=? AND envelope_hash=?)")
+		}
+		if !bounded {
+			t.Fatal("publication query does not stream its envelope membership range")
+		}
+		return rows.Err()
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 }

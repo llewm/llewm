@@ -132,6 +132,22 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 			return ImportApplyResult{}, err
 		}
 	}
+	result, err := applyOperationalBundleWithin(ctx, tx, projectID, bundle, decoded, plan, appliedAt, within)
+	if err != nil {
+		return result, err
+	}
+	if err := tx.Commit(); err != nil {
+		result.Plan.WritesPerformed = 0
+		result.Receipt = nil
+		return result, err
+	}
+	return result, nil
+}
+
+// applyOperationalBundleWithin is the shared canonical writer. Its caller owns
+// the transaction and must roll it back on failure. Results describe staged
+// writes until that caller commits successfully.
+func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID string, bundle Bundle, decoded decodedOperationalBundle, plan ImportPlan, appliedAt time.Time, within func(context.Context, *sql.Tx) error) (ImportApplyResult, error) {
 	result := ImportApplyResult{Plan: plan}
 	if !plan.ApplyAllowed {
 		return result, fmt.Errorf("portable import plan is not applicable")
@@ -228,7 +244,7 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 		AppendedRecords: plan.Counts[PlanAppend], AlreadyPresentRecords: plan.Counts[PlanAlreadyPresent],
 		AppliedAt: appliedAt, Authority: "machine_observed", SchemaVersion: 1,
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO portable_import_receipts(id,project_id,lineage_id,export_id,source_instance_id,manifest_sha256,records_sha256,record_set_sha256,selection_profile,redaction_profile_id,redaction_profile_version,redaction_profile_sha256,appended_records,already_present_records,applied_at,authority,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, receipt.ID, receipt.ProjectID, receipt.LineageID, receipt.ExportID, receipt.SourceInstanceID, receipt.ManifestSHA256, receipt.RecordsSHA256, receipt.RecordSetSHA256, receipt.SelectionProfile, receipt.RedactionProfile, receipt.RedactionVersion, receipt.RedactionSHA256, receipt.AppendedRecords, receipt.AlreadyPresentRecords, receipt.AppliedAt.Format(time.RFC3339Nano), receipt.Authority, receipt.SchemaVersion)
+	_, err := tx.ExecContext(ctx, `INSERT INTO portable_import_receipts(id,project_id,lineage_id,export_id,source_instance_id,manifest_sha256,records_sha256,record_set_sha256,selection_profile,redaction_profile_id,redaction_profile_version,redaction_profile_sha256,appended_records,already_present_records,applied_at,authority,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, receipt.ID, receipt.ProjectID, receipt.LineageID, receipt.ExportID, receipt.SourceInstanceID, receipt.ManifestSHA256, receipt.RecordsSHA256, receipt.RecordSetSHA256, receipt.SelectionProfile, receipt.RedactionProfile, receipt.RedactionVersion, receipt.RedactionSHA256, receipt.AppendedRecords, receipt.AlreadyPresentRecords, receipt.AppliedAt.Format(time.RFC3339Nano), receipt.Authority, receipt.SchemaVersion)
 	if err != nil {
 		return result, fmt.Errorf("append portable import receipt: %w", err)
 	}
@@ -236,9 +252,6 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 		if err := within(ctx, tx); err != nil {
 			return result, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return result, err
 	}
 	plan.WritesPerformed = receipt.AppendedRecords + 1
 	result.Plan = plan
