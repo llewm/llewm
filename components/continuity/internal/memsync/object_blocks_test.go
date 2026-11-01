@@ -66,11 +66,11 @@ func TestObjectBlocksAppendDeltaAndOpaqueLineages(t *testing.T) {
 			if err != nil || len(all) != 2 {
 				t.Fatalf("initial inventory: %d %v", len(all), err)
 			}
-			otherBefore, err := transport.treeAt(ctx, before, "v4", strings.TrimPrefix(other, "lineage:"))
+			otherBefore, err := transport.treeAt(ctx, before, "v5", strings.TrimPrefix(other, "lineage:"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			otherAfter, err := transport.treeAt(ctx, after, "v4", strings.TrimPrefix(other, "lineage:"))
+			otherAfter, err := transport.treeAt(ctx, after, "v5", strings.TrimPrefix(other, "lineage:"))
 			if err != nil || otherBefore != otherAfter {
 				t.Fatalf("unrelated lineage rewritten: %v", err)
 			}
@@ -81,7 +81,7 @@ func TestObjectBlocksAppendDeltaAndOpaqueLineages(t *testing.T) {
 			if _, err := transport.repo.run(ctx, "fsck", "--strict", "--no-reflogs", after); err != nil {
 				t.Fatal(err)
 			}
-			if matches, _ := filepath.Glob(filepath.Join(transport.repo.Dir, "v4", "*")); len(matches) != 0 {
+			if matches, _ := filepath.Glob(filepath.Join(transport.repo.Dir, "v5", "*")); len(matches) != 0 {
 				t.Fatal("transport wrote a working tree")
 			}
 		})
@@ -93,11 +93,11 @@ func TestObjectBlocksRejectMutationModesPathsAndUnknownSelectedFormats(t *testin
 	transport := objectTransportFixture(t, "sha1")
 	block := transportBlockFixture(t, testLineage, "retained")
 	leaf := objectBlob(t, transport, block.Hash+".block", string(block.Bytes), 40)
-	before := transportBlockTree(t, transport, "v4", testLineage, []blockTreeEntry{leaf}, 40)
+	before := transportBlockTree(t, transport, "v5", testLineage, []blockTreeEntry{leaf}, 40)
 	for _, mode := range []string{"deleted", "replaced", "symlink", "executable", "wrong-name", "bad-bytes", "future", "former"} {
 		t.Run(mode, func(t *testing.T) {
 			candidate := leaf
-			version := "v4"
+			version := "v5"
 			switch mode {
 			case "deleted":
 				// Empty selected inventory must not authorize record removal.
@@ -110,7 +110,7 @@ func TestObjectBlocksRejectMutationModesPathsAndUnknownSelectedFormats(t *testin
 			case "wrong-name":
 				candidate.name = "noncanonical.block"
 			case "future":
-				version = "v5"
+				version = "v6"
 			case "former":
 				version = "v3"
 			}
@@ -174,7 +174,7 @@ func TestObjectBlocksMergeValidatesArrivalsBeforeJoiningHistories(t *testing.T) 
 		_, err := transport.blockDelta(ctx, b, r, testLineage)
 		return err
 	}
-	merged, err := transport.mergeCommits(ctx, local, remote, "join verified history", validate)
+	merged, err := transport.mergeCommits(ctx, local, remote, "join verified history", validate, transport.finishBlockMerge(testLineage, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,12 +195,12 @@ func TestObjectBlocksMergeValidatesArrivalsBeforeJoiningHistories(t *testing.T) 
 			t.Fatalf("merge replaced block %s", block.Hash)
 		}
 	}
-	removedTree := transportBlockTree(t, transport, "v4", testLineage, []blockTreeEntry{objectBlob(t, transport, remoteBlock.Hash+".block", string(remoteBlock.Bytes), 40)}, 40)
+	removedTree := transportBlockTree(t, transport, "v5", testLineage, []blockTreeEntry{objectBlob(t, transport, remoteBlock.Hash+".block", string(remoteBlock.Bytes), 40)}, 40)
 	removed, err := transport.writeCommit(ctx, removedTree, []string{base}, "invalid removal")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transport.mergeCommits(ctx, local, removed, "must refuse", validate); err == nil {
+	if _, err := transport.mergeCommits(ctx, local, removed, "must refuse", validate, nil); err == nil {
 		t.Fatal("merge adopted a removed immutable observation")
 	}
 }

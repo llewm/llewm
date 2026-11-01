@@ -125,8 +125,8 @@ func syncCommand() *cobra.Command {
 	var writersStopped bool
 	convert := &cobra.Command{
 		Use:   "convert",
-		Short: "Convert this lineage's history to format 4 and sync",
-		Long: `Fetch and convert this lineage's older observations to format 4, then push.
+		Short: "Convert this lineage's history to format 5 and sync",
+		Long: `Fetch and convert this lineage's older observations to format 5, then push.
 Stop all old writers before conversion and confirm this with --writers-stopped.
 Original observations remain in Git history and the local archive. Invalid or
 incomplete records refuse conversion before removal.`,

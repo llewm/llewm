@@ -172,7 +172,7 @@ func fixtureFetchMerge(t testing.TB, repo git, branch string) {
 			}
 		}
 		return nil
-	})
+	}, transport.finishBlockMerge(testLineage, false))
 	if err != nil {
 		t.Fatal(err)
 	}

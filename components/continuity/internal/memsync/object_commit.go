@@ -96,7 +96,7 @@ func (t *objectTransport) advanceBranch(ctx context.Context, expected transportB
 // is returned. Unrelated initial histories have an empty base; ambiguous merge
 // bases fail closed rather than silently picking one. Ref publication is a
 // separate compare-and-swap after the caller's remaining local work succeeds.
-func (t *objectTransport) mergeCommits(ctx context.Context, local, remote, message string, validate func(context.Context, string, string, string) error) (string, error) {
+func (t *objectTransport) mergeCommits(ctx context.Context, local, remote, message string, validate func(context.Context, string, string, string) error, finish func(context.Context, string, string) (string, error)) (string, error) {
 	if validate == nil || !validGitOID(remote) || (local != "" && (!validGitOID(local) || len(local) != len(remote))) {
 		return "", fmt.Errorf("invalid history merge request")
 	}
@@ -141,6 +141,12 @@ func (t *objectTransport) mergeCommits(ctx context.Context, local, remote, messa
 	tree, err := t.mergeTrees(ctx, base.Tree, l.Tree, r.Tree)
 	if err != nil {
 		return "", err
+	}
+	if finish != nil {
+		tree, err = finish(ctx, l.Tree, tree)
+		if err != nil {
+			return "", err
+		}
 	}
 	return t.writeCommit(ctx, tree, []string{local, remote}, message)
 }

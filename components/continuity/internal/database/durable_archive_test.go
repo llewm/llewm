@@ -43,7 +43,7 @@ func TestDurableArchiveMigrationPreservesLegacyAndRequiresActivation(t *testing.
 		`SELECT count(*) FROM history_index_envelopes`:       1,
 		`SELECT count(*) FROM history_index_publications`:    1,
 		`SELECT count(*) FROM history_index_block_members`:   1,
-		`SELECT mcp_api FROM writer_floor WHERE singleton=1`: 137,
+		`SELECT mcp_api FROM writer_floor WHERE singleton=1`: 138,
 	} {
 		var got int
 		if err := db.QueryRow(query).Scan(&got); err != nil || got != want {

@@ -204,7 +204,7 @@ func TestLegacyStorageCutoverPreservesSourcesAndResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	audit, err := Audit(ctx, root)
-	if err != nil || audit.State != "verified" || !audit.Git.FullObjectCheck {
+	if err != nil || audit.State != "verified" || !audit.Git.FullObjectCheck || !audit.Git.ConversionRequired || len(audit.Git.TransportFormats) != 1 || audit.Git.TransportFormats[0] != 4 {
 		t.Fatalf("audit: %+v %v", audit, err)
 	}
 }
@@ -220,6 +220,64 @@ func TestChangedGitSourceBlocksArchiveRetirement(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(p.Archive.Source, "lineage")); err != nil {
 		t.Fatalf("retired archive before checking Git: %v", err)
+	}
+}
+
+func TestReadyArchiveSchemaUpgradeAuditsSQLiteBeforeMigration(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	t.Setenv("CONTINUITY_HOME", filepath.Join(root, ".llewm", "continuity"))
+	t.Setenv("CONTINUITY_GLOBAL_HOME", filepath.Join(root, "global"))
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	fixtureGit(t, root, "init", "--quiet", "--template=")
+	fixtureGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "code")
+	if _, err := config.WriteDefault(root); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Initialize(ctx, cfg.Storage.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := (project.Resolver{DB: db}).Ensure(ctx, root, "SQLite upgrade", true)
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	const lineage = "lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := (portable.Service{DB: db}).Initialize(ctx, binding.ProjectID, lineage); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	archive, err := recordsync.OpenArchive(ctx, db, binding.ProjectID, lineage, filepath.Join(config.StateDir(root), "history"))
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if _, err := archive.AuditStorage(ctx); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	// Migration095 changes only the floor. Removing that fixture marker and
+	// restoring137 produces the exact predecessor schema, without rebuilding it.
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version='095_history_radix_writer.sql'; UPDATE writer_floor SET mcp_api=137 WHERE singleton=1`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	db.Close()
+	p, err := NewPlan(ctx, root)
+	if err != nil || p.ArchiveMode != "ready" {
+		t.Fatalf("ready plan: %+v %v", p, err)
+	}
+	if result, err := Prepare(ctx, root, p, true); err != nil || result.State != "prepared" || result.Database == nil || result.Database.BackupMigration != "094_history_recovery_selection.sql" {
+		t.Fatalf("ready archive schema upgrade: %+v %v", result, err)
+	}
+	if result, err := Complete(ctx, root, p, true); err != nil || result.State != "ready" {
+		t.Fatalf("finish schema-only upgrade: %+v %v", result, err)
 	}
 }
 

@@ -103,11 +103,11 @@ func (t *objectTransport) lineageIdentity(ctx context.Context, tree, lineage str
 	if err := t.validateBlockLayout(ctx, tree, lineage); err != nil {
 		return "", err
 	}
-	selected, err := t.treeAt(ctx, tree, "v4", strings.TrimPrefix(lineage, "lineage:"))
+	selected, err := t.treeAt(ctx, tree, "v5", strings.TrimPrefix(lineage, "lineage:"))
 	if err != nil {
 		return "", err
 	}
-	return "v4:" + selected, nil
+	return "v5:" + selected, nil
 }
 
 func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard) (Result, bool, bool) {
@@ -174,7 +174,7 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 			}
 		}
 		return nil
-	})
+	}, nil)
 	if err != nil {
 		return Result{}, false, fetched
 	}

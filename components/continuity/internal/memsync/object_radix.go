@@ -14,6 +14,29 @@ import (
 // object primitives do not select or enable a transport wire format.
 const radixBucketLimit = 64
 
+func (t *objectTransport) radixBlock(ctx context.Context, tree, hash string) (blockTreeEntry, error) {
+	if !validDigest(hash) {
+		return blockTreeEntry{}, fmt.Errorf("invalid publication block identity")
+	}
+	prefix := ""
+	for tree != "" {
+		if err := ctx.Err(); err != nil {
+			return blockTreeEntry{}, err
+		}
+		node, err := t.readRadixNode(ctx, tree, prefix)
+		if err != nil {
+			return blockTreeEntry{}, err
+		}
+		if !node.branch {
+			return node.entries[hash+".block"], nil
+		}
+		part := hash[len(prefix) : len(prefix)+2]
+		tree = node.entries[part].oid
+		prefix += part
+	}
+	return blockTreeEntry{}, nil
+}
+
 type radixNode struct {
 	branch  bool
 	entries map[string]blockTreeEntry
@@ -98,13 +121,13 @@ func (t *objectTransport) writeRadixLeaves(ctx context.Context, prefix string, l
 // appendRadix validates additions, reuses untouched branches and returns only
 // genuinely new identities. Existing blobs need no body reads. The caller must
 // have verified the previous tree and must verify new block bodies separately.
-func (t *objectTransport) appendRadix(ctx context.Context, tree string, additions map[string]blockTreeEntry, width int) (string, map[string]blockTreeEntry, error) {
-	if len(additions) > portable.MaxRecordCount || (width != 40 && width != 64) || (tree != "" && (!validGitOID(tree) || len(tree) != width)) {
+func (t *objectTransport) appendRadix(ctx context.Context, tree, prefix string, additions map[string]blockTreeEntry, width int) (string, map[string]blockTreeEntry, error) {
+	if len(prefix) > 64 || len(prefix)%2 != 0 || strings.Trim(prefix, "0123456789abcdef") != "" || len(additions) > portable.MaxRecordCount || (width != 40 && width != 64) || (tree != "" && (!validGitOID(tree) || len(tree) != width)) {
 		return "", nil, fmt.Errorf("invalid history radix publication")
 	}
 	for name, entry := range additions {
 		hash := strings.TrimSuffix(name, ".block")
-		if name != entry.name || !validDigest(hash) || name != hash+".block" || entry.kind != "blob" || entry.mode != "100644" || !validGitOID(entry.oid) || len(entry.oid) != width {
+		if name != entry.name || !validDigest(hash) || name != hash+".block" || !strings.HasPrefix(hash, prefix) || entry.kind != "blob" || entry.mode != "100644" || !validGitOID(entry.oid) || len(entry.oid) != width {
 			return "", nil, fmt.Errorf("invalid history radix addition")
 		}
 	}
@@ -166,7 +189,7 @@ func (t *objectTransport) appendRadix(ctx context.Context, tree string, addition
 		}
 		return t.writeTree(ctx, entries, width)
 	}
-	after, err := edit(tree, "", additions)
+	after, err := edit(tree, prefix, additions)
 	if err != nil {
 		return "", nil, err
 	}

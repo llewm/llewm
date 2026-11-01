@@ -10,7 +10,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
 
-// convertLegacy validates and archives all selected format2/3 observations,
+// convertLegacy validates and archives all selected format2/3/4 observations,
 // then replaces only those namespaces in one parent-preserving commit. The
 // caller must stop old writers and hold the clone lock. Old bytes remain in
 // Git history; no worktree or index participates in conversion.
@@ -32,7 +32,7 @@ func (s Syncer) convertLegacy(ctx context.Context, repo git, identity portable.I
 	}
 	partition := strings.TrimPrefix(identity.LineageID, "lineage:")
 	var namespaces []string
-	for _, version := range []string{"v2", "v3"} {
+	for _, version := range []string{"v2", "v3", "v4"} {
 		selected, err := transport.treeAt(ctx, commit.Tree, version, partition)
 		if err != nil {
 			return 0, err
@@ -67,6 +67,21 @@ func (s Syncer) convertLegacy(ctx context.Context, repo git, identity portable.I
 	if err != nil {
 		return 0, err
 	}
+	// Format4 already contains exact block frames. Relocate their blobs rather
+	// than repacking envelopes, including on a resumed partial conversion.
+	leaves, err := transport.conversionBlockLeaves(ctx, commit.Tree, identity.LineageID)
+	if err != nil {
+		return 0, err
+	}
+	entries := make([]blockTreeEntry, 0, len(leaves))
+	for _, name := range radixNames(leaves) {
+		entries = append(entries, leaves[name])
+	}
+	retained, err := transport.decodeBlockEntries(ctx, identity.LineageID, entries)
+	if err != nil {
+		return 0, err
+	}
+	blocks = append(blocks, retained...)
 	// Validation of every old byte is complete before any archive mutation.
 	for _, object := range scan.Objects {
 		if _, err := s.Archive.Put(object, s.Endpoint()); err != nil {
@@ -90,7 +105,10 @@ func (s Syncer) convertLegacy(ctx context.Context, repo git, identity portable.I
 	if err != nil {
 		return 0, err
 	}
-	message := fmt.Sprintf("continuity: %s convert to format 4, %d observations", identity.InstanceID, len(scan.Objects))
+	if _, err := transport.blockDeltaForConversion(ctx, commit.Tree, tree, identity.LineageID, true); err != nil {
+		return 0, err
+	}
+	message := fmt.Sprintf("continuity: %s convert to format 5", identity.InstanceID)
 	next, err := transport.writeCommit(ctx, tree, []string{branch.OID}, message)
 	if err != nil {
 		return 0, err

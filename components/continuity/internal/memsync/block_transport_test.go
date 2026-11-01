@@ -43,7 +43,7 @@ func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
 	if _, err := m.syncer.trackedBlockObservations(ctx, repo, testLineage, export.Envelopes[0].Envelope.EnvelopeSHA256); err == nil {
 		t.Fatal("untracked observation accepted")
 	}
-	directory, err := recordsync.BlockDirectory(testLineage)
+	directory, err := gitBlockDirectory(testLineage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if err != nil || len(blocks) == 0 {
 		t.Fatalf("publish: %d %v", len(blocks), err)
 	}
-	directory, _ := recordsync.BlockDirectory(testLineage)
+	directory, _ := gitBlockDirectory(testLineage)
 	untracked := filepath.Join(a.syncer.Clone, directory, "untracked.block")
 	if err := os.MkdirAll(filepath.Dir(untracked), 0700); err != nil {
 		t.Fatal(err)

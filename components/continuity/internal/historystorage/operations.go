@@ -145,7 +145,20 @@ func Prepare(ctx context.Context, root string, p Plan, writersStopped bool) (Res
 		if err != nil {
 			return result, err
 		}
-		_, sourceErr := (recordsync.Archive{DB: db, ProjectID: p.ProjectID, Lineage: p.LineageID}).InspectLegacyStorage(ctx, p.Archive.Source)
+		archive := recordsync.Archive{DB: db, ProjectID: p.ProjectID, Lineage: p.LineageID}
+		var sourceErr error
+		if p.ArchiveMode == "legacy" {
+			_, sourceErr = archive.InspectLegacyStorage(ctx, p.Archive.Source)
+		} else {
+			var initialize bool
+			initialize, sourceErr = archive.InspectStorage(ctx, p.Archive.Source)
+			if sourceErr == nil && initialize != (p.ArchiveMode == "initialize") {
+				sourceErr = fmt.Errorf("planned archive activation mode changed before schema migration")
+			}
+			if sourceErr == nil && !initialize {
+				_, sourceErr = archive.AuditStorage(ctx)
+			}
+		}
 		db.Close()
 		if sourceErr != nil {
 			return result, sourceErr

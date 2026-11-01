@@ -48,11 +48,11 @@ func TestObjectRadixSplitPreservesExactBlocks(t *testing.T) {
 			names := radixNames(leaves)
 			last := leaves[names[64]]
 			delete(leaves, last.name)
-			before, added, err := transport.appendRadix(ctx, "", leaves, width)
+			before, added, err := transport.appendRadix(ctx, "", "", leaves, width)
 			if err != nil || len(added) != 64 {
 				t.Fatalf("initial: %d %v", len(added), err)
 			}
-			after, added, err := transport.appendRadix(ctx, before, map[string]blockTreeEntry{last.name: last}, width)
+			after, added, err := transport.appendRadix(ctx, before, "", map[string]blockTreeEntry{last.name: last}, width)
 			if err != nil || len(added) != 1 {
 				t.Fatalf("split: %d %v", len(added), err)
 			}
@@ -70,7 +70,7 @@ func TestObjectRadixSplitPreservesExactBlocks(t *testing.T) {
 					t.Fatalf("changed block bytes: %v", err)
 				}
 			}
-			again, added, err := transport.appendRadix(ctx, after, leaves, width)
+			again, added, err := transport.appendRadix(ctx, after, "", leaves, width)
 			if err != nil || again != after || len(added) != 0 {
 				t.Fatalf("not idempotent: %d %v", len(added), err)
 			}
@@ -90,11 +90,11 @@ func TestObjectRadixBoundedDiscoveryAndDeepPrefixes(t *testing.T) {
 			names := radixNames(leaves)
 			arrival := leaves[names[len(names)-1]]
 			delete(leaves, arrival.name)
-			before, _, err := transport.appendRadix(ctx, "", leaves, 40)
+			before, _, err := transport.appendRadix(ctx, "", "", leaves, 40)
 			if err != nil {
 				t.Fatal(err)
 			}
-			after, _, err := transport.appendRadix(ctx, before, map[string]blockTreeEntry{arrival.name: arrival}, 40)
+			after, _, err := transport.appendRadix(ctx, before, "", map[string]blockTreeEntry{arrival.name: arrival}, 40)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +114,7 @@ func TestObjectRadixBoundedDiscoveryAndDeepPrefixes(t *testing.T) {
 	t.Run("31 shared hash bytes", func(t *testing.T) {
 		transport := objectTransportFixture(t, "sha1")
 		leaves := radixFixtureLeaves(t, transport, 65, 40, true)
-		tree, _, err := transport.appendRadix(context.Background(), "", leaves, 40)
+		tree, _, err := transport.appendRadix(context.Background(), "", "", leaves, 40)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func TestObjectRadixRejectsNoncanonicalAndDestructiveChanges(t *testing.T) {
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	leaves := radixFixtureLeaves(t, transport, 65, 40, false)
-	before, _, err := transport.appendRadix(ctx, "", leaves, 40)
+	before, _, err := transport.appendRadix(ctx, "", "", leaves, 40)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestObjectRadixRejectsNoncanonicalAndDestructiveChanges(t *testing.T) {
 				if mode == "replacement" {
 					copy[leaf.name] = objectBlob(t, transport, leaf.name, "replacement", 40)
 				}
-				after, _, err = transport.appendRadix(ctx, "", copy, 40)
+				after, _, err = transport.appendRadix(ctx, "", "", copy, 40)
 			case "wrong-prefix", "small-branch", "empty-branch":
 				part := leaf.name[:2]
 				child := objectTree(t, transport, []blockTreeEntry{leaf}, 40)
@@ -191,7 +191,7 @@ func TestObjectRadixRejectsNoncanonicalAndDestructiveChanges(t *testing.T) {
 	}
 	bad := leaf
 	bad.name = strings.Repeat("z", 64) + ".block"
-	if _, _, err := transport.appendRadix(ctx, before, map[string]blockTreeEntry{bad.name: bad}, 40); err == nil {
+	if _, _, err := transport.appendRadix(ctx, before, "", map[string]blockTreeEntry{bad.name: bad}, 40); err == nil {
 		t.Fatal("accepted invalid addition")
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
-	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
@@ -240,7 +239,7 @@ func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
 	if err != nil || len(blocks) == 0 {
 		t.Fatalf("blocks: %v", err)
 	}
-	dir, _ := recordsync.BlockDirectory(testLineage)
+	dir, _ := gitBlockDirectory(testLineage)
 	path := filepath.Join(a.syncer.Clone, dir, blocks[0].Hash+".block")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)

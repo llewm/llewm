@@ -19,8 +19,9 @@ import (
 // an index or working tree and supplies the normal memory-clone route.
 // Its immutable tree merge never invokes text merge, hooks or repository code.
 type objectTransport struct {
-	repo  git
-	trees blockTreeDiscovery
+	repo         git
+	trees        blockTreeDiscovery
+	writtenTrees map[string]bool
 }
 
 type objectLeafChange struct {
@@ -266,7 +267,14 @@ func (t *objectTransport) writeTree(ctx context.Context, entries []blockTreeEntr
 			return "", err
 		}
 	}
-	return t.writeObject(ctx, "tree", raw.Bytes(), width)
+	oid, err := t.writeObject(ctx, "tree", raw.Bytes(), width)
+	if err == nil {
+		if t.writtenTrees == nil {
+			t.writtenTrees = map[string]bool{}
+		}
+		t.writtenTrees[oid] = true
+	}
+	return oid, err
 }
 
 // mergeTrees performs a three-way, object-identity merge. Equal subtrees are
@@ -278,6 +286,9 @@ func (t *objectTransport) mergeTrees(ctx context.Context, base, local, remote st
 	if !validGitOID(local) || !validGitOID(remote) || len(local) != len(remote) || (base != "" && (!validGitOID(base) || len(base) != len(local))) {
 		return "", fmt.Errorf("invalid transport merge identity")
 	}
+	// Ownership is scoped to this merge, excluding trees built or read earlier.
+	// Normalization may open only these outputs, not unchanged input history.
+	t.writtenTrees = map[string]bool{}
 	return t.mergeTree(ctx, base, local, remote, 0)
 }
 
@@ -291,7 +302,7 @@ func (t *objectTransport) mergeTree(ctx context.Context, base, local, remote str
 	if local == base {
 		return remote, nil
 	}
-	if depth > 32 {
+	if depth > 36 {
 		return "", fmt.Errorf("transport merge nesting exceeds bounds")
 	}
 	sets := [3]map[string]blockTreeEntry{}

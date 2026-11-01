@@ -207,7 +207,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 				}
 				return nil
 			}
-			next, err := s.objects.mergeCommits(local, current.OID, remote, fmt.Sprintf("continuity: %s merge immutable history", identity.InstanceID), validate)
+			next, err := s.objects.mergeCommits(local, current.OID, remote, fmt.Sprintf("continuity: %s merge immutable history", identity.InstanceID), validate, s.objects.finishBlockMerge(identity.LineageID, p.convert))
 			if err != nil {
 				return result, err
 			}
@@ -245,7 +245,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		result.LeaseNotes = s.syncLeases(ctx, repo, p)
 	}
 	if p.convert && !imported {
-		return result, fmt.Errorf("format-4 conversion needs the remote, and it did not finish: %s", result.Detail)
+		return result, fmt.Errorf("format-5 conversion needs the remote, and it did not finish: %s", result.Detail)
 	}
 	if offline || deferred {
 		if !imported {
@@ -261,7 +261,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		result.Outcome, result.Detail = OutcomeSynced, "synced with "+redact.String(s.Remote)
 	}
 	if p.convert {
-		result.Detail = "history observations converted to format 4; " + result.Detail
+		result.Detail = "history observations converted to format 5; " + result.Detail
 	}
 	if result.Forks > 0 {
 		result.Detail = fmt.Sprintf("%d record revisions have several versions; each is kept as a fork (llewm fork list). %s", result.Forks, result.Detail)

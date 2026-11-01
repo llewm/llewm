@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
@@ -139,19 +140,22 @@ func CompleteStorageMigration(ctx context.Context, clone, remote string, access 
 }
 
 type CloneStorageAudit struct {
-	Clone           string `json:"clone"`
-	ObjectFormat    string `json:"object_format"`
-	References      int    `json:"references"`
-	HeadRef         string `json:"head_ref"`
-	HeadOID         string `json:"head_oid,omitempty"`
-	LineageID       string `json:"lineage_id,omitempty"`
-	Blocks          int    `json:"blocks"`
-	UniqueEnvelopes int    `json:"unique_envelopes"`
-	FullObjectCheck bool   `json:"full_object_check"`
+	Clone              string `json:"clone"`
+	ObjectFormat       string `json:"object_format"`
+	References         int    `json:"references"`
+	HeadRef            string `json:"head_ref"`
+	HeadOID            string `json:"head_oid,omitempty"`
+	LineageID          string `json:"lineage_id,omitempty"`
+	Blocks             int    `json:"blocks"`
+	UniqueEnvelopes    int    `json:"unique_envelopes"`
+	FullObjectCheck    bool   `json:"full_object_check"`
+	TransportFormats   []int  `json:"transport_formats"`
+	ConversionRequired bool   `json:"conversion_required"`
 }
 
 // AuditStorage checks all Git objects and refs independently of tree caches,
-// then validates the selected lineage's current wire blocks. This is a full
+// then validates the selected lineage's supported wire history, including old
+// formats needed during explicit storage cutover before wire conversion. This is a full
 // transport audit, not a peer receipt or semantic-import certification.
 func AuditStorage(ctx context.Context, clone, remote, lineage string, access Access) (CloneStorageAudit, error) {
 	var report CloneStorageAudit
@@ -186,11 +190,32 @@ func AuditStorage(ctx context.Context, clone, remote, lineage string, access Acc
 		if err != nil {
 			return CloneStorageAudit{}, err
 		}
-		blocks, err := transport.blockDelta(ctx, "", commit.Tree, lineage)
+		blocks, err := transport.blockDeltaForConversion(ctx, "", commit.Tree, lineage, true)
 		if err != nil {
 			return CloneStorageAudit{}, err
 		}
 		seen := map[string]bool{}
+		for _, version := range []int{2, 3, 4, 5} {
+			selected, err := transport.treeAt(ctx, commit.Tree, fmt.Sprintf("v%d", version), strings.TrimPrefix(lineage, "lineage:"))
+			if err != nil {
+				return CloneStorageAudit{}, err
+			}
+			if selected != "" {
+				report.TransportFormats = append(report.TransportFormats, version)
+				if version != 5 {
+					report.ConversionRequired = true
+				}
+			}
+		}
+		for _, previous := range []bool{true, false} {
+			legacy, err := transport.legacySnapshot(ctx, commit.Tree, lineage, previous)
+			if err != nil {
+				return CloneStorageAudit{}, err
+			}
+			for _, object := range legacy.Objects {
+				seen[object.Envelope.EnvelopeSHA256] = true
+			}
+		}
 		for _, block := range blocks {
 			for _, object := range block.Objects {
 				seen[object.Envelope.EnvelopeSHA256] = true

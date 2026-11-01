@@ -183,10 +183,10 @@ func TestTwoMachinesSyncThroughOneRemote(t *testing.T) {
 		}
 	}
 	files, err := exec.Command("git", "-C", a.syncer.Clone, "ls-tree", "-r", "--name-only", "HEAD").Output()
-	if err != nil || strings.Count(string(files), "\n") != 3 || !strings.Contains(string(files), "v4/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/blocks/") {
+	if err != nil || strings.Count(string(files), "\n") != 3 || !strings.Contains(string(files), "v5/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/blocks/") {
 		t.Fatalf("memory repository files:\n%s %v", files, err)
 	}
-	for _, name := range []string{"index", "v4", ".git"} {
+	for _, name := range []string{"index", "v5", ".git"} {
 		if _, err := os.Lstat(filepath.Join(a.syncer.Clone, name)); !os.IsNotExist(err) {
 			t.Fatalf("bare sync created %s: %v", name, err)
 		}
@@ -769,7 +769,7 @@ func TestFormatTwoConversionPreservesRemoteOnlyHistory(t *testing.T) {
 		t.Fatalf("convert: %#v %v", converted, err)
 	}
 	log, err := exec.Command("git", "-C", b.syncer.Clone, "log", "-1", "--format=%s").Output()
-	if err != nil || !strings.Contains(string(log), "convert to format 4") {
+	if err != nil || !strings.Contains(string(log), "convert to format 5") {
 		t.Fatalf("conversion commit: %q %v", log, err)
 	}
 	if _, err := a.syncer.Convert(context.Background()); err != nil {

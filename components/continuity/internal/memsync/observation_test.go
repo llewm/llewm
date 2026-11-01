@@ -146,7 +146,7 @@ func TestObservedOldGitBytesRemainCoveredByExplicitFullAudit(t *testing.T) {
 	if err != nil || len(blocks) == 0 {
 		t.Fatalf("fixture blocks: %v", err)
 	}
-	directory, err := recordsync.BlockDirectory(testLineage)
+	directory, err := gitBlockDirectory(testLineage)
 	if err != nil {
 		t.Fatal(err)
 	}

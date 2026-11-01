@@ -161,6 +161,10 @@ Setup creates native bare clones. Existing working clones require explicit
 storage migration; normal opening never converts them or initializes replacement
 history. A migrated clone requires its exact owner, preparation and completion
 receipts before use. Reading an incomplete cutover fails closed.
+The explicit full storage audit validates supported old wire formats as well as
+format 5, reports the selected lineage's formats and whether conversion is still
+required. This lets storage cutover finish before wire conversion; ordinary sync
+still refuses old formats.
 
 The bare-clone cutover coordinator takes nonblocking migration and
 legacy sync locks and inventories the clean source, all resolved refs, immediate
@@ -250,10 +254,11 @@ unknown mutations. Missing, damaged, oversized or stale tracking takes complete
 materialization, without acknowledging an oversized pending set.
 
 Completion proof version 5 requires a current publication cursor with no pending
-local intent. Normal changed cycles avoid full archive/publication scans, but
-still read the complete local semantic catalog and run selector/dependency and
-canonical-state guards. The flat block directory still incurs linear tree work.
-This is not a complete-cycle scaling claim.
+local intent. Normal changed cycles can reuse guarded archive and canonical
+journal baselines. Missing or invalid tracking and large or sensitive dependency
+closures use the complete reference path. Git format 5 bounds selected block
+tree nodes; namespace ancestor listings still depend on the number of unrelated
+versions and lineages in the same repository.
 
 Private commit primitives independently verify bounded commit bytes before
 using tree/parent identities. A merge requires namespace policy validation,
@@ -264,30 +269,29 @@ expected tip, requires ancestry preservation and uses a durable compare-and-swap
 without replacing symbolic links. These primitives create no index or working
 tree. Normal publication and fetched-history adoption use these primitives.
 Merge commits can make the unpushed commit count larger than the number of new
-record blocks. Format-2/3 namespaces refuse ordinary adoption; explicit conversion
+record blocks. Format-2/3/4 namespaces refuse ordinary adoption; explicit conversion
 validates and archives every selected observation before one retirement commit.
 A stale peer retaining an old namespace must also run explicit conversion.
 
-Private block-object publication validates exact format-4 block bytes, appends
-only canonical immutable paths and preserves unrelated root entries and lineage
+Block-object publication validates exact format-4 block frames, appends
+only canonical immutable identities and preserves unrelated root entries and lineage
 trees. Arrival validation opens only changed selected subtrees, checks every new
 blob's Git identity and block/envelope hashes, and rejects block replacement or
 removal. Unsupported selected-lineage formats refuse; other lineages remain
 opaque. Object writes request fsync before subsequent commit/ref publication.
-The existing flat block directory still needs listing when changed; these
-primitives are not a complete-cycle scaling result. The current cycle still
-reconstructs complete block/provenance inventories and semantic snapshots.
-
-Private radix-tree primitives stage the replacement for flat Git block trees.
+Git format 5 replaces flat block paths with adaptive radix trees.
 Leaf buckets hold at most 64 full-hash block names; larger buckets branch on
 successive hash bytes, with at most 256 children per node and 32 levels. Appends
 split only overflowing buckets. Delta validation permits structural relocation
 only when every existing hash retains its exact Git blob identity, and rejects
 removal, replacement, mixed nodes and noncanonical bucket sizes. New subtrees
 receive complete structural validation; previously verified unchanged subtrees
-are reused by identity. These primitives do not yet change the active wire
-format, conversion command or runtime. Concurrent merge normalization and explicit
-conversion must land before the runtime uses them.
+are reused by identity. A concurrent merge can temporarily produce an oversized
+or mixed bucket. Before committing, the runtime normalizes only trees created by
+that merge and validates that the local parent's block identities survive.
+Unchanged input subtrees are not walked during normalization. Publication
+membership uses a hash-prefix point lookup instead of listing the full inventory.
+The block frame codec and shared-folder format remain 4; only Git paths change.
 
 ### Unchanged syncs
 
@@ -650,7 +654,9 @@ restoring the previous automatic-sync setting.
   Git-note and work-narrative commit policy, because they are machine records, not
   engineering work.
 - The repository holds curated, redacted, immutable envelopes in content-addressed
-  blocks at `v4/<lineage>/blocks/<block-sha256>.block`. There is no
+  blocks under `v5/<lineage>/blocks/`. A bucket with at most 64 blocks stores full
+  `<block-sha256>.block` names; larger buckets use successive two-hex-digit hash
+  prefix directories. There is no
   SQLite, no device-private data (raw events, sessions, usage, hook telemetry), and no
   credentials.
 - A project that opts in to cross-machine leases (`[leases] remote = true`) also
@@ -664,12 +670,14 @@ restoring the previous automatic-sync setting.
   remote must accept pushes to custom refs. Like the history branch, they are
   never edited or deleted by hand.
 
-## Format 4 conversion
+## Format 5 conversion
 
-Format 4 packs the existing canonical envelopes into immutable, bounded blocks.
-Ordinary Git sync refuses older tracked records. Before adopting a format-4 binary:
+Format 5 gives Git blocks a bounded adaptive tree layout. Format-4 block frames
+retain their exact bytes, hashes and Git blob identities. Format-2/3 observations
+use the existing explicit envelope conversion and packing rules.
+Ordinary Git sync refuses older tracked records for the selected lineage.
 
-The format-4 build advances the local writer floor to API 135. Existing older
+Migration 095 advances the local writer floor to API 138. Existing older
 client processes must be restarted before they can write to the upgraded store.
 This local fence does not stop a different device's sync process; stop or upgrade
 every writer on the lineage before conversion.
@@ -692,12 +700,17 @@ every writer on the lineage before conversion.
 llewm sync convert --writers-stopped --output json
 ```
 
-The converter fetches before examining the old partition and validates each
+The converter fetches before retiring the old partition and validates each
 tracked observation's bytes, lineage, hash and path. It packs every v3 envelope,
 including remote-only records and rejected heads, without changing its bytes.
-It stages the blocks and retires tracked v3 paths in a normal memory Git commit;
-the original bytes remain in Git history and the local archive. Format-2 records
-first pass through the existing explicit format-3 conversion.
+It relocates every format-4 block without repacking it, and retires only this
+lineage's old namespaces in a parent-preserving commit. Other lineages and opaque
+root entries retain their identities. Original commits remain ancestors, and
+observations remain in the local archive. Format-2 records first pass through
+the existing explicit format-3 conversion. A partial conversion may retain both
+old and new namespaces; repeating the explicit command validates their union
+and finishes the retirement. A peer with an old local namespace must also use
+explicit conversion before ordinary sync.
 
 Retired contract-family observations are carried forward as archival transport
 records and continue to be skipped by operational import. Conversion refuses

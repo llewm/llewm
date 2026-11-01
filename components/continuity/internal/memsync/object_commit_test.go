@@ -48,7 +48,7 @@ func TestObjectCommitPreservesDivergentParentsWithoutMovingRefs(t *testing.T) {
 				}
 				return nil
 			}
-			merged, err := transport.mergeCommits(ctx, local, remote, "merge immutable history\n", validate)
+			merged, err := transport.mergeCommits(ctx, local, remote, "merge immutable history\n", validate, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -73,14 +73,14 @@ func TestObjectCommitPreservesDivergentParentsWithoutMovingRefs(t *testing.T) {
 				_, err := transport.mergeCommits(ctx, pair[0], pair[1], "must refuse", func(context.Context, string, string, string) error {
 					called = true
 					return policyErr
-				})
+				}, nil)
 				if !called || !errors.Is(err, policyErr) {
 					t.Fatalf("merge or fast-forward bypassed rejection: %v", err)
 				}
 			}
 			allow := func(context.Context, string, string, string) error { return nil }
 			for _, tc := range []struct{ local, remote, want string }{{"", remote, remote}, {base, remote, remote}, {merged, remote, merged}, {remote, remote, remote}} {
-				got, err := transport.mergeCommits(ctx, tc.local, tc.remote, "no merge needed", allow)
+				got, err := transport.mergeCommits(ctx, tc.local, tc.remote, "no merge needed", allow, nil)
 				if err != nil || got != tc.want {
 					t.Fatalf("fast-forward/ancestor result: %s want %s: %v", got, tc.want, err)
 				}
@@ -95,7 +95,7 @@ func TestObjectCommitPreservesDivergentParentsWithoutMovingRefs(t *testing.T) {
 					return errors.New("incorrect unrelated-history policy inputs")
 				}
 				return nil
-			})
+			}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +113,7 @@ func TestObjectCommitPreservesDivergentParentsWithoutMovingRefs(t *testing.T) {
 			if _, err := transport.mergeCommits(ctx, merged, reverse, "ambiguous", func(context.Context, string, string, string) error {
 				called = true
 				return nil
-			}); err == nil || called {
+			}, nil); err == nil || called {
 				t.Fatalf("ambiguous base accepted or policy received arbitrary base: %v", err)
 			}
 			if _, err := transport.repo.run(ctx, "fsck", "--strict", "--no-reflogs", merged); err != nil {

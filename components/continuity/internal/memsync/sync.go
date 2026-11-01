@@ -308,7 +308,7 @@ func (s Syncer) now() time.Time {
 	return time.Now().UTC()
 }
 
-// Convert fetches and validates older observations and packs them into format 4.
+// Convert fetches and validates older observations and packs them into format 5.
 // All old writers must be stopped first. It needs the remote.
 func (s Syncer) Convert(ctx context.Context) (Result, error) {
 	return s.run(ctx, plan{push: true, convert: true})
