@@ -220,6 +220,10 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		return MemoryExport{}, expected, false, err
 	}
 	current, err := database.SyncSnapshot(ctx, tx, expected.Project, expected.Consumer)
+	if errors.Is(err, database.ErrCanonicalTracking) {
+		syncwork.RecordWork(ctx, "fallback_delta_tracking_unavailable", 1)
+		return MemoryExport{}, expected, false, nil
+	}
 	if err != nil {
 		return MemoryExport{}, expected, false, err
 	}

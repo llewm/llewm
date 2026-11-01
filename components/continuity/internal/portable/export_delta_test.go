@@ -213,6 +213,17 @@ func TestMemoryDeltaRollsBackRetentionBeforeReplay(t *testing.T) {
 	if _, err := (Service{DB: db}).Initialize(ctx, project, "lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
 		t.Fatal(err)
 	}
+	// Install fault injection before taking the receipt. Later schema changes
+	// must invalidate that receipt rather than reach the retention writer.
+	for _, statement := range []string{
+		`CREATE TABLE fixture_delta_fault(enabled INTEGER NOT NULL)`,
+		`INSERT INTO fixture_delta_fault VALUES(1)`,
+		`CREATE TRIGGER reject_delta_retention BEFORE INSERT ON portable_envelopes WHEN new.record_id='second' AND (SELECT enabled FROM fixture_delta_fault)=1 BEGIN SELECT RAISE(ABORT,'fixture interrupted retention'); END`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
 	baseline, _, _, err := database.ReadSyncChanges(ctx, db, project, "rollback", "archive", 100)
 	if err != nil {
 		t.Fatal(err)
@@ -229,9 +240,6 @@ func TestMemoryDeltaRollsBackRetentionBeforeReplay(t *testing.T) {
 	if err != nil || reason != "" {
 		t.Fatalf("changes: %s %v", reason, err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER reject_delta_retention BEFORE INSERT ON portable_envelopes WHEN new.record_id='second' BEGIN SELECT RAISE(ABORT,'fixture interrupted retention'); END`); err != nil {
-		t.Fatal(err)
-	}
 	if _, _, used, err := EncodeMemoryDelta(ctx, db, c, changes); err == nil || used {
 		t.Fatalf("interrupted retention succeeded: %t %v", used, err)
 	}
@@ -243,7 +251,7 @@ func TestMemoryDeltaRollsBackRetentionBeforeReplay(t *testing.T) {
 	if err != nil || reason != "" || replayed.Generation != c.Generation || replayed.Sequence != c.Sequence || len(pending) != len(changes) {
 		t.Fatalf("rollback changed receipt: %+v %s %v", replayed, reason, err)
 	}
-	if _, err := db.Exec(`DROP TRIGGER reject_delta_retention`); err != nil {
+	if _, err := db.Exec(`UPDATE fixture_delta_fault SET enabled=0`); err != nil {
 		t.Fatal(err)
 	}
 	if export, receipt, used, err := EncodeMemoryDelta(ctx, db, c, changes); err != nil || !used || len(export.Envelopes) != 2 || receipt.Sequence <= c.Sequence {

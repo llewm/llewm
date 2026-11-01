@@ -141,3 +141,55 @@ func TestCaptureProjectConsumesOnlyDerivedChanges(t *testing.T) {
 		t.Fatalf("cursor damage: %t %v", reused, err)
 	}
 }
+
+func TestCaptureProjectMissingCanonicalTriggerForcesCompleteExport(t *testing.T) {
+	for _, mode := range []string{"missing", "modified", "restored"} {
+		t.Run(mode, func(t *testing.T) { testCaptureProjectCanonicalTracking(t, mode) })
+	}
+}
+
+func testCaptureProjectCanonicalTracking(t *testing.T, mode string) {
+	ctx, db, project := indexedTestProject(t, "missing-canonical-trigger")
+	a, err := openTestArchive(t, db, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendDecision := func(id string) {
+		t.Helper()
+		if _, err := (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: id, Title: "Decision", Rationale: "Observation", Disposition: "accepted", Actor: "test", ActorType: "human", Authority: "caller_asserted"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendDecision("before")
+	for i := 0; i < 3; i++ {
+		if _, err := a.CaptureProject(ctx, db, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var definition string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='history_sync_decision_records_insert'`).Scan(&definition); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TRIGGER history_sync_decision_records_insert`); err != nil {
+		t.Fatal(err)
+	}
+	if mode == "modified" {
+		if _, err := db.Exec(`CREATE TRIGGER history_sync_decision_records_insert AFTER INSERT ON decision_records BEGIN SELECT 1; END`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendDecision("untracked-arrival")
+	if mode == "restored" {
+		if _, err := db.Exec(definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	measured, work := syncwork.WithWorkMetrics(ctx)
+	if reused, err := a.CaptureProject(measured, db, project); err != nil || reused || work.Counts()["capture_full_exports"] != 1 {
+		t.Fatalf("missing canonical tracking reused capture: %t %v %v", reused, err, work.Counts())
+	}
+	var records int
+	if err := db.QueryRow(`SELECT count(*) FROM history_archive_envelopes WHERE project_id=?`, project).Scan(&records); err != nil || records != 2 {
+		t.Fatalf("untracked arrival lost: %d %v", records, err)
+	}
+}

@@ -283,6 +283,13 @@ Changes in another known project no longer invalidate the proof. Missing tokens
 fail closed; journal edits or deletions invalidate proofs globally. The journal
 contains no record bodies and is not portable history or a peer receipt.
 
+The global component also binds SQLite's schema version. Before generation or
+cursor reuse, installed canonical change and journal counter triggers must match
+their compiled migration definitions. Missing, modified or unknown guards disable
+cursor acknowledgement and completion proofs, requiring complete capture.
+Restoring the original definitions still invalidates prior receipts because the
+missing interval may have hidden writes. Schema repair remains explicit.
+
 Migration 090 resolves checkpoint action transition ownership through its parent
 action, matching the portable export reader. Appending or carrying an action
 therefore invalidates only its project and can use selected capture. Reassigning

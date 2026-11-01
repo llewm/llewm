@@ -188,6 +188,8 @@ func recordCaptureCursorFallback(ctx context.Context, reason string, err error) 
 		name = "fallback_capture_global_change"
 	case "missing_changes":
 		name = "fallback_capture_missing_changes"
+	case "unknown_tracking":
+		name = "fallback_capture_unknown_tracking"
 	case "delta_limit":
 		name = "fallback_capture_delta_limit"
 	default:

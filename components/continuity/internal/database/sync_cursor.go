@@ -30,10 +30,17 @@ type SyncCursor struct {
 // writer transaction; a later independent snapshot could bless unrelated writes.
 func SyncSnapshot(ctx context.Context, tx *sql.Tx, project, consumer string) (SyncCursor, error) {
 	c := SyncCursor{Project: project, Consumer: consumer}
+	known, err := HistoryCanonicalTracking(ctx, tx)
+	if err != nil {
+		return c, err
+	}
+	if !known {
+		return c, ErrCanonicalTracking
+	}
 	if err := tx.QueryRowContext(ctx, syncGenerationQuery, project).Scan(&c.Generation); err != nil {
 		return c, err
 	}
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM history_sync_changes WHERE project_id=?`, project).Scan(&c.Sequence)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM history_sync_changes WHERE project_id=?`, project).Scan(&c.Sequence)
 	return c, err
 }
 
@@ -71,6 +78,13 @@ func ReadSyncChangesWithin(ctx context.Context, tx *sql.Tx, project, consumer, s
 	}
 	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM history_sync_changes WHERE project_id=?`, project).Scan(&next.Sequence); err != nil {
 		return next, nil, "", err
+	}
+	known, err := HistoryCanonicalTracking(ctx, tx)
+	if err != nil {
+		return next, nil, "", err
+	}
+	if !known {
+		return next, nil, "unknown_tracking", nil
 	}
 	saved := SyncCursor{Project: project, Consumer: consumer}
 	var checksum string
@@ -120,12 +134,30 @@ func ReadSyncChangesWithin(ctx context.Context, tx *sql.Tx, project, consumer, s
 // consumers call it after durable materialization; failure merely causes replay.
 // A racing write cannot be blessed by a later generation read.
 func RememberSyncCursor(ctx context.Context, db *sql.DB, c SyncCursor, state string) (bool, error) {
-	return rememberSyncCursor(ctx, db, c, state)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	ok, err := RememberSyncCursorWithin(ctx, tx, c, state)
+	if err != nil || !ok {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // RememberSyncCursorWithin commits the receipt with the caller's own writes.
 // Rollback discards both; the ordinary generation/sequence checks still apply.
 func RememberSyncCursorWithin(ctx context.Context, tx *sql.Tx, c SyncCursor, state string) (bool, error) {
+	// Reserve the writer before reading tracking definitions, including for a
+	// consumer whose cursor row has not been inserted yet.
+	if _, err := tx.ExecContext(ctx, `UPDATE history_sync_cursors SET sequence=sequence WHERE project_id=? AND 0`, c.Project); err != nil {
+		return false, err
+	}
+	known, err := HistoryCanonicalTracking(ctx, tx)
+	if err != nil || !known {
+		return false, err
+	}
 	return rememberSyncCursor(ctx, tx, c, state)
 }
 
