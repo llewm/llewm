@@ -186,6 +186,15 @@ expected tip, requires ancestry preservation and uses a durable compare-and-swap
 without replacing symbolic links. These primitives create no index or working
 tree and do not yet replace the normal sync cycle.
 
+Private block-object publication validates exact format-4 block bytes, appends
+only canonical immutable paths and preserves unrelated root entries and lineage
+trees. Arrival validation opens only changed selected subtrees, checks every new
+blob's Git identity and block/envelope hashes, and rejects block replacement or
+removal. Unsupported selected-lineage formats refuse; other lineages remain
+opaque. Object writes request fsync before subsequent commit/ref publication.
+The existing flat block directory still needs listing when changed; these
+primitives are not a complete-cycle scaling result or the active backend.
+
 ### Unchanged syncs
 
 Migration 081 adds device-local completion proofs for Git sync. SQL triggers

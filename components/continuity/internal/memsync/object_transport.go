@@ -218,7 +218,9 @@ func (t *objectTransport) writeObject(ctx context.Context, kind string, body []b
 		return "", err
 	}
 	var output = boundedObjectBuffer{limit: 65}
-	if err := t.repo.execOut(ctx, bytes.NewReader(body), &output, []string{"hash-object", "-w", "-t", kind, "--stdin"}); err != nil {
+	repo := t.repo
+	repo.Durable = true
+	if err := repo.execOut(ctx, bytes.NewReader(body), &output, []string{"hash-object", "-w", "-t", kind, "--stdin"}); err != nil {
 		return "", err
 	}
 	if output.String() != expected+"\n" {
