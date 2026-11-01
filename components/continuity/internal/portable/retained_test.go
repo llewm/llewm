@@ -317,7 +317,7 @@ func TestSnapshotEncodingReuseRejectsInvalidRetention(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
-			if _, err := LocalEnvelopesForImport(ctx, tx, id); err == nil {
+			if _, err := LocalEnvelopesForImport(ctx, tx, id, nil); err == nil {
 				t.Fatal("import comparison accepted invalid retained envelope")
 			}
 		})

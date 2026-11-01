@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+	"time"
+
+	"github.com/llewm/llewm/components/continuity/internal/attribution"
+	"github.com/llewm/llewm/components/continuity/internal/decision"
 
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
@@ -143,5 +147,61 @@ func TestMixedHistoryMatchesFullImporter(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A prior incoming actor can be present only as a raw local row. The smaller
+// affected bundle omits it; proof renewal must still compare its exact bytes.
+func TestMixedPresentIncludesPriorUnretainedInvocation(t *testing.T) {
+	ctx, db, project := indexedTestProject(t, "present-unretained-actor")
+	at := time.Unix(1234567890, 0).UTC()
+	if _, err := (attribution.Service{DB: db}).AppendInvocation(ctx, attribution.Invocation{ID: "actor", ProjectID: project, ActorType: "agent", IdentitySource: "caller_asserted", OccurredAt: at, ReceivedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := portable.LocalEnvelopesForImport(ctx, tx, project, []portable.EncodedEnvelope{{Envelope: portable.Envelope{RecordType: "actor_invocation", RecordID: "actor"}}})
+	tx.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := local[portable.RecordKey("actor_invocation", "actor", 0)]
+	if len(actor.Bytes) == 0 {
+		t.Fatal("missing actor fixture")
+	}
+	index := Index{DB: db, ProjectID: project, Lineage: lineage}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{actor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := index.ImportBlocks(ctx, []Block{block}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var retained int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM portable_envelopes WHERE project_id=? AND record_type='actor_invocation'", project).Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("actor retained=%d: %v", retained, err)
+	}
+	if _, err := (decision.Service{DB: db}).Append(ctx, decision.Record{ProjectID: project, ID: "arrival", Title: "Arrival", Rationale: "Observation", Disposition: "accepted", Actor: "owner", ActorType: "human", Authority: "caller_asserted"}); err != nil {
+		t.Fatal(err)
+	}
+	export, err := portable.EncodeMemoryExport(ctx, db, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := append(export.Envelopes, actor)
+	hash, ok := mixedReplaySet(objects)
+	if !ok {
+		t.Fatal("ineligible fixture")
+	}
+	got, used, err := index.tryMixedAdditions(ctx, hash, objects)
+	if err != nil || !used {
+		t.Fatalf("present renewal used=%t result=%+v: %v", used, got, err)
+	}
+	if _, proof, err := index.mixedReplaySnapshot(ctx, hash, objects, ""); err != nil || !proof {
+		t.Fatalf("missing renewed proof: %v", err)
 	}
 }

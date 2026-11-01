@@ -160,7 +160,7 @@ func (s Index) completeReferenceSnapshotWithin(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return nil, nil, nil, false, err
 	}
-	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID, objects)
 	if err != nil {
 		return nil, nil, nil, false, err
 	}

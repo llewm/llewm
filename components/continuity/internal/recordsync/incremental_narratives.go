@@ -54,7 +54,7 @@ func (s Index) checkNarrativeLocal(ctx context.Context, tx *sql.Tx, objects []po
 	if recoveries != 0 {
 		return errNarrativeProofChanged
 	}
-	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID, objects)
 	if err != nil {
 		return err
 	}

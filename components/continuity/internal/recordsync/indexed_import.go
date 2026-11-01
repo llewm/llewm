@@ -228,7 +228,7 @@ func (s Index) mixedReplaySnapshot(ctx context.Context, setHash string, objects 
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM redaction_recoveries WHERE project_id=?`, s.ProjectID).Scan(&recoveries); err != nil || recoveries != 0 {
 		return "", false, err
 	}
-	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID, objects)
 	if err != nil {
 		return "", false, err
 	}
@@ -366,7 +366,7 @@ func (s Index) validatedNarrativesPresent(ctx context.Context, setHash string, o
 	if err != nil || count == 0 {
 		return false, err
 	}
-	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID, objects)
 	if err != nil {
 		return false, err
 	}

@@ -629,6 +629,16 @@ parent invocations, loaded in bounded batches. Unrelated invocation activity
 is excluded. This preserves the attribution dependencies needed by a fresh
 destination.
 
+Complete import planning and replay proof snapshots validate saved curated
+history and its invocation dependency closure. Roots include incoming invocation
+identities and references, retained invocation identities, raw curated bindings,
+and recovered original identities and references. Retained or recovered wire
+references can expand the closure; parent discovery and body validation stay in
+the caller's transaction until the closure is complete. A required malformed
+invocation still blocks validation. Unrelated raw invocation activity remains
+stored and does not block curated sync, regardless of bundle size. Export
+selection and transaction/generation guards are unchanged.
+
 Writer API 124 retains each canonical envelope in an append-only local table
 at its first memory export or successful import (migration 076). Later exports
 reuse that form, including after a root move. Imported prose is already portable;
@@ -855,6 +865,13 @@ canonical importer scans. Mixed-addition guards sort local identities and hash
 each payload once to compute both the prior state excluding additions and the
 complete renewed state. Both hashes preserve their existing proof encoding;
 the complete local-state comparison and canonical import checks still apply.
+`import_invocation_closure_rounds/op` counts curated import snapshot passes,
+including passes repeated for references discovered in retained wire forms.
+`import_invocation_metadata_rows/op` counts parent-discovery rows, and
+`invocation_rows_loaded/op` counts invocation bodies scanned by the shared loader
+(including exports and repeated passes). These count attempted work, not unique
+identities or proof completeness.
+
 `operational_full_loads/op` counts complete operational snapshot load attempts;
 `operational_delta_loads/op` counts selected loads that reach specification
 assembly. `operational_specs_loaded/op` counts assembled envelope specifications

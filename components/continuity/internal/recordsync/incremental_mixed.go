@@ -113,8 +113,17 @@ func (s Index) tryMixedAdditions(ctx context.Context, setHash string, objects []
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM redaction_recoveries WHERE project_id=?`, s.ProjectID).Scan(&recoveries); err != nil || recoveries != 0 {
 			return errMixedProofChanged
 		}
-		if local == nil {
-			local, err = portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+		missingActor := false
+		for _, object := range objects {
+			e := object.Envelope
+			if e.RecordType == "actor_invocation" {
+				if _, ok := local[portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)]; !ok {
+					missingActor = true
+				}
+			}
+		}
+		if local == nil || missingActor {
+			local, err = portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID, objects)
 			if err != nil {
 				return fmt.Errorf("%w: %v", errMixedProofChanged, err)
 			}

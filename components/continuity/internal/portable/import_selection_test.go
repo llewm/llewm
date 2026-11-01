@@ -31,7 +31,7 @@ func verifyImportSelections(t *testing.T, ctx context.Context, db *sql.DB, proje
 	if err != nil {
 		t.Fatal(err)
 	}
-	full, err := LocalEnvelopesForImport(ctx, tx, project)
+	full, err := LocalEnvelopesForImport(ctx, tx, project, objects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestImportSelectionPlansMatchCompleteSnapshot(t *testing.T) {
 	if _, used, err := loadImportSelection(ctx, tx, project, root, identity.LineageID, []EncodedEnvelope{damaged}, make(snapshotEncodings)); !used || err == nil {
 		t.Fatalf("selected damage was accepted: %t %v", used, err)
 	}
-	if _, err := LocalEnvelopesForImport(ctx, tx, project); err == nil {
+	if _, err := LocalEnvelopesForImport(ctx, tx, project, nil); err == nil {
 		t.Fatal("complete snapshot accepted omitted damage")
 	}
 }

@@ -61,6 +61,8 @@ func guardedRecoveryComparison(source queryer) bool {
 		return true
 	case *recordSelectionSource:
 		return guardedRecoveryComparison(value.queryer)
+	case *importInvocationSource:
+		return guardedRecoveryComparison(value.queryer)
 	default:
 		return false
 	}

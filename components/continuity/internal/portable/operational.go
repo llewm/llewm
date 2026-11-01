@@ -79,7 +79,7 @@ func LoadOperationalRecords(ctx context.Context, db *sql.DB, projectID string) (
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&databaseSchema); err != nil {
 		return OperationalRecordSet{}, err
 	}
-	records, missing, err := loadOperationalSpecs(ctx, tx, projectID, projectRoot, identity.LineageID, false, nil)
+	records, missing, err := loadOperationalSpecs(ctx, tx, projectID, projectRoot, identity.LineageID, false, nil, nil)
 	if err != nil {
 		return OperationalRecordSet{}, err
 	}
@@ -140,7 +140,7 @@ func projectRootFrom(ctx context.Context, source queryer, projectID string) (str
 // through the export helpers without changing their signatures.
 const rootSeparator = "\x00"
 
-func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string, allInvocations bool, validated snapshotEncodings) ([]EnvelopeSpec, []Reference, error) {
+func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projectRoot, lineageID string, allInvocations bool, validated snapshotEncodings, invocationRoots map[string]struct{}) ([]EnvelopeSpec, []Reference, error) {
 	syncwork.RecordWork(ctx, "operational_full_loads", 1)
 	checkpointSpecs, err := loadCheckpointSpecs(ctx, source, projectID, projectRoot, lineageID)
 	if err != nil {
@@ -222,6 +222,15 @@ func loadOperationalSpecs(ctx context.Context, source queryer, projectID, projec
 		return nil, nil, err
 	}
 	records = append(records, recoverySpecs...)
+	if invocationRoots != nil {
+		for id := range roadmapInvocations {
+			invocationRoots[id] = struct{}{}
+		}
+		for _, spec := range records {
+			addImportInvocationRoots(invocationRoots, Envelope{RecordType: spec.RecordType, RecordID: spec.RecordID, Refs: spec.Refs})
+		}
+		roadmapInvocations = invocationRoots
+	}
 	narratives, missing, err := loadNarrativeAndInvocationSpecs(ctx, source, projectID, projectRoot, lineageID, roadmapInvocations, allInvocations)
 	if err != nil {
 		return nil, nil, err
@@ -418,9 +427,11 @@ func loadInvocations(ctx context.Context, source queryer, projectID string, ids 
 	return result, nil
 }
 
+const invocationRecordsQuery = `SELECT id,session_id,parent_invocation_id,actor_type,client,client_version,provider,model,identity_source,occurred_at,received_at,schema_version,effort_requested_raw,effort_requested_normalized,effort_requested_source,effort_requested_authority,effort_effective_raw,effort_effective_normalized,effort_effective_source,effort_effective_authority FROM actor_invocations WHERE project_id=?`
+
 func loadInvocationBatch(ctx context.Context, source queryer, projectID string, ids map[string]struct{}, all bool) ([]attribution.Invocation, error) {
 	args := []any{projectID}
-	query := `SELECT id,session_id,parent_invocation_id,actor_type,client,client_version,provider,model,identity_source,occurred_at,received_at,schema_version,effort_requested_raw,effort_requested_normalized,effort_requested_source,effort_requested_authority,effort_effective_raw,effort_effective_normalized,effort_effective_source,effort_effective_authority FROM actor_invocations WHERE project_id=?`
+	query := invocationRecordsQuery
 	if !all {
 		if len(ids) == 0 {
 			return []attribution.Invocation{}, nil
@@ -451,6 +462,7 @@ func loadInvocationBatch(ctx context.Context, source queryer, projectID string, 
 		if err := rows.Scan(&value.ID, &session, &parent, &value.ActorType, &client, &clientVersion, &provider, &model, &value.IdentitySource, &occurred, &received, &value.SchemaVersion, &requestedRaw, &requestedNormalized, &requestedSource, &requestedAuthority, &effectiveRaw, &effectiveNormalized, &effectiveSource, &effectiveAuthority); err != nil {
 			return nil, err
 		}
+		syncwork.RecordWork(ctx, "invocation_rows_loaded", 1)
 		value.ProjectID = projectID
 		value.SessionID, value.ParentInvocationID = nullString(session), nullString(parent)
 		value.Client, value.ClientVersion = nullString(client), nullString(clientVersion)
@@ -654,19 +666,22 @@ func planValidatedOperationalImport(ctx context.Context, source queryer, project
 	if snapshot == nil {
 		localSpecs, selected, err = loadImportSelection(ctx, source, projectID, projectRoot, identity.LineageID, bundle.Records, validated)
 	}
+	var local map[string]EncodedEnvelope
 	if err == nil && !selected {
-		localSpecs, _, err = loadOperationalSpecs(ctx, source, projectID, projectRoot, identity.LineageID, true, validated)
+		local, err = localEnvelopesForImport(ctx, source, projectID, bundle.Records)
 	}
 	if err != nil {
 		return ImportPlan{}, err
 	}
-	local := make(map[string]EncodedEnvelope, len(localSpecs))
-	for _, spec := range localSpecs {
-		encoded, err := validated.encode(ctx, spec)
-		if err != nil {
-			return ImportPlan{}, err
+	if selected {
+		local = make(map[string]EncodedEnvelope, len(localSpecs))
+		for _, spec := range localSpecs {
+			encoded, err := validated.encode(ctx, spec)
+			if err != nil {
+				return ImportPlan{}, err
+			}
+			local[recordKey(encoded.Envelope)] = encoded
 		}
-		local[recordKey(encoded.Envelope)] = encoded
 	}
 	counts := emptyPlanCounts()
 	if snapshot != nil {

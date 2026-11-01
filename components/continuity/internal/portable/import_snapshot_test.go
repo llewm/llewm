@@ -43,7 +43,7 @@ func TestAlreadyPresentImportSharesValidatedSnapshot(t *testing.T) {
 		Appended: func(context.Context, *sql.Tx) error { t.Fatal("already-present import appended records"); return nil },
 		Present: func(ctx context.Context, tx *sql.Tx, snapshot map[string]EncodedEnvelope) error {
 			called = true
-			fresh, err := LocalEnvelopesForImport(ctx, tx, project)
+			fresh, err := LocalEnvelopesForImport(ctx, tx, project, nil)
 			if err != nil {
 				return err
 			}

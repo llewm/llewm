@@ -122,7 +122,7 @@ func loadMemoryExportSnapshot(ctx context.Context, source queryer, projectID str
 		return snapshot, err
 	}
 	snapshot.validated = make(snapshotEncodings)
-	snapshot.specs, _, err = loadOperationalSpecs(ctx, source, projectID, root, identity.LineageID, false, snapshot.validated)
+	snapshot.specs, _, err = loadOperationalSpecs(ctx, source, projectID, root, identity.LineageID, false, snapshot.validated, nil)
 	if err != nil {
 		return snapshot, err
 	}
