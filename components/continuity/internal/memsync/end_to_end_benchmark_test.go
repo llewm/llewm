@@ -114,7 +114,7 @@ func BenchmarkHistorySyncRemoteMixedHistory(b *testing.B) {
 
 func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 	ctx := context.Background()
-	for _, size := range []int{500, 5669} {
+	for _, size := range []int{500, 5669, 10000} {
 		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
 			origin := bareRemote(b)
 			m := newMachine(b, "plan-history", origin)

@@ -70,7 +70,7 @@ func (s Syncer) observeGitPublications(ctx context.Context, repo git, lineage st
 			return nil, nil, fmt.Errorf("observed Git history became empty")
 		}
 
-		stamp, accepted, err := index.ObservePublicationBatch(ctx, *s.Archive, s.Endpoint(), previous.Stamp, full, blocks)
+		mutation, accepted, err := index.ObservePublicationBatch(ctx, *s.Archive, s.Endpoint(), previous.Stamp, full, blocks)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -82,8 +82,12 @@ func (s Syncer) observeGitPublications(ctx context.Context, repo git, lineage st
 			syncwork.RecordWork(ctx, "fallback_git_observation_race", 1)
 			continue
 		}
+		stamp := mutation.After
 		if stamp == (recordsync.ObservationStamp{}) || buildinfo.Current().BuildDirty {
 			return blocks, nil, nil
+		}
+		if err := s.journalAfterObservation(ctx, repo, lineage, tree, mutation); err != nil {
+			return nil, nil, err
 		}
 		next := gitObservationReceipt{Version: 1, Route: route, Tree: tree, Stamp: stamp}
 		if next != previous {
@@ -109,6 +113,9 @@ func (s Syncer) advanceObservedInventory(lineage string, receipt *gitObservation
 	}
 	if receipt.Route != route || receipt.Stamp.ArchiveEpoch != stamp.ArchiveEpoch || receipt.Stamp.Schema != stamp.Schema {
 		return fmt.Errorf("publication observation binding changed")
+	}
+	if receipt.Stamp == stamp {
+		return nil
 	}
 	receipt.Stamp = stamp
 	return s.Archive.SaveStatus(key, *receipt)

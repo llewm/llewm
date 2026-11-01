@@ -202,13 +202,13 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if err := aa.CaptureLocal(export.Envelopes); err != nil {
 		t.Fatal(err)
 	}
-	blocks, snapshot, err := a.syncer.publishBlocks(ctx, testLineage)
-	if err != nil || len(blocks) == 0 {
-		t.Fatalf("publish: %d %v", len(blocks), err)
-	}
 	repo, err := a.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	blocks, snapshot, err := a.syncer.publishBlocks(ctx, repo, testLineage)
+	if err != nil || len(blocks) == 0 {
+		t.Fatalf("publish: %d %v", len(blocks), err)
 	}
 	directory, _ := recordsync.BlockDirectory(testLineage)
 	untracked := filepath.Join(a.syncer.Clone, directory, "untracked.block")

@@ -133,7 +133,7 @@ func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage 
 	return bodies, nil
 }
 
-func (s Syncer) publishBlocks(ctx context.Context, lineage string, observation ...*gitObservationReceipt) ([]recordsync.Block, []recordsync.Block, error) {
+func (s Syncer) publishBlocks(ctx context.Context, repo git, lineage string, observation ...*gitObservationReceipt) ([]recordsync.Block, []recordsync.Block, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return nil, nil, fmt.Errorf("matching history archive is required for block publication")
 	}
@@ -141,14 +141,18 @@ func (s Syncer) publishBlocks(ctx context.Context, lineage string, observation .
 	if len(observation) == 0 || observation[0] == nil {
 		return index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay)
 	}
-	blocks, snapshot, stamp, err := index.PlanObservedPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay, observation[0].Stamp)
+	scope, err := s.journalPublicationScope(ctx, repo, lineage, observation[0].Stamp, observation[0].Tree)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := s.advanceObservedInventory(lineage, observation[0], stamp); err != nil {
+	plan, err := index.PlanJournalPublication(ctx, *s.Archive, scope, false)
+	if err != nil {
 		return nil, nil, err
 	}
-	return blocks, snapshot, nil
+	if err := s.advanceObservedInventory(lineage, observation[0], plan.Observed); err != nil {
+		return nil, nil, err
+	}
+	return plan.Blocks, plan.Snapshot, nil
 }
 
 // commitBlocks publishes only exact validated objects through an attached
@@ -200,11 +204,25 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return recordsync.ImportResult{}, fmt.Errorf("matching history archive is required for block import")
 	}
-	blocks, _, err := s.observeGitPublications(ctx, repo, lineage, false)
+	blocks, observed, err := s.observeGitPublications(ctx, repo, lineage, false)
 	if err != nil {
 		return recordsync.ImportResult{}, err
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
+	if observed != nil {
+		scope, err := s.journalPublicationScope(ctx, repo, lineage, observed.Stamp, observed.Tree)
+		if err != nil {
+			return recordsync.ImportResult{}, err
+		}
+		plan, err := index.PlanJournalPublication(ctx, *s.Archive, scope, true)
+		if err != nil {
+			return recordsync.ImportResult{}, err
+		}
+		if err := s.advanceObservedInventory(lineage, observed, plan.Observed); err != nil {
+			return recordsync.ImportResult{}, err
+		}
+		return index.ImportBlocks(ctx, plan.Snapshot)
+	}
 	// The publication snapshot is complete at its scan time. Reuse it only
 	// when every fetched record was already present with the same bytes;
 	// otherwise rescan after observation to include newly received records.

@@ -68,6 +68,46 @@ func folderCycle(t *testing.T, m machine, archive recordsync.Archive, endpoint f
 	return result
 }
 
+func TestHybridIdleFolderCycleKeepsGitJournalReady(t *testing.T) {
+	ctx := context.Background()
+	remote := bareRemote(t)
+	bridge, peer := newMachine(t, "bridge", remote), newMachine(t, "git-peer", remote)
+	archiveMachine(t, &peer)
+	bridgeArchive := archiveMachine(t, &bridge)
+	folder := localHistoryMachine(t, "folder-peer")
+	folderArchive := archiveMachine(t, &folder)
+	shared := t.TempDir()
+	marker, err := foldersync.Create(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := foldersync.Endpoint{Name: "personal", Directory: shared, StoreID: marker.StoreID, LineageID: testLineage}
+	peer.decide(t, "git-origin", "Git history")
+	peer.sync(t, OutcomeSynced)
+	bridge.decide(t, "bridge-origin", "Local history")
+	bridge.sync(t, OutcomeSynced)
+	folder.decide(t, "folder-origin", "Folder history")
+	folderCycle(t, folder, folderArchive, endpoint)
+	folderCycle(t, bridge, bridgeArchive, endpoint)
+	warmUnchanged(t, bridge)
+	index := recordsync.Index{DB: bridge.db, ProjectID: bridge.project, Lineage: testLineage}
+	for i := 0; i < 3; i++ {
+		before, err := index.ObservationStamp(ctx, bridgeArchive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := folderCycle(t, bridge, bridgeArchive, endpoint)
+		if result.ImportedRecords != 0 || result.PublishedRecords != 0 {
+			t.Fatalf("idle folder changed history: %+v", result)
+		}
+		after, err := index.ObservationStamp(ctx, bridgeArchive)
+		if err != nil || before != after {
+			t.Fatalf("idle folder invalidated Git inventory: %+v/%+v %v", before, after, err)
+		}
+		warmUnchanged(t, bridge)
+	}
+}
+
 func TestHybridThreeMachinesConvergeWithExplicitDestinationRelays(t *testing.T) {
 	ctx := context.Background()
 	remote := bareRemote(t)

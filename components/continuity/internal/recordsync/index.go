@@ -303,6 +303,8 @@ func (s Index) Clear(ctx context.Context) error {
 // whose publication membership must survive. An unavailable or incomplete
 // endpoint must stop the coordinator before it calls Rebuild. Staged intent
 // absent from a supplied endpoint is retained only if its stored block validates.
+// The local semantic catalog is disposable and may be reconstructed from the
+// durable archive; it never requires a transport inventory of its own.
 func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) error {
 	verified := make(map[string]Block)
 	count, size, memberships := 0, 0, 0
@@ -365,6 +367,9 @@ func (s Index) Rebuild(ctx context.Context, inventories map[string][]Block) erro
 		if err := rows.Scan(&endpoint, &block); err != nil {
 			rows.Close()
 			return err
+		}
+		if endpoint == Hash("local-snapshot:"+s.Lineage) && provided[endpoint] == nil {
+			continue
 		}
 		if provided[endpoint] == nil {
 			rows.Close()

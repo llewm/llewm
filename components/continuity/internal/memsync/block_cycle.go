@@ -109,7 +109,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if _, err := s.Archive.CaptureProject(local, s.DB, s.ProjectID); err != nil {
 		return result, err
 	}
-	blocks, snapshot, err := s.publishBlocks(local, identity.LineageID, observation)
+	blocks, snapshot, err := s.publishBlocks(local, repo, identity.LineageID, observation)
 	if err != nil {
 		return result, err
 	}

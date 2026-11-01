@@ -74,8 +74,9 @@ func TestGitFolderCoordinatorRecoversCommittedPublicationIntent(t *testing.T) {
 	if _, err := runHistorySync(ctx, application, false, false); err != nil {
 		t.Fatalf("coordinated rebuild: %v", err)
 	}
+	// Local semantic membership is not a transport destination.
 	var members int
-	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash).Scan(&members); err != nil || members != 2 {
+	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=? AND endpoint_hash<>?`, application.ProjectID, staged[0].Hash, recordsync.Hash("local-snapshot:"+status.Identity.LineageID)).Scan(&members); err != nil || members != 2 {
 		t.Fatalf("publication memberships: %d %v", members, err)
 	}
 }
@@ -135,8 +136,9 @@ func TestFolderOnlyCoordinatorRecoversFromAnotherEndpoint(t *testing.T) {
 	if _, err := runHistorySync(ctx, application, false, false); err == nil {
 		t.Fatal("rebuild accepted an unavailable endpoint")
 	}
+	// Local semantic membership is not a transport destination.
 	var members int
-	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash).Scan(&members); err != nil || members != 1 {
+	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=? AND endpoint_hash<>?`, application.ProjectID, staged[0].Hash, recordsync.Hash("local-snapshot:"+identity.LineageID)).Scan(&members); err != nil || members != 1 {
 		t.Fatalf("unavailable endpoint changed staged membership: %d %v", members, err)
 	}
 	if err := os.Rename(markerPath+".unavailable", markerPath); err != nil {
@@ -145,7 +147,7 @@ func TestFolderOnlyCoordinatorRecoversFromAnotherEndpoint(t *testing.T) {
 	if _, err := runHistorySync(ctx, application, false, false); err != nil {
 		t.Fatalf("coordinated rebuild: %v", err)
 	}
-	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=?`, application.ProjectID, staged[0].Hash).Scan(&members); err != nil || members != 2 {
+	if err := application.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_publications WHERE project_id=? AND block_hash=? AND endpoint_hash<>?`, application.ProjectID, staged[0].Hash, recordsync.Hash("local-snapshot:"+identity.LineageID)).Scan(&members); err != nil || members != 2 {
 		t.Fatalf("staged and observed memberships: %d %v", members, err)
 	}
 }

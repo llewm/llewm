@@ -18,7 +18,7 @@ import (
 
 // Bump when the completion proof's interpretation changes. These device-local
 // proofs are disposable; a miss or uncertainty always runs the reference cycle.
-const syncProofVersion = 4
+const syncProofVersion = 5
 
 type syncGuard struct{ route, generation, tree, archive string }
 
@@ -58,7 +58,19 @@ func (s Syncer) guard(ctx context.Context, repo git) (syncGuard, error) {
 	if err != nil {
 		return g, err
 	}
-	trackingBody, _ := json.Marshal([]any{g.archive, observation})
+	tree, err := s.objectReader(repo).headTree(ctx)
+	if err != nil {
+		return g, err
+	}
+	scope, err := s.journalPublicationScope(ctx, repo, identity.LineageID, observation, tree)
+	if err != nil {
+		return g, err
+	}
+	publication, err := (recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID}).PublicationJournalStamp(ctx, a, scope)
+	if err != nil {
+		return g, err
+	}
+	trackingBody, _ := json.Marshal([]any{g.archive, observation, publication})
 	g.archive = recordsync.Hash(string(trackingBody))
 	g.tree, err = lineageTree(ctx, repo, "HEAD", identity.LineageID)
 	if err != nil {

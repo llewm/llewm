@@ -24,6 +24,10 @@ type ObservationStamp struct {
 	Schema       int64  `json:"schema"`
 }
 
+// ObservationMutation carries both snapshots from one reserved writer. A
+// consumer may advance only when it still holds the exact Before receipt.
+type ObservationMutation struct{ Before, After ObservationStamp }
+
 func (s Index) observationBinding(a Archive) error {
 	if s.DB == nil || a.DB != s.DB || a.ProjectID != s.ProjectID || a.Lineage != s.Lineage || s.ProjectID == "" || !lineagePattern.MatchString(s.Lineage) {
 		return fmt.Errorf("matching project/archive database required")
@@ -79,7 +83,7 @@ func (s Index) ObservationStamp(ctx context.Context, a Archive) (ObservationStam
 // accepted=false without writes if its prior stamp is stale. Complete mode is
 // only for a complete verified transport snapshot, and audits durable data
 // before committing. Unavailable tracking never produces a reusable stamp.
-func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint string, expected ObservationStamp, complete bool, blocks []Block) (stamp ObservationStamp, accepted bool, err error) {
+func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint string, expected ObservationStamp, complete bool, blocks []Block) (mutation ObservationMutation, accepted bool, err error) {
 	if err = s.observationBinding(a); err != nil {
 		return
 	}
@@ -120,6 +124,9 @@ func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint 
 		if trackingErr != nil && !errors.Is(trackingErr, ErrObservationTracking) {
 			return trackingErr
 		}
+		if trackingErr == nil {
+			mutation.Before = before
+		}
 		if !complete && (trackingErr != nil || before != expected) {
 			return nil
 		}
@@ -147,9 +154,9 @@ func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint 
 			}
 		}
 		var err error
-		stamp, err = s.observationStampWithin(ctx, tx, a)
+		mutation.After, err = s.observationStampWithin(ctx, tx, a)
 		if errors.Is(err, ErrObservationTracking) {
-			stamp = ObservationStamp{}
+			mutation.After = ObservationStamp{}
 			err = nil
 		}
 		if err != nil {
@@ -160,12 +167,12 @@ func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint 
 	})
 	if err != nil {
 		accepted = false
-		stamp = ObservationStamp{}
+		mutation = ObservationMutation{}
 	}
 	return
 }
 
-func (s Index) observeBlockWithin(ctx context.Context, tx *sql.Tx, a Archive, endpointHash string, block Block) error {
+func (s Index) materializeBlockWithin(ctx context.Context, tx *sql.Tx, block Block) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_blocks(project_id,block_hash,index_version) VALUES(?,?,?) ON CONFLICT(project_id,block_hash) DO UPDATE SET index_version=excluded.index_version WHERE history_index_blocks.index_version IS NOT excluded.index_version`, s.ProjectID, block.Hash, IndexVersion); err != nil {
 		return err
 	}
@@ -182,6 +189,14 @@ func (s Index) observeBlockWithin(ctx context.Context, tx *sql.Tx, a Archive, en
 	if err := s.insertBlockObjects(ctx, tx, block); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (s Index) observeBlockWithin(ctx context.Context, tx *sql.Tx, a Archive, endpointHash string, block Block) error {
+	if err := s.materializeBlockWithin(ctx, tx, block); err != nil {
+		return err
+	}
+
 	if _, err := a.store().putWithin(ctx, tx, "ready", endpointHash, block.Objects); err != nil {
 		return err
 	}

@@ -175,37 +175,68 @@ func (s Index) planPublicationWithInventory(ctx context.Context, archive Archive
 	if err != nil {
 		return nil, nil, err
 	}
-	// The publication plan already contains stable, validated blocks whose
-	// objects are in this same archive snapshot. Preserve those identities for
-	// import instead of repacking old history whenever one envelope arrives.
-	covered := make(map[string]bool, len(inventory))
-	all := append([]Block(nil), blocks...)
-	for _, block := range blocks {
-		for _, object := range block.Objects {
-			covered[object.Envelope.EnvelopeSHA256] = true
-		}
+	// All transports share a complete local semantic catalog. Seeding only
+	// uncovered whole groups preserves existing identities without repeatedly
+	// adding overlapping residual groups when endpoint authorizations differ.
+	if err := s.seedSemanticPublications(ctx, archive, blocks, tracking...); err != nil {
+		return nil, nil, err
 	}
-	var remaining []portable.EncodedEnvelope
-	for _, object := range inventory {
-		if !covered[object.Envelope.EnvelopeSHA256] {
-			remaining = append(remaining, object)
-		}
-	}
-	if len(remaining) == 0 {
-		return blocks, all, nil
-	}
-	// Keep residual membership in the same derived catalog, under a local-only
-	// namespace that is never used as transport provenance. A foreign arrival
-	// must not repack every previous foreign record into another synthetic block.
-	// The scan already validated these exact archive bytes. Reuse that snapshot;
-	// the planner checks stored membership against it and packs only additions.
-	extra, err := s.planPublicationWithScanRecovery(ctx, archive, "local-snapshot:"+s.Lineage, true, nil, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
-		return remaining, remaining, nil
+	all, err := s.planPublicationWithScanRecovery(ctx, archive, "local-snapshot:"+s.Lineage, true, nil, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
+		return inventory, inventory, nil
 	}, tracking...)
 	if err != nil {
 		return nil, nil, err
 	}
-	return blocks, append(all, extra...), nil
+	return blocks, all, nil
+}
+
+func (s Index) seedSemanticPublications(ctx context.Context, archive Archive, blocks []Block, tracking ...*publicationTracking) error {
+	if len(blocks) == 0 {
+		return nil
+	}
+	var observed *publicationTracking
+	if len(tracking) > 0 {
+		observed = tracking[0]
+	}
+	var after ObservationStamp
+	err := archive.store().transact(ctx, func(tx *sql.Tx) error {
+		if observed != nil && observed.valid {
+			current, err := s.observationStampWithin(ctx, tx, archive)
+			if err != nil || current != observed.expected {
+				observed.valid = false
+			}
+		}
+		for _, block := range blocks {
+			uncovered := true
+			for _, object := range block.Objects {
+				var exists bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM history_index_publications p JOIN history_index_block_members m USING(project_id,block_hash) WHERE p.project_id=? AND p.endpoint_hash=? AND m.envelope_hash=?)`, s.ProjectID, Hash("local-snapshot:"+s.Lineage), object.Envelope.EnvelopeSHA256).Scan(&exists); err != nil {
+					return err
+				}
+				if exists {
+					uncovered = false
+					break
+				}
+			}
+			if uncovered {
+				if err := s.stageJournalBlockWithin(ctx, tx, Hash("local-snapshot:"+s.Lineage), block); err != nil {
+					return err
+				}
+			}
+		}
+		if observed != nil && observed.valid {
+			var err error
+			after, err = s.observationStampWithin(ctx, tx, archive)
+			if err != nil || after.ArchiveEpoch != observed.expected.ArchiveEpoch || after.Schema != observed.expected.Schema {
+				observed.valid = false
+			}
+		}
+		return nil
+	})
+	if err == nil && observed != nil && observed.valid {
+		observed.expected = after
+	}
+	return err
 }
 
 func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, tracking ...*publicationTracking) ([]Block, error) {

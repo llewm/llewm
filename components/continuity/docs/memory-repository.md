@@ -229,9 +229,21 @@ Interrupted staged intent remains publishable on the next cycle.
 A known observation reads only changed selected blocks through the Git tree
 delta. Previously observed bytes remain covered by explicit full audits;
 out-of-band corruption of an old object is not promised detection on every
-cycle. Full archive/publication snapshots and semantic guards still run on
-changed cycles, and the flat block directory still incurs linear tree work.
-This observation optimization is not a complete-cycle scaling claim.
+cycle. Publication consumes the archive journal under a reserved writer, with at most
+4,096 changes and 512 pending block hashes per receipt. It stages only newly
+authorized uncovered observations, appends stable local semantic-catalog blocks,
+and acknowledges the exact archive snapshot in that transaction. Pending intent
+is removed only after a verified local Git tree contains its immutable block;
+remote delivery remains governed by fetched refs and push outcomes. Observation
+hands off exact before/after inventory stamps so it cannot bless intervening
+unknown mutations. Missing, damaged, oversized or stale tracking takes complete
+materialization, without acknowledging an oversized pending set.
+
+Completion proof version 5 requires a current publication cursor with no pending
+local intent. Normal changed cycles avoid full archive/publication scans, but
+still read the complete local semantic catalog and run selector/dependency and
+canonical-state guards. The flat block directory still incurs linear tree work.
+This is not a complete-cycle scaling claim.
 
 Private commit primitives independently verify bounded commit bytes before
 using tree/parent identities. A merge requires namespace policy validation,
@@ -408,13 +420,13 @@ rolls back all additions before the complete importer runs. An old
 record referring to an added ID still forces fallback, including a resource
 revision referenced by an older note; these guards are deliberately conservative.
 
-Local import snapshots preserve stable block membership for both published
-records and records received through other destinations. Residual records use
-a device-local `local-snapshot:` membership in the derived publication catalog,
-so one foreign arrival adds a block for the new records instead of repacking
-old history. This membership never grants transport provenance or relay
-permission. Snapshots still validate archive bytes and indexed references;
-damaged inventories follow the existing repair path.
+All transports share a complete local import snapshot with stable block
+membership for published records and records received through other destinations.
+Its device-local `local-snapshot:` membership covers each envelope once, so a
+foreign arrival adds a group for new records without repacking old history.
+This membership never grants transport provenance or relay permission. Normal
+cycles validate catalog block frames; archive audits independently verify durable
+bytes. Damaged inventories follow the existing repair path.
 
 Migration 089 stores one immutable envelope body and reference set per project
 and envelope hash. Blocks contain only membership rows; overlapping blocks share

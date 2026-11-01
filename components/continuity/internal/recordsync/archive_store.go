@@ -269,7 +269,7 @@ func (s archiveStore) rememberWithin(ctx context.Context, tx *sql.Tx, consumer s
 	if err != nil {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO history_archive_cursors(project_id,consumer,snapshot_json,checksum) VALUES(?,?,?,?) ON CONFLICT(project_id,consumer) DO UPDATE SET snapshot_json=excluded.snapshot_json,checksum=excluded.checksum`, s.ProjectID, consumer, string(body), Hash(string(body)))
+	_, err = tx.ExecContext(ctx, `INSERT INTO history_archive_cursors(project_id,consumer,snapshot_json,checksum) VALUES(?,?,?,?) ON CONFLICT(project_id,consumer) DO UPDATE SET snapshot_json=excluded.snapshot_json,checksum=excluded.checksum WHERE history_archive_cursors.snapshot_json IS NOT excluded.snapshot_json OR history_archive_cursors.checksum IS NOT excluded.checksum`, s.ProjectID, consumer, string(body), Hash(string(body)))
 	return err == nil, err
 }
 

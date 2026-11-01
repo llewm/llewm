@@ -15,7 +15,8 @@ func TestObservationBatchAtomicallyBindsEpochInventoryAndVerifiedBytes(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	stamp, accepted, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block})
+	observed, accepted, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block})
+	stamp := observed.After
 	if err != nil || !accepted || stamp.Inventory == "" {
 		t.Fatalf("complete: %+v %v %v", stamp, accepted, err)
 	}
@@ -30,7 +31,7 @@ func TestObservationBatchAtomicallyBindsEpochInventoryAndVerifiedBytes(t *testin
 	if err != nil || current != stamp {
 		t.Fatalf("append invalidated immutable observation: %+v %v", current, err)
 	}
-	if next, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", stamp, false, nil); err != nil || !ok || next != stamp {
+	if next, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", stamp, false, nil); err != nil || !ok || next.After != stamp {
 		t.Fatalf("reuse: %+v %v %v", next, ok, err)
 	}
 	if _, err := store.DB.Exec(`UPDATE history_index_envelopes SET record_id='damaged' WHERE project_id=?`, store.ProjectID); err != nil {
@@ -40,7 +41,7 @@ func TestObservationBatchAtomicallyBindsEpochInventoryAndVerifiedBytes(t *testin
 		t.Fatalf("stale observation accepted: %v %v", ok, err)
 	}
 	repaired, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block})
-	if err != nil || !ok || repaired == stamp {
+	if err != nil || !ok || repaired.After == stamp {
 		t.Fatalf("repair: %+v %v %v", repaired, ok, err)
 	}
 	if _, err := index.ReadBlockBytes(ctx, block.Hash, block.Bytes); err != nil {
@@ -94,7 +95,7 @@ func TestMissingObservationTrackingUsesCompleteValidationWithoutReusableStamp(t 
 		t.Fatalf("accepted incomplete tracking: %v %v", ok, err)
 	}
 	after, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block})
-	if err != nil || !ok || after != (ObservationStamp{}) {
+	if err != nil || !ok || after.After != (ObservationStamp{}) {
 		t.Fatalf("complete fallback: %+v %v %v", after, ok, err)
 	}
 	if _, err := archive.AuditStorage(ctx); err != nil {
@@ -117,10 +118,11 @@ func TestObservedPublicationAdvancesOnlyItsOwnVerifiedInventoryWrites(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, _, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block})
+	initial, _, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block})
 	if err != nil {
 		t.Fatal(err)
 	}
+	before := initial.After
 	if err := archive.CaptureLocal([]portable.EncodedEnvelope{archiveObject(t, "new", `{"value":2}`)}); err != nil {
 		t.Fatal(err)
 	}

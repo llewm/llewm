@@ -32,6 +32,9 @@ func TestObservedGitCycleReadsOnlyNewBlocksAndRepairsDamagedInventory(t *testing
 	}
 	m.decide(t, "new", "New observation")
 	counts := measure()
+	if counts["archive_audit_envelopes"] != 0 || counts["archive_journal_rows_read"] != 3 || counts["archive_envelopes_read"] != 3 || counts["fallback_publication_journal_full"] != 0 {
+		t.Fatalf("known cycle scanned old archive: %v", counts)
+	}
 	if counts["fallback_git_observation_full"] != 0 || counts["git_observation_blocks"] != 1 || counts["git_observation_delta"] < 2 {
 		t.Fatalf("old blocks reread: %v", counts)
 	}
@@ -104,7 +107,7 @@ func TestObservedPublicationIntentSurvivesBeforeGitCommit(t *testing.T) {
 	if _, err := m.syncer.Archive.CaptureProject(ctx, m.db, m.project); err != nil {
 		t.Fatal(err)
 	}
-	planned, _, err := m.syncer.publishBlocks(ctx, testLineage, receipt)
+	planned, _, err := m.syncer.publishBlocks(ctx, repo, testLineage, receipt)
 	if err != nil || len(planned) == 0 {
 		t.Fatalf("plan: %d %v", len(planned), err)
 	}
