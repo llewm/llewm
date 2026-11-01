@@ -25,12 +25,12 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if err != nil {
 		return result, err
 	}
-	lock, err := lockFile(filepath.Join(s.Clone, ".git", "continuity-sync.lock"))
+	lock, err := lockFile(filepath.Join(s.Clone, "continuity-sync.lock"))
 	if err != nil {
 		return result, err
 	}
 	defer lock.Close()
-	s.discovery = &blockTreeDiscovery{}
+	s.objects = &objectTransport{repo: repo}
 	before, guardErr := s.guard(local, repo)
 	if guardErr != nil {
 		syncwork.RecordWork(ctx, "fallback_unchanged_guard_unavailable", 1)
@@ -67,46 +67,62 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if s.Archive.Lineage != identity.LineageID {
 		return result, fmt.Errorf("matching history archive is required")
 	}
-	if cache, err := openBlockTreeCache(filepath.Join(s.Clone, ".git")); err == nil {
+	if cache, err := openBlockTreeCache(s.Clone); err == nil {
 		defer cache.Close()
-		s.discovery.cache = cache
+		s.objects.trees.cache = cache
 	}
 	// Rebuild receipt membership and provenance from already tracked local
 	// history before classifying operational records as locally originated or
 	// planning publication. This also repairs damaged entries that are present.
-	_, err = s.trackedPublications(local, repo, identity.LineageID)
+	tree, err := s.objects.headTree(local)
 	if err != nil {
 		return result, err
 	}
-	old, err := s.trackedV3Snapshot(local, repo, identity.LineageID)
-	if err != nil {
+	if err := s.objects.validateBlockLayoutForConversion(local, tree, identity.LineageID, p.convert); err != nil {
 		return result, err
 	}
-	if len(old.Objects) != 0 && !p.convert {
-		return result, fmt.Errorf("format-3 observations require explicit conversion: stop old writers, then run `llewm sync convert --writers-stopped`")
-	}
-	for _, object := range old.Objects {
-		if _, err := s.Archive.Put(object, s.Endpoint()); err != nil {
-			return result, err
+	if p.convert {
+		for _, previous := range []bool{true, false} {
+			old, err := s.objects.legacySnapshot(local, tree, identity.LineageID, previous)
+			if err != nil {
+				return result, err
+			}
+			for _, object := range old.Objects {
+				if _, err := s.Archive.Put(object, s.Endpoint()); err != nil {
+					return result, err
+				}
+			}
 		}
+	}
+	if _, err := s.trackedPublications(local, repo, identity.LineageID); err != nil {
+		return result, err
 	}
 	if _, err := s.Archive.CaptureProject(local, s.DB, s.ProjectID); err != nil {
 		return result, err
 	}
-	paths, count, snapshot, err := s.publishBlocks(local, identity.LineageID)
-	result.ExportedRecords = count
+	blocks, snapshot, err := s.publishBlocks(local, identity.LineageID)
 	if err != nil {
 		return result, err
 	}
-	if err := commitBlocks(local, repo, paths, fmt.Sprintf("continuity: %s +%d records", identity.InstanceID, count)); err != nil {
+	count, err := commitBlocks(local, repo, identity.LineageID, blocks, fmt.Sprintf("continuity: %s", identity.InstanceID), p.convert)
+	if err != nil {
 		return result, err
 	}
+	result.ExportedRecords = count
 	head, err := repo.run(local, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return result, err
 	}
 	branch := head
 	importBlocks := func() error {
+		if p.convert {
+			converted, err := s.convertLegacy(local, repo, *identity)
+			if err != nil {
+				return err
+			}
+			result.ExportedRecords += converted
+			result.Converted = true
+		}
 		importCurrent := func() error {
 			imported, err := s.importTrackedBlocks(local, repo, identity.LineageID, snapshot)
 			result.ImportedRecords += imported.ImportedRecords
@@ -123,35 +139,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 			}
 			return nil
 		}
-		if err := importCurrent(); err != nil {
-			return err
-		}
-		// Convert older format-2 records first; this operation refuses them in
-		// an ordinary sync. Both conversion steps require stopped old writers.
-		var legacy Result
-		if err := retireFormerFormat(local, repo, s.Clone, *identity, p.convert, &legacy); err != nil {
-			return err
-		}
-		result.ExportedRecords += legacy.ExportedRecords
-		snapshot, err := s.trackedV3Snapshot(local, repo, identity.LineageID)
-		if err != nil {
-			return err
-		}
-		if len(snapshot.Objects) != 0 && !p.convert {
-			return fmt.Errorf("format-3 observations require explicit conversion: stop old writers, then run `llewm sync convert --writers-stopped`")
-		}
-		if p.convert {
-			converted, err := s.convertTrackedV3(local, repo, *identity)
-			if err != nil {
-				return err
-			}
-			result.ExportedRecords += converted
-			result.Converted = true
-			if converted != 0 {
-				return importCurrent()
-			}
-		}
-		return nil
+		return importCurrent()
 	}
 	offline, deferred, imported := false, false, false
 	for attempt := 0; ; attempt++ {
@@ -184,13 +172,40 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		}
 		branch = remoteBranch(local, repo, head)
 		if remoteExists(local, repo, branch) {
-			if _, err := repo.run(local, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
-				if _, err := repo.run(local, "checkout", "--quiet", "-B", branch, "origin/"+branch); err != nil {
+			current, err := s.objects.currentBranch(local)
+			if err != nil {
+				return result, err
+			}
+			remote, err := repo.run(local, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)
+			if err != nil {
+				return result, err
+			}
+			validate := func(ctx context.Context, base, ours, theirs string) error {
+				for _, candidate := range []string{ours, theirs} {
+					if candidate == "" {
+						continue
+					}
+					if _, err := s.objects.blockDeltaForConversion(ctx, base, candidate, identity.LineageID, p.convert); err != nil {
+						return err
+					}
+					if p.convert {
+						for _, previous := range []bool{true, false} {
+							if _, err := s.objects.legacySnapshot(ctx, candidate, identity.LineageID, previous); err != nil {
+								return err
+							}
+						}
+					}
+				}
+				return nil
+			}
+			next, err := s.objects.mergeCommits(local, current.OID, remote, fmt.Sprintf("continuity: %s merge immutable history", identity.InstanceID), validate)
+			if err != nil {
+				return result, err
+			}
+			if next != current.OID {
+				if err := s.objects.advanceBranch(local, current, next); err != nil {
 					return result, err
 				}
-			} else if _, err := repo.run(local, "rebase", "--quiet", "origin/"+branch); err != nil {
-				_, _ = repo.run(local, "rebase", "--abort")
-				return result, err
 			}
 		}
 		if err := importBlocks(); err != nil {

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -46,21 +45,11 @@ func TestBlockRedactionRepairUsesTrackedObservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := recordsync.OpenRoot(m.syncer.Clone)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
-		root.Close()
-		t.Fatal(err)
-	}
-	root.Close()
 	repo, err := m.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, _ := recordsync.BlockDirectory(testLineage)
-	if err := commitBlocks(ctx, repo, []string{filepath.ToSlash(filepath.Join(dir, block.Hash+".block"))}, "fixture: repair observations"); err != nil {
+	if _, err := commitBlocks(ctx, repo, testLineage, []recordsync.Block{block}, "fixture: repair observations", false); err != nil {
 		t.Fatal(err)
 	}
 	preview, err := m.syncer.RepairRedaction(ctx, original.Envelope.EnvelopeSHA256, derived.Envelope.EnvelopeSHA256, projectRoot, peerProject, "test", "historical re-export", "", false)
@@ -147,21 +136,11 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transportRoot, err := recordsync.OpenRoot(a.syncer.Clone)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := recordsync.PublishBlock(transportRoot, testLineage, block); err != nil {
-		transportRoot.Close()
-		t.Fatal(err)
-	}
-	transportRoot.Close()
 	repo, err := a.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, _ := recordsync.BlockDirectory(testLineage)
-	if err := commitBlocks(ctx, repo, []string{filepath.ToSlash(filepath.Join(directory, block.Hash+".block"))}, "fixture: historical re-export"); err != nil {
+	if _, err := commitBlocks(ctx, repo, testLineage, []recordsync.Block{block}, "fixture: historical re-export", false); err != nil {
 		t.Fatal(err)
 	}
 	collision := a.sync(t, OutcomeCollision)

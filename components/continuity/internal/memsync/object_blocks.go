@@ -9,6 +9,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 func (t *objectTransport) treeAt(ctx context.Context, tree string, parts ...string) (string, error) {
@@ -41,6 +42,10 @@ func (t *objectTransport) treeAt(ctx context.Context, tree string, parts ...stri
 // other lineages and opaque unrelated root entries untouched. Old-format
 // conversion must use its explicit reader before invoking ordinary publication.
 func (t *objectTransport) validateBlockLayout(ctx context.Context, tree, lineage string) error {
+	return t.validateBlockLayoutForConversion(ctx, tree, lineage, false)
+}
+
+func (t *objectTransport) validateBlockLayoutForConversion(ctx context.Context, tree, lineage string, converting bool) error {
 	if _, err := recordsync.BlockDirectory(lineage); err != nil {
 		return err
 	}
@@ -68,6 +73,12 @@ func (t *objectTransport) validateBlockLayout(ctx context.Context, tree, lineage
 			continue
 		}
 		if entry.name != "v4" {
+			if entry.name == "v2" || entry.name == "v3" {
+				if converting {
+					continue
+				}
+				return fmt.Errorf("format-%s observations require explicit conversion: stop old writers, then run `llewm sync convert --writers-stopped`", entry.name[1:])
+			}
 			return fmt.Errorf("history format %s for this lineage requires explicit conversion or a newer reader", entry.name)
 		}
 		children, err := t.trees.read(ctx, t.repo, selected)
@@ -87,10 +98,14 @@ func (t *objectTransport) validateBlockLayout(ctx context.Context, tree, lineage
 // subtree identities can be reused after prior verification; deleting or
 // replacing a selected immutable path is never an ordinary arrival.
 func (t *objectTransport) blockDelta(ctx context.Context, before, after, lineage string) ([]recordsync.Block, error) {
-	if err := t.validateBlockLayout(ctx, before, lineage); err != nil {
+	return t.blockDeltaForConversion(ctx, before, after, lineage, false)
+}
+
+func (t *objectTransport) blockDeltaForConversion(ctx context.Context, before, after, lineage string, converting bool) ([]recordsync.Block, error) {
+	if err := t.validateBlockLayoutForConversion(ctx, before, lineage, converting); err != nil {
 		return nil, err
 	}
-	if err := t.validateBlockLayout(ctx, after, lineage); err != nil {
+	if err := t.validateBlockLayoutForConversion(ctx, after, lineage, converting); err != nil {
 		return nil, err
 	}
 	directory, err := recordsync.BlockDirectory(lineage)
@@ -136,10 +151,14 @@ func (t *objectTransport) blockDelta(ctx context.Context, before, after, lineage
 // A flat block directory still needs listing when changed; this primitive alone
 // does not establish bounded end-to-end discovery across growing histories.
 func (t *objectTransport) appendBlocks(ctx context.Context, before, lineage string, blocks []recordsync.Block, width int) (string, int, error) {
+	return t.appendBlocksForConversion(ctx, before, lineage, blocks, width, false)
+}
+
+func (t *objectTransport) appendBlocksForConversion(ctx context.Context, before, lineage string, blocks []recordsync.Block, width int, converting bool) (string, int, error) {
 	if (before != "" && (!validGitOID(before) || len(before) != width)) || (width != 40 && width != 64) {
 		return "", 0, fmt.Errorf("invalid history publication tree")
 	}
-	if err := t.validateBlockLayout(ctx, before, lineage); err != nil {
+	if err := t.validateBlockLayoutForConversion(ctx, before, lineage, converting); err != nil {
 		return "", 0, err
 	}
 	directory, err := recordsync.BlockDirectory(lineage)
@@ -151,6 +170,7 @@ func (t *objectTransport) appendBlocks(ctx context.Context, before, lineage stri
 	}
 	additions := map[string]blockTreeEntry{}
 	counts := map[string]int{}
+	byteCounts := map[string]int{}
 	total, count := 0, 0
 	for _, block := range blocks {
 		verified, err := recordsync.DecodeBlock(lineage, block.Hash, block.Bytes)
@@ -169,6 +189,7 @@ func (t *objectTransport) appendBlocks(ctx context.Context, before, lineage stri
 		name := verified.Hash + ".block"
 		additions[name] = blockTreeEntry{name: name, kind: "blob", mode: "100644", oid: oid}
 		counts[name] = len(verified.Objects)
+		byteCounts[name] = len(verified.Bytes)
 	}
 	if len(additions) == 0 {
 		return before, 0, nil
@@ -208,6 +229,7 @@ func (t *objectTransport) appendBlocks(ctx context.Context, before, lineage stri
 			for name, entry := range pending {
 				entries = append(entries, entry)
 				added += counts[name]
+				syncwork.RecordWork(ctx, "published_block_bytes", int64(byteCounts[name]))
 			}
 			return t.writeTree(ctx, entries, width)
 		}

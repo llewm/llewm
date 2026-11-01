@@ -1,6 +1,6 @@
 // Package memsync syncs a project's curated history with a Git memory
-// repository: export new envelopes, commit, rebase onto the remote, import what
-// arrived, and push. Offline, it still exports and commits locally.
+// repository: publish immutable objects, merge histories with their parents
+// intact, import what arrived, and push. Offline publication remains local.
 package memsync
 
 import (
@@ -36,8 +36,8 @@ const (
 )
 
 // Network limits. Only waiting on the remote is ever cut short: local Git and
-// database steps always run to completion, so an interrupted sync never leaves a
-// lock file, a half-finished rebase, or a rolled-back import behind.
+// database writes finish their transaction or ref-update boundary. Interruption
+// releases the lock and retains durable objects/publication intent for retry.
 const (
 	// ProbeTimeout bounds the connection check before any Git network command,
 	// so an unreachable remote costs at most this long.
@@ -122,26 +122,20 @@ func Init(ctx context.Context, remote, clone string, access Access, setup Setup)
 	if strings.TrimSpace(remote) == "" {
 		return errors.New("a memory repository remote is required")
 	}
-	if _, err := os.Stat(filepath.Join(clone, ".git")); err == nil {
-		origin, err := access.git(clone).run(ctx, "config", "--get", "remote.origin.url")
+	if _, err := os.Lstat(filepath.Join(clone, "HEAD")); err == nil || workingCloneAt(clone) {
+		repo, err := openBareRepository(ctx, clone, remote, access)
 		if err != nil {
 			return err
 		}
-		if origin != remote {
-			return fmt.Errorf("%s is a clone of %s, not %s", clone, redact.String(origin), redact.String(remote))
-		}
-		if err := verifyRemote(ctx, access.git(clone), remote); err != nil {
-			return err
-		}
-		if err := configureHelper(ctx, access.git(clone), setup.Helper); err != nil {
+		if err := configureHelper(ctx, repo, setup.Helper); err != nil {
 			return err
 		}
 		if setup.Token != "" {
-			return approveToken(ctx, access.git(clone), remote, setup.Token)
+			return approveToken(ctx, repo, remote, setup.Token)
 		}
 		if setup.Interactive {
 			// A remote round trip lets Git prompt and the helper store the answer.
-			runner := access.git(clone)
+			runner := repo
 			runner.Interactive = true
 			_, err := runner.run(ctx, "ls-remote", "--quiet", "origin", "HEAD")
 			return err
@@ -152,6 +146,10 @@ func Init(ctx context.Context, remote, clone string, access Access, setup Setup)
 		return err
 	}
 	runner := access.git(filepath.Dir(clone))
+	if err := durableGitAvailable(ctx, runner); err != nil {
+		return err
+	}
+	runner.Durable = true
 	// Resolve URL rewrites before the clone contacts anything.
 	if resolved, err := runner.run(ctx, "ls-remote", "--get-url", remote); err != nil {
 		return err
@@ -164,13 +162,17 @@ func Init(ctx context.Context, remote, clone string, access Access, setup Setup)
 			return err
 		}
 	}
-	if _, err := runner.run(ctx, "clone", "--quiet", remote, clone); err != nil {
+	if _, err := runner.run(ctx, "clone", "--quiet", "--bare", "--no-hardlinks", remote, clone); err != nil {
 		return err
 	}
-	if err := verifyRemote(ctx, access.git(clone), remote); err != nil {
+	repo, err := openBareRepository(ctx, clone, remote, access)
+	if err != nil {
 		return err
 	}
-	return configureHelper(ctx, access.git(clone), setup.Helper)
+	if _, err := repo.run(ctx, "config", "--local", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+		return err
+	}
+	return configureHelper(ctx, repo, setup.Helper)
 }
 
 // verifyRemote refuses a clone whose origin, as Git will actually contact it for
@@ -266,8 +268,8 @@ type Syncer struct {
 	Leases  *lease.Service
 	Archive *recordsync.Archive
 	Relay   bool
-	// discovery is owned by one locked block cycle, never shared across syncs.
-	discovery *blockTreeDiscovery
+	// objects is owned by one locked block cycle, never shared across syncs.
+	objects *objectTransport
 }
 
 // Result describes one sync attempt.
@@ -425,7 +427,7 @@ func (s Syncer) fetch(ctx context.Context, repo git, p plan) error {
 		return err
 	}
 	defer cancel()
-	_, err = repo.run(bounded, "fetch", "--quiet", "origin")
+	_, err = repo.run(bounded, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/*:refs/remotes/origin/*")
 	return budgetCause(bounded, err)
 }
 
@@ -435,8 +437,16 @@ func (s Syncer) push(ctx context.Context, repo git, branch string, p plan) error
 		return err
 	}
 	defer cancel()
-	_, err = repo.run(bounded, "push", "--quiet", "origin", "HEAD:refs/heads/"+branch)
-	return budgetCause(bounded, err)
+	head, err := repo.run(context.WithoutCancel(ctx), "rev-parse", "--verify", "--quiet", "HEAD")
+	if err != nil || !validGitOID(head) {
+		return fmt.Errorf("history push requires a verified local tip")
+	}
+	_, err = repo.run(bounded, "push", "--quiet", "origin", head+":refs/heads/"+branch)
+	if err != nil {
+		return budgetCause(bounded, err)
+	}
+	_, err = repo.run(context.WithoutCancel(ctx), "update-ref", "refs/remotes/origin/"+branch, head)
+	return err
 }
 
 // budgetCause returns the network step's own limit (errBudget or
@@ -448,50 +458,6 @@ func budgetCause(bounded context.Context, err error) error {
 	if cause := context.Cause(bounded); errors.Is(cause, errBudget) || errors.Is(cause, errNetworkTimeout) {
 		return cause
 	}
-	return err
-}
-
-// writeNew writes envelopes not yet present in the clone and returns the
-// slash-separated clone paths it wrote.
-func writeNew(clone string, envelopes []portable.EncodedEnvelope) (map[string]bool, error) {
-	written := map[string]bool{}
-	for _, encoded := range envelopes {
-		relative := portable.MemoryRecordPath(encoded.Envelope)
-		path := filepath.Join(clone, relative)
-		if _, err := os.Stat(path); err == nil {
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return written, err
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return written, err
-		}
-		temporary := path + ".tmp"
-		if err := os.WriteFile(temporary, portable.MemoryFileBytes(encoded), 0o644); err != nil {
-			return written, err
-		}
-		if err := os.Rename(temporary, path); err != nil {
-			return written, err
-		}
-		written[filepath.ToSlash(relative)] = true
-	}
-	return written, nil
-}
-
-func commit(ctx context.Context, repo git, lineageDir string, records int, message string) error {
-	if _, err := repo.run(ctx, "add", "--all", "--", lineageDir); err != nil {
-		// Nothing exported yet means there is no directory to add, but a
-		// staged format-1 removal still needs its commit.
-		if records != 0 {
-			return err
-		}
-	}
-	if _, err := repo.run(ctx, "diff", "--cached", "--quiet"); err == nil {
-		return nil
-	} else if exitCode(err) != 1 {
-		return err
-	}
-	_, err := repo.run(ctx, "commit", "--quiet", "-m", message)
 	return err
 }
 

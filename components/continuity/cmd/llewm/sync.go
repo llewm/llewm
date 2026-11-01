@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -241,7 +240,10 @@ memory repository holds none.`,
 					return err
 				}
 				if identity == nil {
-					lineages := cloneLineages(target)
+					lineages, err := memsync.Lineages(cmd.Context(), target, remote, access)
+					if err != nil {
+						return err
+					}
 					if lineageID == "" && len(lineages) > 0 {
 						return fmt.Errorf("this project has no portable identity yet and the memory repository holds other histories; rerun sync init with --lineage LINEAGE to join one (%s), or run `llewm sync init` without --remote first to start a separate history", strings.Join(lineages, ", "))
 					}
@@ -462,26 +464,6 @@ func syncSettings(ctx context.Context, settings config.Sync, clone string) []str
 		values = append(values, "clone credential helper "+helper)
 	}
 	return values
-}
-
-// cloneLineages lists the lineages present in a memory clone.
-func cloneLineages(clone string) []string {
-	seen := make(map[string]bool)
-	var lineages []string
-	for _, version := range []string{"v4", portable.MemoryRepositoryRoot, portable.FormerMemoryRepositoryRoot} {
-		entries, err := os.ReadDir(filepath.Join(clone, version))
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() && !seen[entry.Name()] {
-				seen[entry.Name()] = true
-				lineages = append(lineages, "lineage:"+entry.Name())
-			}
-		}
-	}
-	sort.Strings(lineages)
-	return lineages
 }
 
 // startBackgroundSync is replaced in tests so they never spawn processes.

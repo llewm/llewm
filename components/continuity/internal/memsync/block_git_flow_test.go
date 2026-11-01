@@ -3,18 +3,16 @@ package memsync
 import (
 	"bytes"
 	"context"
-	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
 
-// Exercise the experimental block primitives through an actual disposable Git
-// remote. The production Git sync path still uses record-per-file storage.
-func TestExperimentalBlockFlowThroughGit(t *testing.T) {
+// Exercise publication, provenance and semantic import through a disposable
+// Git remote using committed objects and no index or checked-out records.
+func TestBareBlockPublicationFlowThroughGit(t *testing.T) {
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "block-git-a", remote), newMachine(t, "block-git-b", remote)
@@ -22,10 +20,6 @@ func TestExperimentalBlockFlowThroughGit(t *testing.T) {
 	ai := recordsync.Index{DB: a.db, ProjectID: a.project, Lineage: testLineage}
 	bi := recordsync.Index{DB: b.db, ProjectID: b.project, Lineage: testLineage}
 	endpoint := "git:test"
-	directory, err := recordsync.BlockDirectory(testLineage)
-	if err != nil {
-		t.Fatal(err)
-	}
 	write := func(m machine, archive recordsync.Archive, index recordsync.Index) {
 		t.Helper()
 		local, err := portable.EncodeMemoryExport(ctx, m.db, m.project)
@@ -39,22 +33,11 @@ func TestExperimentalBlockFlowThroughGit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		root, err := recordsync.OpenRoot(m.syncer.Clone)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, block := range blocks {
-			if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
-				root.Close()
-				t.Fatal(err)
-			}
-		}
-		root.Close()
 		repo, err := m.syncer.repository(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := commit(ctx, repo, directory, len(blocks), "fixture: publish blocks"); err != nil {
+		if _, err := commitBlocks(ctx, repo, testLineage, blocks, "fixture: publish blocks", false); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := repo.run(ctx, "push", "origin", "HEAD:refs/heads/main"); err != nil {
@@ -67,26 +50,11 @@ func TestExperimentalBlockFlowThroughGit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		listing, err := repo.run(ctx, "ls-files", "--", directory)
-		if err != nil {
+		if _, err := m.syncer.readTrackedBlocks(ctx, repo, testLineage, false, func(hash string, body []byte) (recordsync.Block, error) {
+			return index.ReadPublicationBytes(ctx, hash, body, archive, endpoint)
+		}); err != nil {
 			t.Fatal(err)
 		}
-		root, err := recordsync.OpenRoot(m.syncer.Clone)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, path := range strings.Fields(listing) {
-			block, err := recordsync.ReadBlock(root, testLineage, filepath.FromSlash(path))
-			if err != nil {
-				root.Close()
-				t.Fatal(err)
-			}
-			if _, err := index.ObservePublication(ctx, archive, endpoint, block); err != nil {
-				root.Close()
-				t.Fatal(err)
-			}
-		}
-		root.Close()
 		all, err := index.PlanPublication(ctx, archive, "internal:semantic", true)
 		if err != nil {
 			t.Fatal(err)
@@ -101,12 +69,7 @@ func TestExperimentalBlockFlowThroughGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bRepo.run(ctx, "fetch", "origin"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bRepo.run(ctx, "checkout", "-B", "main", "origin/main"); err != nil {
-		t.Fatal(err)
-	}
+	fixtureFetchMerge(t, bRepo, "main")
 	read(b, ba, bi)
 	b.decide(t, "from-b", "Git block B")
 	write(b, ba, bi)
@@ -114,12 +77,7 @@ func TestExperimentalBlockFlowThroughGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := aRepo.run(ctx, "fetch", "origin"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := aRepo.run(ctx, "rebase", "origin/main"); err != nil {
-		t.Fatal(err)
-	}
+	fixtureFetchMerge(t, aRepo, "main")
 	read(a, aa, ai)
 	canonical := func(m machine) [][]byte {
 		t.Helper()

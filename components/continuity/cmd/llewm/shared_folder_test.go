@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func TestGitFolderCoordinatorRecoversTrackedStagedBlock(t *testing.T) {
+func TestGitFolderCoordinatorRecoversCommittedPublicationIntent(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	root := testProject(t)
@@ -58,25 +58,13 @@ func TestGitFolderCoordinatorRecoversTrackedStagedBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gitRoot, err := recordsync.OpenRoot(syncer.Clone)
-	if err != nil {
-		t.Fatal(err)
+	if result, err := syncer.Session(ctx, 0); err != nil || result.ExportedRecords == 0 || result.UnpushedCommits == 0 {
+		t.Fatalf("stage committed Git publication without network: %+v %v", result, err)
 	}
-	if _, err := recordsync.PublishBlock(gitRoot, status.Identity.LineageID, staged[0]); err != nil {
-		gitRoot.Close()
+	// Simulate loss of derived membership after object/ref publication. The
+	// coordinator must recover it from committed bytes before relaying them.
+	if _, err := application.DB.ExecContext(ctx, `DELETE FROM history_index_publications WHERE project_id=? AND endpoint_hash=? AND block_hash=?`, application.ProjectID, recordsync.Hash(syncer.Endpoint()), staged[0].Hash); err != nil {
 		t.Fatal(err)
-	}
-	gitRoot.Close()
-	blockDir, err := recordsync.BlockDirectory(status.Identity.LineageID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", filepath.Join(blockDir, staged[0].Hash+".block")}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture block"}} {
-		command := exec.Command("git", args...)
-		command.Dir = syncer.Clone
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("git fixture: %v %s", err, output)
-		}
 	}
 	// Durable observations survive disposable index damage; recovery must
 	// rebuild membership without deleting or overwriting the archive source.

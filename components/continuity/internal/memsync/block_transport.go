@@ -4,51 +4,28 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
-	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // trackedV3Snapshot reads only paths tracked by Git. Every path and envelope
 // is checked before the resulting snapshot can be used for conversion.
 func (s Syncer) trackedV3Snapshot(ctx context.Context, repo git, lineage string) (recordsync.ScanResult, error) {
-	var result recordsync.ScanResult
-	listing, err := repo.run(ctx, "ls-files", "--", portable.MemoryLineageDir(lineage))
+	transport := s.objectReader(repo)
+	tree, err := transport.headTree(ctx)
 	if err != nil {
-		return result, err
+		return recordsync.ScanResult{}, err
 	}
-	root, err := recordsync.OpenRoot(s.Clone)
-	if err != nil {
-		return result, err
-	}
-	defer root.Close()
-	total := 0
-	for _, path := range strings.Fields(listing) {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		object, err := recordsync.ReadObject(root, filepath.FromSlash(path), lineage)
-		if err != nil {
-			return result, fmt.Errorf("invalid tracked v3 record: %w", err)
-		}
-		total += len(object.Bytes)
-		if total > portable.MaxRecordsBytes || len(result.Objects) >= portable.MaxRecordCount {
-			return result, fmt.Errorf("tracked v3 inventory exceeds bounds")
-		}
-		result.Objects = append(result.Objects, object)
-	}
-	return result, nil
+	return transport.legacySnapshot(ctx, tree, lineage, false)
 }
 
-// trackedBlocks never discovers untracked files in the working tree.
+// trackedBlocks reads committed objects; loose files cannot enter the inventory.
 func (s Syncer) trackedBlocks(ctx context.Context, repo git, lineage string) ([]recordsync.Block, error) {
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
-	return s.readTrackedBlocks(ctx, repo, lineage, func(root *os.Root, path string) (recordsync.Block, error) {
-		return index.ReadBlock(ctx, root, path)
+	return s.readTrackedBlocks(ctx, repo, lineage, false, func(hash string, body []byte) (recordsync.Block, error) {
+		return index.ReadBlockBytes(ctx, hash, body)
 	})
 }
 
@@ -59,42 +36,27 @@ func (s Syncer) trackedPublications(ctx context.Context, repo git, lineage strin
 		return nil, fmt.Errorf("matching history archive is required for block observation")
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
-	return s.readTrackedBlocks(ctx, repo, lineage, func(root *os.Root, path string) (recordsync.Block, error) {
-		return index.ReadPublication(ctx, root, path, *s.Archive, s.Endpoint())
+	return s.readTrackedBlocks(ctx, repo, lineage, true, func(hash string, body []byte) (recordsync.Block, error) {
+		return index.ReadPublicationBytes(ctx, hash, body, *s.Archive, s.Endpoint())
 	})
 }
 
 // readTrackedBlocks can bypass the derived index when reconstructing it.
-func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string, read func(*os.Root, string) (recordsync.Block, error)) ([]recordsync.Block, error) {
-	directory, err := recordsync.BlockDirectory(lineage)
+func (s Syncer) readTrackedBlocks(ctx context.Context, repo git, lineage string, converting bool, read func(string, []byte) (recordsync.Block, error)) ([]recordsync.Block, error) {
+	transport := s.objectReader(repo)
+	tree, err := transport.headTree(ctx)
+	if err != nil || tree == "" {
+		return nil, err
+	}
+	blocks, err := transport.blockDeltaForConversion(ctx, "", tree, lineage, converting)
 	if err != nil {
 		return nil, err
 	}
-	paths, err := s.trackedBlockPaths(ctx, repo, directory)
-	if err != nil {
-		return nil, err
-	}
-	root, err := recordsync.OpenRoot(s.Clone)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	var blocks []recordsync.Block
-	count, total := 0, 0
-	for _, path := range paths {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		block, err := read(root, filepath.FromSlash(path))
+	for i, block := range blocks {
+		blocks[i], err = read(block.Hash, block.Bytes)
 		if err != nil {
 			return nil, fmt.Errorf("invalid tracked history block: %w", err)
 		}
-		count += len(block.Objects)
-		total += len(block.Bytes)
-		if count > portable.MaxRecordCount || total > portable.MaxRecordsBytes {
-			return nil, fmt.Errorf("tracked block inventory exceeds bounds")
-		}
-		blocks = append(blocks, block)
 	}
 	return blocks, nil
 }
@@ -110,7 +72,7 @@ func (s Syncer) RebuildInventory(ctx context.Context, other func(context.Context
 	if err != nil {
 		return err
 	}
-	lock, err := lockFile(filepath.Join(s.Clone, ".git", "continuity-sync.lock"))
+	lock, err := lockFile(filepath.Join(s.Clone, "continuity-sync.lock"))
 	if err != nil {
 		return err
 	}
@@ -122,19 +84,8 @@ func (s Syncer) RebuildInventory(ctx context.Context, other func(context.Context
 	if identity == nil || identity.LineageID != s.Archive.Lineage {
 		return fmt.Errorf("Git route differs from selected project's lineage")
 	}
-	var old Result
-	if err := retireFormerFormat(ctx, repo, s.Clone, *identity, false, &old); err != nil {
-		return err
-	}
-	legacy, err := s.trackedV3Snapshot(ctx, repo, identity.LineageID)
-	if err != nil {
-		return err
-	}
-	if len(legacy.Objects) != 0 {
-		return fmt.Errorf("format-3 observations require explicit conversion before inventory rebuild")
-	}
-	blocks, err := s.readTrackedBlocks(ctx, repo, identity.LineageID, func(root *os.Root, path string) (recordsync.Block, error) {
-		return recordsync.ReadBlock(root, identity.LineageID, path)
+	blocks, err := s.readTrackedBlocks(ctx, repo, identity.LineageID, false, func(hash string, body []byte) (recordsync.Block, error) {
+		return recordsync.DecodeBlock(identity.LineageID, hash, body)
 	})
 	if err != nil {
 		return err
@@ -178,61 +129,57 @@ func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage 
 	return bodies, nil
 }
 
-func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]string, int, []recordsync.Block, error) {
+func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]recordsync.Block, []recordsync.Block, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
-		return nil, 0, nil, fmt.Errorf("matching history archive is required for block publication")
+		return nil, nil, fmt.Errorf("matching history archive is required for block publication")
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
-	blocks, inventory, err := index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	root, err := recordsync.OpenRoot(s.Clone)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	defer root.Close()
-	count := 0
-	var paths []string
-	directory, err := recordsync.BlockDirectory(lineage)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	for _, block := range blocks {
-		if err := ctx.Err(); err != nil {
-			return paths, count, nil, err
-		}
-		added, err := recordsync.PublishBlock(root, lineage, block)
-		if err != nil {
-			return paths, count, nil, err
-		}
-		paths = append(paths, filepath.ToSlash(filepath.Join(directory, block.Hash+".block")))
-		if added {
-			count += len(block.Objects)
-			syncwork.RecordWork(ctx, "published_block_bytes", int64(len(block.Bytes)))
-		}
-	}
-	return paths, count, inventory, nil
+	return index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay)
 }
 
-// commitBlocks stages only explicitly validated block paths. Never add a whole
-// directory: untracked working-tree files are not part of the transport.
-func commitBlocks(ctx context.Context, repo git, paths []string, message string) error {
-	if _, err := repo.run(ctx, "diff", "--cached", "--quiet"); err != nil {
-		return fmt.Errorf("block publication requires a clean Git index")
+// commitBlocks publishes only exact validated objects through an attached
+// branch's compare-and-swap. Loose files and indexes cannot enter the commit.
+func commitBlocks(ctx context.Context, repo git, lineage string, blocks []recordsync.Block, message string, converting bool) (int, error) {
+	transport := &objectTransport{repo: repo}
+	branch, err := transport.currentBranch(ctx)
+	if err != nil {
+		return 0, err
 	}
-	for _, path := range paths {
-		if _, err := repo.run(ctx, "add", "--", path); err != nil {
-			return err
+	before := ""
+	width := 40
+	if branch.OID != "" {
+		commit, err := transport.readCommit(ctx, branch.OID)
+		if err != nil {
+			return 0, err
+		}
+		before, width = commit.Tree, len(branch.OID)
+	} else {
+		format, err := repo.run(ctx, "rev-parse", "--show-object-format")
+		if err != nil {
+			return 0, err
+		}
+		if format == "sha256" {
+			width = 64
+		} else if format != "sha1" {
+			return 0, fmt.Errorf("unsupported memory object format")
 		}
 	}
-	if _, err := repo.run(ctx, "diff", "--cached", "--quiet"); err == nil {
-		return nil
-	} else if exitCode(err) != 1 {
-		return err
+	after, count, err := transport.appendBlocksForConversion(ctx, before, lineage, blocks, width, converting)
+	if err != nil || before == after {
+		return 0, err
 	}
-	_, err := repo.run(ctx, "commit", "--quiet", "-m", message)
-	return err
+	var parents []string
+	if branch.OID != "" {
+		parents = []string{branch.OID}
+	}
+	commit, err := transport.writeCommit(ctx, after, parents, fmt.Sprintf("%s +%d records", message, count))
+	if err != nil {
+		return 0, err
+	}
+	if err := transport.advanceBranch(ctx, branch, commit); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage string, snapshot []recordsync.Block) (recordsync.ImportResult, error) {
@@ -270,60 +217,4 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 		}
 	}
 	return index.ImportBlocks(ctx, all)
-}
-
-// convertTrackedV3 validates every tracked v3 path, stages complete blocks and
-// only then removes the v3 paths in the same Git commit. The caller is
-// responsible for fetching first and stopping all old writers before invoking
-// conversion. Original bytes remain in Git history and the local archive.
-func (s Syncer) convertTrackedV3(ctx context.Context, repo git, identity portable.Identity) (int, error) {
-	if s.Archive == nil || s.Archive.Lineage != identity.LineageID {
-		return 0, fmt.Errorf("matching history archive is required for conversion")
-	}
-	scan, err := s.trackedV3Snapshot(ctx, repo, identity.LineageID)
-	if err != nil {
-		return 0, err
-	}
-	blocks, err := recordsync.ConvertV3Snapshot(identity.LineageID, scan)
-	if err != nil {
-		return 0, err
-	}
-	if len(scan.Objects) == 0 {
-		return 0, nil
-	}
-	if _, err := repo.run(ctx, "diff", "--cached", "--quiet"); err != nil {
-		return 0, fmt.Errorf("conversion requires a clean Git index")
-	}
-	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID}
-	root, err := recordsync.OpenRoot(s.Clone)
-	if err != nil {
-		return 0, err
-	}
-	defer root.Close()
-	for _, block := range blocks {
-		if _, err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
-			return 0, err
-		}
-		if _, err := recordsync.PublishBlock(root, identity.LineageID, block); err != nil {
-			return 0, err
-		}
-	}
-	directory, err := recordsync.BlockDirectory(identity.LineageID)
-	if err != nil {
-		return 0, err
-	}
-	for _, block := range blocks {
-		path := filepath.ToSlash(filepath.Join(directory, block.Hash+".block"))
-		if _, err := repo.run(ctx, "add", "--", path); err != nil {
-			return 0, err
-		}
-	}
-	if _, err := repo.run(ctx, "rm", "-r", "-q", "--", portable.MemoryLineageDir(identity.LineageID)); err != nil {
-		return 0, err
-	}
-	message := fmt.Sprintf("continuity: %s convert to format 4, %d observations", identity.InstanceID, len(scan.Objects))
-	if _, err := repo.run(ctx, "commit", "--quiet", "-m", message); err != nil {
-		return 0, err
-	}
-	return len(scan.Objects), nil
 }

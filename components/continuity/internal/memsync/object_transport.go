@@ -16,7 +16,7 @@ import (
 )
 
 // objectTransport operates entirely on verified Git objects. It does not need
-// an index or working tree and is not yet the active memory-clone route.
+// an index or working tree and supplies the normal memory-clone route.
 // Its immutable tree merge never invokes text merge, hooks or repository code.
 type objectTransport struct {
 	repo  git

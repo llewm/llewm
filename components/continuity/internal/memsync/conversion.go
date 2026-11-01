@@ -1,101 +1,102 @@
 package memsync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
 
-// previousEnvelopes validates the entire old partition before removing any
-// old observation. Re-encoding the observations themselves preserves
-// remote-only records and rejected heads which an operational export omits.
-func previousEnvelopes(clone, lineage string) ([]portable.EncodedEnvelope, error) {
-	root := filepath.Join(clone, portable.FormerMemoryLineageDir(lineage))
-	var records []portable.EncodedEnvelope
-	bytes := 0
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("format conversion refuses symlink: %s", path)
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() || !strings.HasSuffix(path, ".json") || info.Size() > portable.MaxPayloadBytes+portable.MaxIndexBytes+(64<<10) {
-			return fmt.Errorf("format conversion refuses unexpected file: %s", path)
-		}
-		bytes += int(info.Size())
-		if bytes > portable.MaxRecordsBytes || len(records) >= portable.MaxRecordCount {
-			return fmt.Errorf("format conversion exceeds its record/byte budget; nothing removed")
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		relative, err := filepath.Rel(clone, path)
-		if err != nil {
-			return err
-		}
-		converted, err := portable.ConvertPreviousMemoryFile(relative, body)
-		if err != nil {
-			return fmt.Errorf("convert %s: %w", relative, err)
-		}
-		if converted.Envelope.LineageID != lineage {
-			return fmt.Errorf("format conversion found another lineage in %s", relative)
-		}
-		records = append(records, converted)
-		return nil
-	})
-	return records, err
-}
-
-// retireFormerFormat makes one normal, fast-forwardable history commit. The
-// original v2 bytes remain in Git history and the database observation ledger.
-func retireFormerFormat(ctx context.Context, repo git, clone string, identity portable.Identity, convert bool, result *Result) error {
-	ancient := filepath.Join(clone, "v1", strings.TrimPrefix(identity.LineageID, "lineage:"))
-	if _, err := os.Lstat(ancient); err == nil {
-		return fmt.Errorf("format-1 records require the original format-2 conversion before upgrading; nothing removed")
-	} else if !os.IsNotExist(err) {
-		return err
+// convertLegacy validates and archives all selected format2/3 observations,
+// then replaces only those namespaces in one parent-preserving commit. The
+// caller must stop old writers and hold the clone lock. Old bytes remain in
+// Git history; no worktree or index participates in conversion.
+func (s Syncer) convertLegacy(ctx context.Context, repo git, identity portable.Identity) (int, error) {
+	if s.Archive == nil || s.Archive.DB != s.DB || s.Archive.ProjectID != s.ProjectID || s.Archive.Lineage != identity.LineageID {
+		return 0, fmt.Errorf("matching history archive is required for conversion")
 	}
-	former := portable.FormerMemoryLineageDir(identity.LineageID)
-	if _, err := os.Lstat(filepath.Join(clone, former)); os.IsNotExist(err) {
-		if convert {
-			result.Converted = true
-		}
-		return nil
-	} else if err != nil {
-		return err
+	transport := s.objectReader(repo)
+	branch, err := transport.currentBranch(ctx)
+	if err != nil || branch.OID == "" {
+		return 0, err
 	}
-	if !convert {
-		return fmt.Errorf("the memory repository holds format-2 observations for this lineage; retire all older writers, then run `llewm sync convert --writers-stopped`; no history is discarded")
-	}
-	records, err := previousEnvelopes(clone, identity.LineageID)
+	commit, err := transport.readCommit(ctx, branch.OID)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	written, err := writeNew(clone, records)
+	if err := transport.validateBlockLayoutForConversion(ctx, commit.Tree, identity.LineageID, true); err != nil {
+		return 0, err
+	}
+	partition := strings.TrimPrefix(identity.LineageID, "lineage:")
+	var namespaces []string
+	for _, version := range []string{"v2", "v3"} {
+		selected, err := transport.treeAt(ctx, commit.Tree, version, partition)
+		if err != nil {
+			return 0, err
+		}
+		if selected != "" {
+			namespaces = append(namespaces, version+"/"+partition)
+		}
+	}
+	if len(namespaces) == 0 {
+		return 0, nil
+	}
+	var scan recordsync.ScanResult
+	seen := map[string][]byte{}
+	for _, previous := range []bool{true, false} {
+		legacy, err := transport.legacySnapshot(ctx, commit.Tree, identity.LineageID, previous)
+		if err != nil {
+			return 0, err
+		}
+		for _, object := range legacy.Objects {
+			hash := object.Envelope.EnvelopeSHA256
+			if known, ok := seen[hash]; ok {
+				if !bytes.Equal(known, object.Bytes) {
+					return 0, fmt.Errorf("legacy observation identity collision")
+				}
+				continue
+			}
+			seen[hash] = object.Bytes
+			scan.Objects = append(scan.Objects, object)
+		}
+	}
+	blocks, err := recordsync.ConvertV3Snapshot(identity.LineageID, scan)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if _, err := repo.run(ctx, "rm", "-r", "-q", "--", former); err != nil {
-		return err
+	// Validation of every old byte is complete before any archive mutation.
+	for _, object := range scan.Objects {
+		if _, err := s.Archive.Put(object, s.Endpoint()); err != nil {
+			return 0, err
+		}
 	}
-	if err := commit(ctx, repo, portable.MemoryLineageDir(identity.LineageID), len(written), fmt.Sprintf("continuity: %s convert to format 3, +%d observations", identity.InstanceID, len(written))); err != nil {
-		return err
+	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID, Now: s.Now}
+	for _, block := range blocks {
+		if _, err := index.ObservePublication(ctx, *s.Archive, s.Endpoint(), block); err != nil {
+			return 0, err
+		}
 	}
-	result.ExportedRecords += len(written)
-	result.Converted = true
-	return nil
+	tree := commit.Tree
+	for _, namespace := range namespaces {
+		tree, err = transport.withoutNamespace(ctx, tree, namespace)
+		if err != nil {
+			return 0, err
+		}
+	}
+	tree, count, err := transport.appendBlocks(ctx, tree, identity.LineageID, blocks, len(branch.OID))
+	if err != nil {
+		return 0, err
+	}
+	message := fmt.Sprintf("continuity: %s convert to format 4, %d observations", identity.InstanceID, len(scan.Objects))
+	next, err := transport.writeCommit(ctx, tree, []string{branch.OID}, message)
+	if err != nil {
+		return 0, err
+	}
+	if err := transport.advanceBranch(ctx, branch, next); err != nil {
+		return 0, err
+	}
+	return count, nil
 }

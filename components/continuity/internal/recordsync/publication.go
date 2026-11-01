@@ -35,6 +35,22 @@ func (s Index) ReadPublication(ctx context.Context, root *os.Root, path string, 
 	return block, nil
 }
 
+// ReadPublicationBytes shares the exact inventory/provenance path with folder
+// publication, without requiring Git objects to be materialized as files.
+func (s Index) ReadPublicationBytes(ctx context.Context, hash string, body []byte, archive Archive, endpoint string) (Block, error) {
+	if endpoint == "" || archive.Lineage != s.Lineage || archive.ProjectID != s.ProjectID || archive.DB != s.DB {
+		return Block{}, fmt.Errorf("publication endpoint and matching lineage are required")
+	}
+	block, err := s.ReadBlockBytes(ctx, hash, body)
+	if err != nil {
+		return Block{}, err
+	}
+	if _, err := s.observePublicationObjects(ctx, archive, endpoint, block.Hash, block.Objects); err != nil {
+		return Block{}, err
+	}
+	return block, nil
+}
+
 type publicationReader interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }

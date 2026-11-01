@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -27,14 +27,11 @@ import (
 // message) whose tip is the scope's current state. Writes push the next commit
 // with --force-with-lease naming the tip that was read, so the remote applies
 // at most one of two racing writes; the loser rereads. The refs are outside
-// refs/heads, so the history-sync branch, its rebase, and its pushes never see
+// refs/heads, so the history-sync branch, its merges, and its pushes never see
 // them.
 
 // leaseHistory bounds how many events of a scope one read returns.
 const leaseHistory = 20
-
-// emptyTree is Git's well-known empty tree object.
-const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 var lineageHex = regexp.MustCompile(`^[0-9a-f]{8,64}$`)
 
@@ -96,15 +93,12 @@ func (s Syncer) leaseRefs(ctx context.Context, repo git, locked bool) (leaseRefs
 // repository opens the memory clone for Git commands: it must exist, point at
 // the configured remote, and have a committer.
 func (s Syncer) repository(ctx context.Context) (git, error) {
-	repo := Access{Askpass: s.Askpass, SSHKey: s.SSHKey, NoPrompt: s.NoPrompt}.git(s.Clone)
-	if _, err := os.Stat(filepath.Join(s.Clone, ".git")); err != nil {
-		return git{}, fmt.Errorf("memory clone %s is missing; run `llewm sync init`", s.Clone)
-	}
-	if err := verifyRemote(ctx, repo, s.Remote); err != nil {
+	repo, err := openBareRepository(ctx, s.Clone, s.Remote, Access{Askpass: s.Askpass, SSHKey: s.SSHKey, NoPrompt: s.NoPrompt})
+	if err != nil {
 		return git{}, err
 	}
 	if email, _ := repo.run(ctx, "config", "user.email"); email == "" {
-		// Commits and rebases both need a committer.
+		// Local publication and parent-preserving merges need a committer.
 		repo.Identity = []string{"-c", "user.name=Continuity", "-c", "user.email=continuity@localhost.invalid"}
 	}
 	return repo, nil
@@ -114,7 +108,7 @@ func (r leaseRefs) lock() (func(), error) {
 	if r.locked {
 		return func() {}, nil
 	}
-	file, err := lockFile(filepath.Join(r.clone, ".git", "continuity-sync.lock"))
+	file, err := lockFile(filepath.Join(r.clone, "continuity-sync.lock"))
 	if err != nil {
 		return nil, err
 	}
@@ -182,28 +176,43 @@ func (r leaseRefs) Scopes(ctx context.Context) (map[string]lease.RemoteScope, er
 
 // events reads up to leaseHistory events ending at tip, newest first.
 func (r leaseRefs) events(ctx context.Context, tip string) ([]lease.RemoteEvent, error) {
-	output, err := r.repo.run(ctx, "log", fmt.Sprintf("--max-count=%d", leaseHistory), "--format=%x1e%H%x1f%B", tip)
-	if err != nil {
-		return nil, err
-	}
+	transport := &objectTransport{repo: r.repo}
 	var events []lease.RemoteEvent
-	for _, entry := range strings.Split(output, "\x1e") {
-		commit, message, ok := strings.Cut(strings.TrimSpace(entry), "\x1f")
-		if !ok {
-			continue
+	for tip != "" && len(events) < leaseHistory {
+		commit, err := transport.readCommit(ctx, tip)
+		if err != nil {
+			return nil, err
 		}
-		lines := strings.Split(strings.TrimSpace(message), "\n")
+		empty, err := gitObjectIdentity("tree", nil, len(tip))
+		if err != nil || commit.Tree != empty || len(commit.Parents) > 1 {
+			return nil, fmt.Errorf("lease commit has a nonempty tree or multiple parents")
+		}
+		if _, err := transport.trees.read(ctx, r.repo, empty); err != nil {
+			return nil, err
+		}
+		lines := strings.Split(strings.TrimSpace(commit.Message), "\n")
 		var event lease.RemoteEvent
 		decoder := json.NewDecoder(strings.NewReader(lines[len(lines)-1]))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&event); err != nil {
-			return nil, fmt.Errorf("commit %s: %w", commit, err)
+			return nil, fmt.Errorf("commit %s: %w", tip, err)
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			return nil, fmt.Errorf("lease commit has trailing event data")
 		}
 		if err := event.Validate(); err != nil {
-			return nil, fmt.Errorf("commit %s: %w", commit, err)
+			return nil, fmt.Errorf("commit %s: %w", tip, err)
 		}
-		event.Version = commit
+		if len(events) != 0 && event.Scope() != events[0].Scope() {
+			return nil, fmt.Errorf("lease commit chain changes scope")
+		}
+		event.Version = tip
 		events = append(events, event)
+		tip = ""
+		if len(commit.Parents) == 1 {
+			tip = commit.Parents[0]
+		}
 	}
 	return events, nil
 }
@@ -224,15 +233,27 @@ func (r leaseRefs) Write(ctx context.Context, expected string, event lease.Remot
 	if err != nil {
 		return "", err
 	}
-	if _, err := r.output(local, "", "hash-object", "-w", "-t", "tree", "--stdin"); err != nil {
+	format, err := r.repo.run(local, "rev-parse", "--show-object-format")
+	if err != nil {
 		return "", err
 	}
-	args := []string{"commit-tree", emptyTree}
+	width := 40
+	if format == "sha256" {
+		width = 64
+	} else if format != "sha1" {
+		return "", fmt.Errorf("unsupported lease object format")
+	}
+	transport := &objectTransport{repo: r.repo}
+	tree, err := transport.writeTree(local, nil, width)
+	if err != nil {
+		return "", err
+	}
+	var parents []string
 	if expected != "" {
-		args = append(args, "-p", expected)
+		parents = []string{expected}
 	}
 	message := fmt.Sprintf("llewm lease: %s token %d %s\n\n%s\n", event.Scope(), event.Token, event.Action, body)
-	commit, err := r.output(local, message, append(args, "-F", "-")...)
+	commit, err := transport.writeCommit(local, tree, parents, message)
 	if err != nil {
 		return "", err
 	}
@@ -261,8 +282,3 @@ func (r leaseRefs) Write(ctx context.Context, expected string, event lease.Remot
 }
 
 // output runs Git with input on standard input and returns its output.
-func (r leaseRefs) output(ctx context.Context, input string, args ...string) (string, error) {
-	var stdout bytes.Buffer
-	err := r.repo.execOut(ctx, strings.NewReader(input), &stdout, args)
-	return strings.TrimSpace(stdout.String()), err
-}

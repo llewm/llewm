@@ -18,7 +18,7 @@ import (
 
 // Bump when the completion proof's interpretation changes. These device-local
 // proofs are disposable; a miss or uncertainty always runs the reference cycle.
-const syncProofVersion = 2
+const syncProofVersion = 3
 
 type syncGuard struct{ route, generation, tree, archive string }
 
@@ -69,8 +69,27 @@ func (s Syncer) guard(ctx context.Context, repo git) (syncGuard, error) {
 }
 
 func lineageTree(ctx context.Context, repo git, ref, lineage string) (string, error) {
-	partition := strings.TrimPrefix(lineage, "lineage:")
-	return repo.run(ctx, "ls-tree", ref, "--", "v2/"+partition, "v3/"+partition, "v4/"+partition)
+	oid, err := repo.run(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", ref)
+	if err != nil {
+		return "", err
+	}
+	transport := &objectTransport{repo: repo}
+	commit, err := transport.readCommit(ctx, oid)
+	if err != nil {
+		return "", err
+	}
+	return transport.lineageIdentity(ctx, commit.Tree, lineage)
+}
+
+func (t *objectTransport) lineageIdentity(ctx context.Context, tree, lineage string) (string, error) {
+	if err := t.validateBlockLayout(ctx, tree, lineage); err != nil {
+		return "", err
+	}
+	selected, err := t.treeAt(ctx, tree, "v4", strings.TrimPrefix(lineage, "lineage:"))
+	if err != nil {
+		return "", err
+	}
+	return "v4:" + selected, nil
 }
 
 func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard) (Result, bool, bool) {
@@ -92,11 +111,6 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 	}
 	if reason != "" {
 		syncwork.RecordWork(ctx, reason, 1)
-		return Result{}, false, fetched
-	}
-	clean, err := repo.run(ctx, "status", "--porcelain", "--untracked-files=no")
-	if err != nil || clean != "" {
-		syncwork.RecordWork(ctx, "fallback_unchanged_worktree_unclean", 1)
 		return Result{}, false, fetched
 	}
 	head, err := repo.run(ctx, "symbolic-ref", "--short", "HEAD")
@@ -121,9 +135,35 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 		syncwork.RecordWork(ctx, "fallback_unchanged_remote_tree", 1)
 		return Result{}, false, fetched
 	}
-	if _, err := repo.run(ctx, "rebase", "--quiet", "origin/"+branch); err != nil {
-		_, _ = repo.run(context.WithoutCancel(ctx), "rebase", "--abort")
+	transport := s.objectReader(repo)
+	current, err := transport.currentBranch(ctx)
+	if err != nil {
 		return Result{}, false, fetched
+	}
+	remote, err := repo.run(ctx, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)
+	if err != nil {
+		return Result{}, false, fetched
+	}
+	lineage := s.lineageForGuard(ctx)
+	next, err := transport.mergeCommits(ctx, current.OID, remote, "continuity: merge unchanged lineage history", func(ctx context.Context, _, ours, theirs string) error {
+		for _, tree := range []string{ours, theirs} {
+			selected, err := transport.lineageIdentity(ctx, tree, lineage)
+			if err != nil {
+				return err
+			}
+			if selected != g.tree {
+				return fmt.Errorf("selected lineage changed during unchanged sync")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return Result{}, false, fetched
+	}
+	if next != current.OID {
+		if err := transport.advanceBranch(context.WithoutCancel(ctx), current, next); err != nil {
+			return Result{}, false, fetched
+		}
 	}
 	after, err := s.guard(ctx, repo)
 	if err != nil || after != g || !upToDate(ctx, repo, branch) {

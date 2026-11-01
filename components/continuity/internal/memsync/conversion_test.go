@@ -2,9 +2,7 @@ package memsync
 
 import (
 	"context"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,18 +58,18 @@ func TestCorruptPreviousObservationRefusesConversionWithoutRemovalOrPush(t *test
 	b := newMachine(t, "converter", remote)
 	a.decide(t, "remote", "Keep remote evidence")
 	plantFormerFormat(t, a)
-	files, err := exec.Command("git", "-C", a.syncer.Clone, "ls-files", "--", "v2").Output()
+	files, err := exec.Command("git", "-C", a.syncer.Clone, "ls-tree", "-r", "--name-only", "HEAD", "--", "v2").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
 	relative := strings.TrimSpace(string(files))
-	if err := os.WriteFile(filepath.Join(a.syncer.Clone, relative), []byte("invalid observation\n"), 0644); err != nil {
+	repo, err := a.syncer.repository(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"add", "--", relative}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "corrupt fixture"}, {"push", "--quiet", "origin", "HEAD"}} {
-		if output, err := exec.Command("git", append([]string{"-C", a.syncer.Clone}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("fixture: %s %v", output, err)
-		}
+	fixtureCommitFiles(t, repo, map[string][]byte{relative: []byte("invalid observation\n")}, nil, "corrupt fixture")
+	if _, err := repo.run(context.Background(), "push", "--quiet", "origin", "HEAD"); err != nil {
+		t.Fatal(err)
 	}
 	before, err := exec.Command("git", "-C", remote, "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -80,8 +78,13 @@ func TestCorruptPreviousObservationRefusesConversionWithoutRemovalOrPush(t *test
 	if result, err := b.syncer.Convert(context.Background()); err == nil || result.Converted {
 		t.Fatalf("corrupt conversion succeeded: %+v %v", result, err)
 	}
-	if _, err := os.Stat(filepath.Join(b.syncer.Clone, relative)); err != nil {
-		t.Fatalf("old bytes removed: %v", err)
+	peer, err := b.syncer.repository(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch := remoteBranch(context.Background(), peer, "master")
+	if body, err := peer.run(context.Background(), "show", "refs/remotes/origin/"+branch+":"+relative); err != nil || body != "invalid observation" {
+		t.Fatalf("fetched evidence removed: %q %v", body, err)
 	}
 	after, err := exec.Command("git", "-C", remote, "rev-parse", "HEAD").Output()
 	if err != nil || string(after) != string(before) {

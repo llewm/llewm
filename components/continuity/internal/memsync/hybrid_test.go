@@ -14,7 +14,6 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,22 +248,19 @@ func TestHybridRelaysOpaqueEnvelopeBytesWithoutSemanticApplication(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := recordsync.OpenRoot(producer.syncer.Clone)
-	if err != nil {
-		t.Fatal(err)
-	}
 	block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{future})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
+	repo, err := producer.syncer.repository(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	root.Close()
-	for _, args := range [][]string{{"add", "--all"}, {"-c", "user.name=fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "Future schema fixture"}, {"push", "--quiet", "origin", "HEAD"}} {
-		if output, err := exec.Command("git", append([]string{"-C", producer.syncer.Clone}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("fixture commit: %v %s", err, output)
-		}
+	if _, err := commitBlocks(ctx, repo, testLineage, []recordsync.Block{block}, "fixture: future schema", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.run(ctx, "push", "--quiet", "origin", "HEAD"); err != nil {
+		t.Fatal(err)
 	}
 	result := bridge.sync(t, OutcomeSynced)
 	if result.DeferredRecords != 1 {

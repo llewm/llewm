@@ -156,10 +156,11 @@ func snapshotClone(ctx context.Context, repo git, remote string, working bool) (
 			return snapshot, err
 		}
 		gitRoot.Close()
-		top, err := repo.run(ctx, "rev-parse", "--show-toplevel")
+		topBytes, err := readGitBytes(ctx, repo, 32<<10, "rev-parse", "--show-toplevel")
 		if err != nil {
 			return snapshot, err
 		}
+		top := string(bytes.TrimSuffix(topBytes, []byte{'\n'}))
 		actual, actualErr := os.Stat(top)
 		selected, selectedErr := os.Stat(repo.Dir)
 		if actualErr != nil || selectedErr != nil || !os.SameFile(actual, selected) {

@@ -21,7 +21,7 @@ func TestHistorySyncWorkMetricsMeasureOnlySelectedCycle(t *testing.T) {
 		t.Fatalf("measured cycle changed behavior: %+v %v", result, err)
 	}
 	counts := metrics.Counts()
-	for _, name := range []string{"operational_specs_loaded", "snapshot_envelope_encodes", "published_block_bytes", "block_read_bytes", "inventory_records_checked", "archive_envelopes_inserted", "git_tree_entries_visited"} {
+	for _, name := range []string{"operational_specs_loaded", "snapshot_envelope_encodes", "published_block_bytes", "block_read_bytes", "inventory_records_checked", "archive_envelopes_inserted", "transport_tree_entries_read"} {
 		if counts[name] <= 0 {
 			t.Errorf("missing observed work %s: %v", name, counts)
 		}

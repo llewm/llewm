@@ -36,7 +36,7 @@ func (s Syncer) RepairRedaction(ctx context.Context, originalHash, derivedHash, 
 	if err != nil {
 		return result, err
 	}
-	lock, err := lockFile(filepath.Join(s.Clone, ".git", "continuity-sync.lock"))
+	lock, err := lockFile(filepath.Join(s.Clone, "continuity-sync.lock"))
 	if err != nil {
 		return result, err
 	}

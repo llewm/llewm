@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 const maxCachedTreeBytes = 4 << 20
@@ -52,6 +53,8 @@ func (d *blockTreeDiscovery) treeEntries(ctx context.Context, repo git, oid stri
 		if raw, err := recordsync.ReadFile(d.cache, oid+".tree", maxCachedTreeBytes); err == nil {
 			if entries, err := decodeGitTree(oid, raw); err == nil {
 				d.cacheHits++
+				syncwork.RecordWork(ctx, "transport_tree_entries_read", int64(len(entries)))
+				syncwork.RecordWork(ctx, "transport_tree_bytes_read", int64(len(raw)))
 				return entries, nil
 			}
 		}
@@ -65,6 +68,8 @@ func (d *blockTreeDiscovery) treeEntries(ctx context.Context, repo git, oid stri
 	if err != nil {
 		return nil, err
 	}
+	syncwork.RecordWork(ctx, "transport_tree_entries_read", int64(len(entries)))
+	syncwork.RecordWork(ctx, "transport_tree_bytes_read", int64(raw.Len()))
 	if d.cache != nil {
 		_, _ = recordsync.WriteFile(d.cache, oid+".tree", raw.Bytes(), true)
 	}

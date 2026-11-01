@@ -47,7 +47,7 @@ func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.run(ctx, "add", "--", directory); err != nil {
+	if _, err := commitBlocks(ctx, repo, testLineage, []recordsync.Block{block}, "fixture: tracked block", false); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := m.syncer.trackedBlocks(ctx, repo, testLineage); err != nil || len(got) != 1 || got[0].Hash != block.Hash {
@@ -57,10 +57,11 @@ func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
 	if got, err := m.syncer.trackedBlockObservations(ctx, repo, testLineage, hash); err != nil || !bytes.Equal(got[hash], export.Envelopes[0].Bytes) {
 		t.Fatalf("tracked observation mismatch: %v", err)
 	}
-	path := filepath.Join(m.syncer.Clone, directory, block.Hash+".block")
-	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
+	oid, err := repo.run(ctx, "rev-parse", "HEAD:"+filepath.ToSlash(filepath.Join(directory, block.Hash+".block")))
+	if err != nil {
 		t.Fatal(err)
 	}
+	fixtureCorruptObject(t, repo, oid, "blob", []byte("corrupt"))
 	if _, err := m.syncer.trackedBlocks(ctx, repo, testLineage); err == nil {
 		t.Fatal("accepted corrupt tracked block")
 	}
@@ -113,17 +114,12 @@ func TestTrackedV3ConversionPreservesAllObservations(t *testing.T) {
 		return object
 	}
 	objects := []portable.EncodedEnvelope{makeObject(`{"head":1}`), makeObject(`{"head":2}`)}
-	if _, err := writeNew(m.syncer.Clone, objects); err != nil {
-		t.Fatal(err)
-	}
-	if err := commit(ctx, repo, portable.MemoryLineageDir(testLineage), len(objects), "fixture: v3 history"); err != nil {
-		t.Fatal(err)
-	}
+	fixtureCommitEnvelopes(t, repo, objects, "fixture: v3 history")
 	identity, err := (portable.Service{DB: m.db}).Get(ctx, m.project)
 	if err != nil || identity == nil {
 		t.Fatalf("identity: %v", err)
 	}
-	if count, err := m.syncer.convertTrackedV3(ctx, repo, *identity); err != nil || count != len(objects) {
+	if count, err := m.syncer.convertLegacy(ctx, repo, *identity); err != nil || count != len(objects) {
 		t.Fatalf("conversion: %d %v", count, err)
 	}
 	if snapshot, err := m.syncer.trackedV3Snapshot(ctx, repo, testLineage); err != nil || len(snapshot.Objects) != 0 {
@@ -161,36 +157,33 @@ func TestTrackedV3ConversionRejectsCorruptionBeforeRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeNew(m.syncer.Clone, export.Envelopes); err != nil {
-		t.Fatal(err)
-	}
 	repo, err := m.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commit(ctx, repo, portable.MemoryLineageDir(testLineage), len(export.Envelopes), "fixture: v3 history"); err != nil {
-		t.Fatal(err)
-	}
+	fixtureCommitEnvelopes(t, repo, export.Envelopes, "fixture: v3 history")
 	before, err := repo.run(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(m.syncer.Clone, portable.MemoryRecordPath(export.Envelopes[0].Envelope))
-	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
+	path := filepath.ToSlash(portable.MemoryRecordPath(export.Envelopes[0].Envelope))
+	oid, err := repo.run(ctx, "rev-parse", "HEAD:"+path)
+	if err != nil {
 		t.Fatal(err)
 	}
+	fixtureCorruptObject(t, repo, oid, "blob", []byte("corrupt"))
 	identity, err := (portable.Service{DB: m.db}).Get(ctx, m.project)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.syncer.convertTrackedV3(ctx, repo, *identity); err == nil {
+	if _, err := m.syncer.convertLegacy(ctx, repo, *identity); err == nil {
 		t.Fatal("corrupt observation accepted")
 	}
 	after, err := repo.run(ctx, "rev-parse", "HEAD")
 	if err != nil || before != after {
 		t.Fatalf("conversion changed history: %s %s %v", before, after, err)
 	}
-	if _, err := os.Stat(path); err != nil {
+	if preserved, err := repo.run(ctx, "rev-parse", "HEAD:"+path); err != nil || preserved != oid {
 		t.Fatalf("conversion removed original: %v", err)
 	}
 }
@@ -209,9 +202,9 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if err := aa.CaptureLocal(export.Envelopes); err != nil {
 		t.Fatal(err)
 	}
-	paths, count, snapshot, err := a.syncer.publishBlocks(ctx, testLineage)
-	if err != nil || count != len(export.Envelopes) {
-		t.Fatalf("publish: %d %v", count, err)
+	blocks, snapshot, err := a.syncer.publishBlocks(ctx, testLineage)
+	if err != nil || len(blocks) == 0 {
+		t.Fatalf("publish: %d %v", len(blocks), err)
 	}
 	repo, err := a.syncer.repository(ctx)
 	if err != nil {
@@ -219,13 +212,16 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	}
 	directory, _ := recordsync.BlockDirectory(testLineage)
 	untracked := filepath.Join(a.syncer.Clone, directory, "untracked.block")
+	if err := os.MkdirAll(filepath.Dir(untracked), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(untracked, []byte("not an observation"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitBlocks(ctx, repo, paths, "fixture: publish blocks"); err != nil {
-		t.Fatal(err)
+	if count, err := commitBlocks(ctx, repo, testLineage, blocks, "fixture: publish blocks", false); err != nil || count != len(export.Envelopes) {
+		t.Fatalf("publication: %d %v", count, err)
 	}
-	if tracked, err := repo.run(ctx, "ls-files", "--", filepath.ToSlash(filepath.Join(directory, "untracked.block"))); err != nil || tracked != "" {
+	if tracked, err := repo.run(ctx, "ls-tree", "-r", "--name-only", "HEAD", "--", filepath.ToSlash(filepath.Join(directory, "untracked.block"))); err != nil || tracked != "" {
 		t.Fatalf("untracked file was committed: %q %v", tracked, err)
 	}
 	if _, err := repo.run(ctx, "push", "origin", "HEAD:refs/heads/main"); err != nil {
@@ -235,12 +231,7 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := peer.run(ctx, "fetch", "origin"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := peer.run(ctx, "checkout", "-B", "main", "origin/main"); err != nil {
-		t.Fatal(err)
-	}
+	fixtureFetchMerge(t, peer, "main")
 	// A snapshot from before fetch must not hide newly tracked records.
 	if result, err := b.syncer.importTrackedBlocks(ctx, peer, testLineage, []recordsync.Block{}); err != nil || result.ImportedRecords != len(export.Envelopes) {
 		t.Fatalf("import: %+v %v", result, err)
@@ -346,16 +337,11 @@ func TestBlockCycleConvertsRemoteV3AndPreservesFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeNew(a.syncer.Clone, export.Envelopes); err != nil {
-		t.Fatal(err)
-	}
 	repo, err := a.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commit(ctx, repo, portable.MemoryLineageDir(testLineage), len(export.Envelopes), "fixture: v3 history"); err != nil {
-		t.Fatal(err)
-	}
+	fixtureCommitEnvelopes(t, repo, export.Envelopes, "fixture: v3 history")
 	if _, err := repo.run(ctx, "push", "origin", "HEAD:refs/heads/main"); err != nil {
 		t.Fatal(err)
 	}
@@ -389,16 +375,11 @@ func TestBlockCycleConvertsStalePeerAfterRemoteConversion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeNew(a.syncer.Clone, export.Envelopes); err != nil {
-		t.Fatal(err)
-	}
 	repo, err := a.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commit(ctx, repo, portable.MemoryLineageDir(testLineage), len(export.Envelopes), "fixture: v3 history"); err != nil {
-		t.Fatal(err)
-	}
+	fixtureCommitEnvelopes(t, repo, export.Envelopes, "fixture: v3 history")
 	if _, err := repo.run(ctx, "push", "origin", "HEAD:refs/heads/main"); err != nil {
 		t.Fatal(err)
 	}

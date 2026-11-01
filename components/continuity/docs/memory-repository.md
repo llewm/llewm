@@ -60,7 +60,7 @@ Each managed clone follows this same ownership contract. Git repository readers
 can read every lineage stored there; lineage directories do not enforce access.
 
 - Continuity owns the memory clone and every Git operation in it: export, commit,
-  fetch, rebase, import, and push, under a file lock. People and agents do not edit,
+  fetch, merge, import, and push, under a file lock. People and agents do not edit,
   commit to, rebase, reset, or force-push the memory repository or its clones by hand.
   Every bootstrap of a project with sync states this as the built-in
   `memory-repository` rule, naming the clone path, so it needs no copy in
@@ -151,14 +151,16 @@ never overwritten or deleted by cutover. A backup created before preparation
 commits may remain unregistered after interruption; a new preparation must use
 a fresh backup destination rather than infer ownership of that file.
 
-The private Git object transport foundation reads bounded, hash-verified blobs
+Normal Git sync uses bare storage and reads bounded, hash-verified commits, blobs
 and trees without an index or working tree. Tree entries retain their modes;
 selected transport blobs must be regular non-executable files. A tree delta
 skips equal subtree identities. Three-way merging reuses unchanged trees and
 rejects conflicting immutable leaves instead of text-merging record bytes.
 Namespace policy and new-object protocol validation must precede publication.
-These primitives do not by themselves convert or activate an existing managed
-clone, change its remote, or replace the current sync route.
+Setup creates native bare clones. Existing working clones require explicit
+storage migration; normal opening never converts them or initializes replacement
+history. A migrated clone requires its exact owner, preparation and completion
+receipts before use. Reading an incomplete cutover fails closed.
 
 The private bare-clone cutover coordinator takes nonblocking migration and
 legacy sync locks and inventories the clean source, all resolved refs, immediate
@@ -184,7 +186,11 @@ Unrelated initial histories can join; multiple merge bases refuse rather than
 selecting an arbitrary base. Branch publication checks the resolved HEAD and
 expected tip, requires ancestry preservation and uses a durable compare-and-swap
 without replacing symbolic links. These primitives create no index or working
-tree and do not yet replace the normal sync cycle.
+tree. Normal publication and fetched-history adoption use these primitives.
+Merge commits can make the unpushed commit count larger than the number of new
+record blocks. Format-2/3 namespaces refuse ordinary adoption; explicit conversion
+validates and archives every selected observation before one retirement commit.
+A stale peer retaining an old namespace must also run explicit conversion.
 
 Private block-object publication validates exact format-4 block bytes, appends
 only canonical immutable paths and preserves unrelated root entries and lineage
@@ -193,7 +199,8 @@ blob's Git identity and block/envelope hashes, and rejects block replacement or
 removal. Unsupported selected-lineage formats refuse; other lineages remain
 opaque. Object writes request fsync before subsequent commit/ref publication.
 The existing flat block directory still needs listing when changed; these
-primitives are not a complete-cycle scaling result or the active backend.
+primitives are not a complete-cycle scaling result. The current cycle still
+reconstructs complete block/provenance inventories and semantic snapshots.
 
 ### Unchanged syncs
 
@@ -266,19 +273,18 @@ the last invalidating trigger name for device-local diagnosis.
 
 After a successful, stable cycle with no pending semantic or delivery work,
 later cycles can reuse its proof. They still verify the configured remote,
-fetch, compare the lineage's v2/v3/v4 subtree identities, require a clean tracked
-working tree, and check local database and archive state again. An unrelated
+fetch, compare the verified lineage subtree identities, and check local database
+and archive state again. There is no index or working tree to inspect. An unrelated
 lineage's commit does not require record replay. A missing or invalidated proof,
 changed policy or build, local edits, pending push, or uncertain state runs the
 full workflow. Explicit conversion always runs the full workflow.
 
-On Linux, the archive guard walks metadata (device, inode, mode, size, mtime,
-and ctime), including provenance. It does not open or decode record contents;
-even same-size edits with restored mtime invalidate the proof. Status files are
-excluded. Platforms without this change identity retain full validation.
-This still costs a metadata walk, rather than constant work independent of
-archive size. Folder endpoints can reuse a local completion proof too: the
-configured marker/lineage, endpoint contents, archive metadata, database token,
+The SQLite archive guard reads its epoch, journal sequence and counters without
+walking history. Selected archive bytes are verified on access; full audits
+detect old-object damage. An unchanged proof does not promise every-cycle
+detection of out-of-band changes to previously verified immutable bytes.
+Folder endpoints retain conservative provider validation and can reuse a local
+completion proof too: the configured marker/lineage, endpoint contents, archive stamp, database token,
 build and relay policy must remain unchanged. Missing, changed or uncertain
 state takes the complete validated scan and publication-repair path. Folder
 results retain `unchanged` and `duration_ms`, visible through status and TUI
@@ -369,17 +375,17 @@ migration, retain verified backups, and verify fresh clients after the cutover.
 Physical database compaction is a separate SQLite maintenance operation after
 logical cleanup; free pages alone do not shrink the file.
 
-Tracked-path discovery reuses immutable Git tree nodes across locked block
-cycles. The tree is taken from the index, including staged additions and
-deletions, rather than assuming HEAD describes interrupted publication state.
-Raw tree objects are cached locally under the archive's `status/git-trees`.
+Object discovery reuses immutable Git tree nodes across locked block cycles.
+Only a committed branch tip supplies membership; loose files and abandoned
+indexes cannot enter publication. Durable archive publication intent survives
+an interrupted object/tree/commit/ref boundary and is replayed on retry.
+Raw tree objects are cached locally under the bare clone's `status/git-trees`.
 Each read verifies the complete bytes against the selected Git SHA-1 or SHA-256
 object ID before parsing membership. Only missing, changed or damaged nodes
-are fetched from Git again; cache writes are optional. Uncertain
-or unmerged indexes and discovery limits fall back to the complete tracked-path
-listing. Paths use NUL delimiters. Every discovered block still undergoes the
-ordinary working-file and content validation, so a tree cache cannot conceal
-missing or corrupt working files. Cache contents are bounded per object and
+are fetched from Git again; cache writes are optional. Discovery limits fail
+closed instead of accepting an incomplete delta. Every accessed block undergoes
+Git object identity and content validation, so a tree cache cannot conceal
+missing or corrupt selected blob bytes. Cache contents are bounded per object and
 root-relative file access confines local I/O. Cached node reads, path enumeration
 and complete content validation still visit old history. This reduces repeated
 Git discovery; it does not establish fixed-delta scaling or replace full recovery.
@@ -508,7 +514,7 @@ restoring the previous automatic-sync setting.
   (acquire, renew, release), with the event as JSON in the message. Continuity
   writes them only with `git push --force-with-lease=<ref>:<tip read>`, so the
   remote applies at most one of two racing writes. They live outside `refs/heads`,
-  so the history branch, its rebase, and its pushes never touch them, and the
+  so the history branch, its merges, and its pushes never touch them, and the
   remote must accept pushes to custom refs. Like the history branch, they are
   never edited or deleted by hand.
 
@@ -775,9 +781,9 @@ Invariants for every option:
   imported history. A checkpoint from another device may therefore need a later
   bootstrap after the sync finishes. Pushes after checkpoints also run detached.
 - Only waiting on the remote is ever cut short. Local Git and database steps
-  (export, commit, rebase, import, recording the attempt) always finish, so an
-  interrupted sync never leaves a lock file, a rebase in progress, or a
-  rolled-back import. A canceled Git gets SIGTERM with its transport helpers,
+  (export, object publication, merge, import, recording the attempt) finish their
+  transaction or ref-update boundary. An interrupted sync releases its lock and
+  retains durable objects and publication intent for retry. A canceled Git gets SIGTERM with its transport helpers,
   never SIGKILL.
 - An HTTPS remote is probed with a plain TCP connection first (1.5 s), so an
   offline machine is reported in about a second. Remotes behind a proxy are not

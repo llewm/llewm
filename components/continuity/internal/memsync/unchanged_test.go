@@ -190,13 +190,9 @@ func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(b.syncer.Clone, "unrelated"), []byte("Other lineage metadata"), 0600); err != nil {
+	fixtureCommitFiles(t, otherRepo, map[string][]byte{"unrelated": []byte("Other lineage metadata")}, nil, "Unrelated fixture change")
+	if _, err := otherRepo.run(ctx, "push", "--quiet", "origin", "HEAD"); err != nil {
 		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "--", "unrelated"}, {"commit", "--quiet", "-m", "Unrelated fixture change"}, {"push", "--quiet", "origin", "HEAD"}} {
-		if _, err := otherRepo.run(ctx, args...); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if !a.sync(t, OutcomeSynced).Unchanged {
 		t.Fatal("unrelated tree change forced full processing")
@@ -206,14 +202,7 @@ func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(a.syncer.Clone, "unpublished"), []byte("Pending delivery"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "--", "unpublished"}, {"commit", "--quiet", "-m", "Pending fixture delivery"}} {
-		if _, err := localRepo.run(ctx, args...); err != nil {
-			t.Fatal(err)
-		}
-	}
+	fixtureCommitFiles(t, localRepo, map[string][]byte{"unpublished": []byte("Pending delivery")}, nil, "Pending fixture delivery")
 	if a.sync(t, OutcomeSynced).Unchanged {
 		t.Fatal("pending push skipped")
 	}
@@ -252,7 +241,7 @@ func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
 		t.Fatal("missing proof accepted")
 	}
 	warmUnchanged(t, a)
-	// Uncommitted working-tree corruption cannot inherit a commit-tree proof.
+	// Loose files are not a working tree and cannot enter a commit-tree proof.
 	repo, err := a.syncer.repository(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -263,11 +252,22 @@ func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
 	}
 	dir, _ := recordsync.BlockDirectory(testLineage)
 	path := filepath.Join(a.syncer.Clone, dir, blocks[0].Hash+".block")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := a.syncer.Sync(ctx); err == nil || got.Unchanged {
-		t.Fatalf("dirty tree accepted: %+v %v", got, err)
+	if got := a.sync(t, OutcomeSynced); !got.Unchanged {
+		t.Fatal("unreachable loose file invalidated an object proof")
+	}
+	oid, err := repo.run(ctx, "rev-parse", "HEAD:"+filepath.ToSlash(filepath.Join(dir, blocks[0].Hash+".block")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureCorruptObject(t, repo, oid, "blob", []byte("corrupt"))
+	if _, err := a.syncer.trackedBlocks(ctx, repo, testLineage); err == nil {
+		t.Fatal("explicit object access concealed damaged Git bytes")
 	}
 }
 

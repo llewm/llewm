@@ -34,6 +34,16 @@ func (s Index) ReadBlock(ctx context.Context, root *os.Root, path string) (Block
 	if err != nil {
 		return Block{}, err
 	}
+	return s.ReadBlockBytes(ctx, hash, body)
+}
+
+// ReadBlockBytes validates exact transport bytes against a content-derived
+// block identity. Git object readers and conservative folder readers share
+// the same disposable inventory verification and repair behavior.
+func (s Index) ReadBlockBytes(ctx context.Context, hash string, body []byte) (Block, error) {
+	if !hex64.MatchString(hash) {
+		return Block{}, fmt.Errorf("invalid block hash")
+	}
 	syncwork.RecordWork(ctx, "block_read_bytes", int64(len(body)))
 	syncwork.RecordWork(ctx, "block_reads", 1)
 	block := Block{Hash: hash, Bytes: body}

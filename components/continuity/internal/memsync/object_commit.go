@@ -14,6 +14,7 @@ const maxTransportCommitBytes = 1 << 20
 type transportCommit struct {
 	Tree    string
 	Parents []string
+	Message string
 }
 
 type transportBranch struct{ Ref, OID string }
@@ -160,7 +161,7 @@ func (t *objectTransport) readCommit(ctx context.Context, oid string) (transport
 	if err != nil || actual != oid {
 		return commit, fmt.Errorf("Git commit content identity mismatch")
 	}
-	headers, _, ok := bytes.Cut(body, []byte("\n\n"))
+	headers, message, ok := bytes.Cut(body, []byte("\n\n"))
 	if !ok || bytes.ContainsRune(headers, 0) {
 		return commit, fmt.Errorf("invalid transport commit headers")
 	}
@@ -207,6 +208,7 @@ func (t *objectTransport) readCommit(ctx context.Context, oid string) (transport
 	if commit.Tree == "" || !author || !committer {
 		return commit, fmt.Errorf("incomplete transport commit")
 	}
+	commit.Message = string(message)
 	syncwork.RecordWork(ctx, "transport_commits_read", 1)
 	return commit, nil
 }

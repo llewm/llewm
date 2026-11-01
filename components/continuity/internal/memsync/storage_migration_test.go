@@ -19,10 +19,14 @@ func cloneStorageFixture(t testing.TB) (context.Context, cloneStoragePaths, stri
 	m := newMachine(t, "bare-storage", remote)
 	m.decide(t, "retained", "Keep immutable history")
 	m.sync(t, OutcomeSynced)
-	repo, err := m.syncer.repository(ctx)
-	if err != nil {
+	// Simulate the previous storage backend in a disposable working clone.
+	// The current Init/Sync route is bare and must never manufacture one.
+	legacy := filepath.Join(filepath.Dir(m.syncer.Clone), "legacy-clone")
+	if _, err := (git{Dir: filepath.Dir(legacy)}).run(ctx, "clone", "--quiet", remote, legacy); err != nil {
 		t.Fatal(err)
 	}
+	m.syncer.Clone = legacy
+	repo := git{Dir: legacy, Identity: []string{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"}}
 	before, err := repo.run(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)

@@ -182,9 +182,14 @@ func TestTwoMachinesSyncThroughOneRemote(t *testing.T) {
 			t.Fatalf("converged decisions = %q", got)
 		}
 	}
-	files, err := exec.Command("git", "-C", a.syncer.Clone, "ls-files").Output()
+	files, err := exec.Command("git", "-C", a.syncer.Clone, "ls-tree", "-r", "--name-only", "HEAD").Output()
 	if err != nil || strings.Count(string(files), "\n") != 3 || !strings.Contains(string(files), "v4/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/blocks/") {
 		t.Fatalf("memory repository files:\n%s %v", files, err)
+	}
+	for _, name := range []string{"index", "v4", ".git"} {
+		if _, err := os.Lstat(filepath.Join(a.syncer.Clone, name)); !os.IsNotExist(err) {
+			t.Fatalf("bare sync created %s: %v", name, err)
+		}
 	}
 }
 
@@ -399,7 +404,7 @@ func TestInitRefusesACloneOfAnotherRemote(t *testing.T) {
 	if err := Init(context.Background(), first, clone, Access{}, Setup{}); err != nil {
 		t.Fatalf("re-init: %v", err)
 	}
-	if err := Init(context.Background(), second, clone, Access{}, Setup{}); err == nil || !strings.Contains(err.Error(), "is a clone of") {
+	if err := Init(context.Background(), second, clone, Access{}, Setup{}); err == nil || !strings.Contains(err.Error(), "refusing") {
 		t.Fatalf("wrong remote: %v", err)
 	}
 }
@@ -547,20 +552,15 @@ func TestUnknownRecordTypesAreDeferred(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := recordsync.OpenRoot(a.syncer.Clone)
+	repo, err := a.syncer.repository(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := recordsync.PublishBlock(root, testLineage, block); err != nil {
-		root.Close()
+	if _, err := commitBlocks(context.Background(), repo, testLineage, []recordsync.Block{block}, "fixture: future", false); err != nil {
 		t.Fatal(err)
 	}
-	root.Close()
-
-	for _, args := range [][]string{{"add", "--all"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "future"}, {"push", "--quiet", "origin", "HEAD"}} {
-		if output, err := exec.Command("git", append([]string{"-C", a.syncer.Clone}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, output)
-		}
+	if _, err := repo.run(context.Background(), "push", "--quiet", "origin", "HEAD"); err != nil {
+		t.Fatal(err)
 	}
 
 	first := b.sync(t, OutcomeSynced)
@@ -591,7 +591,7 @@ func TestSessionSyncImportsAndLeavesThePushToTheBackground(t *testing.T) {
 
 	b.decide(t, "second", "Second")
 	result, err := b.syncer.Session(context.Background(), 5*time.Second)
-	if err != nil || result.Outcome != OutcomeDeferred || result.UnpushedCommits != 1 || !strings.Contains(result.Detail, "background sync pushes") {
+	if err != nil || result.Outcome != OutcomeDeferred || result.UnpushedCommits != 2 || !strings.Contains(result.Detail, "background sync pushes") {
 		t.Fatalf("session sync: %#v %v", result, err)
 	}
 	if got := b.decisions(t); got != "first,second" {
@@ -628,8 +628,11 @@ func TestSpentSessionBudgetStillFinishesLocalWork(t *testing.T) {
 	if err != nil || result.Outcome != OutcomeDeferred || result.ExportedRecords != 1 || result.UnpushedCommits != 1 || !strings.Contains(result.Detail, "no time left to fetch") {
 		t.Fatalf("spent budget: %#v %v", result, err)
 	}
-	if output, err := exec.Command("git", "-C", a.syncer.Clone, "status", "--porcelain").CombinedOutput(); err != nil || len(output) != 0 {
-		t.Fatalf("clone not clean after a spent budget: %q %v", output, err)
+	if _, err := os.Lstat(filepath.Join(a.syncer.Clone, "index")); !os.IsNotExist(err) {
+		t.Fatalf("spent budget created an index: %v", err)
+	}
+	if output, err := exec.Command("git", "-C", a.syncer.Clone, "fsck", "--strict", "--no-dangling").CombinedOutput(); err != nil {
+		t.Fatalf("spent budget left invalid history: %q %v", output, err)
 	}
 	a.sync(t, OutcomeSynced)
 }
@@ -714,6 +717,7 @@ func plantFormerFormat(t *testing.T, m machine) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	files := map[string][]byte{}
 	for _, current := range export.Envelopes {
 		old := current.Envelope
 		old.Format, old.FormatVersion, old.EnvelopeSHA256 = "llmem-portable-record", 2, ""
@@ -730,18 +734,15 @@ func plantFormerFormat(t *testing.T, m machine) {
 			t.Fatal(err)
 		}
 		relative := strings.Replace(filepath.ToSlash(portable.MemoryRecordPath(old)), "v3/", "v2/", 1)
-		path := filepath.Join(m.syncer.Clone, relative)
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, append(canonical, '\n'), 0644); err != nil {
-			t.Fatal(err)
-		}
+		files[relative] = append(canonical, '\n')
 	}
-	for _, args := range [][]string{{"add", "--all"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "format-2 observations"}, {"push", "--quiet", "origin", "HEAD"}} {
-		if output, err := exec.Command("git", append([]string{"-C", m.syncer.Clone}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, output)
-		}
+	repo, err := m.syncer.repository(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureCommitFiles(t, repo, files, nil, "format-2 observations")
+	if _, err := repo.run(context.Background(), "push", "--quiet", "origin", "HEAD"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -759,8 +760,8 @@ func TestFormatTwoConversionPreservesRemoteOnlyHistory(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "llewm sync convert") || result.Outcome != OutcomeError {
 		t.Fatalf("sync past format-2 observations: %#v %v", result, err)
 	}
-	if b.decisions(t) != "memory-repo,use-sqlite" {
-		t.Fatalf("current records were not imported beside format-2 observations: %q", b.decisions(t))
+	if b.decisions(t) != "memory-repo" {
+		t.Fatalf("unsupported legacy tree was partially adopted before conversion: %q", b.decisions(t))
 	}
 
 	converted, err := b.syncer.Convert(context.Background())
@@ -771,7 +772,9 @@ func TestFormatTwoConversionPreservesRemoteOnlyHistory(t *testing.T) {
 	if err != nil || !strings.Contains(string(log), "convert to format 4") {
 		t.Fatalf("conversion commit: %q %v", log, err)
 	}
-	a.sync(t, OutcomeSynced)
+	if _, err := a.syncer.Convert(context.Background()); err != nil {
+		t.Fatalf("stale legacy peer conversion: %v", err)
+	}
 	for _, m := range []machine{a, b} {
 		if _, err := os.Stat(filepath.Join(m.syncer.Clone, portable.FormerMemoryRepositoryRoot)); !os.IsNotExist(err) {
 			t.Fatalf("format-2 observations remain in %s: %v", m.syncer.Clone, err)
