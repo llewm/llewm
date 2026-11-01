@@ -185,18 +185,22 @@ func BenchmarkTrackPlanRepeatedRevisions(b *testing.B) {
 	const root = "/project"
 	const lineage = "lineage:55555555555555555555555555555555"
 	value := trackplan.Plan{ProjectID: project, ID: "plan", Revision: 1, RoadmapNodeID: "track", Title: "Repeated plan", Summary: strings.TrimSpace(strings.Repeat("Review the work under /project. ", 40)), Status: "active", Creator: "person", Authority: "caller_asserted", RecordedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), SchemaVersion: 1, Items: []trackplan.Item{{ID: "one", Title: "One", Detail: strings.TrimSpace(strings.Repeat("Check /project and retain evidence. ", 40)), Status: "active"}}}
-	for _, mode := range []string{"uncached", "cached"} {
+	for _, mode := range []string{"uncached", "conversion_cache", "conversion_validation_cache"} {
 		b.Run(mode, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				text := cachedTrackText(project, root)
+				valid := validTrackPlanText
+				if mode == "conversion_validation_cache" {
+					valid = newTrackPlanTextValidation().valid
+				}
 				for revision := 1; revision <= 20; revision++ {
 					value.Revision = revision
 					var err error
-					if mode == "cached" {
-						_, err = trackPlanSpecWithText(lineage, project, root, value, text)
+					if mode != "uncached" {
+						_, err = trackPlanSpecWithText(lineage, project, root, value, text, valid)
 					} else {
-						_, err = trackPlanSpec(lineage, project, root, value)
+						_, err = trackPlanSpecWithText(lineage, project, root, value, func(v string) string { return portableTrackText(v, project, root) }, validTrackPlanText)
 					}
 					if err != nil {
 						b.Fatal(err)

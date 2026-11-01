@@ -896,6 +896,13 @@ from the hash input, and compares the result with the received bytes. Duplicate
 fields, alternate escapes and unsupported integer representations remain invalid;
 unknown record schemas retain their existing transport-only handling. The generic
 canonical encoder remains the independent test reference.
+Track-plan loading and bundle decoding also reuse the pure safe-text predicate
+for repeated exact strings within that one load or decode. This cache holds at
+most 1,024 cloned keys totaling 1 MiB; oversized values and capacity misses use
+the ordinary predicate. Required-field checks, structural validation, reference
+and index comparisons, dependency checks, and current database reads still run
+on every record. The cache is neither persisted nor used as a semantic receipt.
+
 During complete semantic journal replay, a call-scoped cache can reuse the pure
 canonical/hash decode of an exact retained envelope. It is limited to 8,192
 entries and a conservative 64 MiB decoded-storage charge; a full cache uses the

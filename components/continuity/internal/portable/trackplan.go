@@ -40,6 +40,7 @@ func loadTrackPlanSpecs(ctx context.Context, source queryer, projectID, projectR
 	// Plan revisions often repeat unchanged items. Reuse only deterministic
 	// text transformations within this export; never persist the input cache.
 	text := cachedTrackText(projectID, projectRoot)
+	validText := newTrackPlanTextValidation().valid
 	planRows, err := exportRows(ctx, source, "track_plan_revisions", `SELECT id,revision FROM track_plan_revisions WHERE project_id=? ORDER BY id,revision`, projectID)
 	if err != nil {
 		return nil, err
@@ -56,7 +57,7 @@ func loadTrackPlanSpecs(ctx context.Context, source queryer, projectID, projectR
 			planRows.Close()
 			return nil, err
 		}
-		spec, err := trackPlanSpecWithText(lineageID, projectID, projectRoot, value, text)
+		spec, err := trackPlanSpecWithText(lineageID, projectID, projectRoot, value, text, validText)
 		if err != nil {
 			planRows.Close()
 			return nil, err
@@ -158,10 +159,10 @@ func loadTrackPlan(ctx context.Context, source queryer, projectID, id string, re
 func trackPlanSpec(lineageID, projectID, projectRoot string, value trackplan.Plan) (EnvelopeSpec, error) {
 	return trackPlanSpecWithText(lineageID, projectID, projectRoot, value, func(value string) string {
 		return portableTrackText(value, projectID, projectRoot)
-	})
+	}, newTrackPlanTextValidation().valid)
 }
 
-func trackPlanSpecWithText(lineageID, projectID, projectRoot string, value trackplan.Plan, text func(string) string) (EnvelopeSpec, error) {
+func trackPlanSpecWithText(lineageID, projectID, projectRoot string, value trackplan.Plan, text func(string) string, validText func(string, bool) bool) (EnvelopeSpec, error) {
 	stringsWithText := func(values []string) []string {
 		result := make([]string, len(values))
 		for index, value := range values {
@@ -204,28 +205,28 @@ func trackPlanSpecWithText(lineageID, projectID, projectRoot string, value track
 		return EnvelopeSpec{}, err
 	}
 	spec := EnvelopeSpec{LineageID: lineageID, RecordType: "track_plan", RecordSchemaVersion: 1, RecordID: value.ID, RecordRevision: value.Revision, RecordedAt: value.RecordedAt, Authority: value.Authority, Index: index, Refs: trackPlanRefs(payload), Payload: body}
-	return spec, validateTrackPlanSpec(spec, payload)
+	return spec, validateTrackPlanSpec(spec, payload, validText)
 }
 
-func validateTrackPlanSpec(spec EnvelopeSpec, payload any) error {
+func validateTrackPlanSpec(spec EnvelopeSpec, payload any, validText func(string, bool) bool) error {
 	encoded, err := EncodeEnvelope(spec)
 	if err != nil {
 		return err
 	}
 	switch value := payload.(type) {
 	case trackPlanPayload:
-		_, err = decodeTrackPlan(encoded.Envelope, value)
+		_, err = decodeTrackPlan(encoded.Envelope, value, validText)
 	default:
 		err = fmt.Errorf("unsupported track-plan payload validation type %T", payload)
 	}
 	return err
 }
 
-func decodeTrackPlan(envelope Envelope, payload trackPlanPayload) (trackplan.Plan, error) {
-	if envelope.RecordRevision < 1 || !portableIncomingIdentifier(envelope.RecordID) || payload.OperationalSchemaVersion != trackplan.SchemaVersion || !portableIncomingIdentifier(payload.RoadmapNodeID) || !validTrackPlanText(payload.TaskID, false) || !validTrackPlanText(payload.Title, true) || !validTrackPlanText(payload.Summary, true) || !validTrackPlanText(payload.Creator, true) || !validTrackPlanText(payload.Model, false) || !oneOfValue(payload.Status, "proposed", "accepted", "active", "completed", "superseded") || !oneOfValue(envelope.Authority, "model_suggested", "caller_asserted") || (envelope.Authority == "model_suggested" && (payload.Model == "" || (payload.Status != "proposed" && (payload.Change == nil || !oneOfValue(payload.Change.Kind, "progress", "delegated"))))) || (envelope.Authority == "caller_asserted" && payload.Model != "") || !validTrackPlanStrings(payload.WorkItemIDs) || len(payload.Items) == 0 || len(payload.Items) > 100 {
+func decodeTrackPlan(envelope Envelope, payload trackPlanPayload, validText func(string, bool) bool) (trackplan.Plan, error) {
+	if envelope.RecordRevision < 1 || !portableIncomingIdentifier(envelope.RecordID) || payload.OperationalSchemaVersion != trackplan.SchemaVersion || !portableIncomingIdentifier(payload.RoadmapNodeID) || !validText(payload.TaskID, false) || !validText(payload.Title, true) || !validText(payload.Summary, true) || !validText(payload.Creator, true) || !validText(payload.Model, false) || !oneOfValue(payload.Status, "proposed", "accepted", "active", "completed", "superseded") || !oneOfValue(envelope.Authority, "model_suggested", "caller_asserted") || (envelope.Authority == "model_suggested" && (payload.Model == "" || (payload.Status != "proposed" && (payload.Change == nil || !oneOfValue(payload.Change.Kind, "progress", "delegated"))))) || (envelope.Authority == "caller_asserted" && payload.Model != "") || !validTrackPlanStrings(payload.WorkItemIDs, validText) || len(payload.Items) == 0 || len(payload.Items) > 100 {
 		return trackplan.Plan{}, fmt.Errorf("track plan %s/%d is invalid", envelope.RecordID, envelope.RecordRevision)
 	}
-	if !validPortablePlanItems(payload.Items) || !sameReferences(envelope.Refs, trackPlanRefs(payload)) || !checkpointIndexMatches(envelope.Index, envelopeIndex{Title: payload.Title, Status: payload.Status, TaskID: payload.TaskID}) {
+	if !validPortablePlanItems(payload.Items, validText) || !sameReferences(envelope.Refs, trackPlanRefs(payload)) || !checkpointIndexMatches(envelope.Index, envelopeIndex{Title: payload.Title, Status: payload.Status, TaskID: payload.TaskID}) {
 		return trackplan.Plan{}, fmt.Errorf("track plan %s/%d metadata or items are invalid", envelope.RecordID, envelope.RecordRevision)
 	}
 	recorded, err := parsePortableTime(envelope.RecordedAt)
@@ -235,10 +236,10 @@ func decodeTrackPlan(envelope Envelope, payload trackPlanPayload) (trackplan.Pla
 	return trackplan.Plan{Change: payload.Change, ID: envelope.RecordID, Revision: envelope.RecordRevision, RoadmapNodeID: payload.RoadmapNodeID, TaskID: payload.TaskID, Title: payload.Title, Summary: payload.Summary, Status: payload.Status, Creator: payload.Creator, Model: payload.Model, Authority: envelope.Authority, WorkItemIDs: append([]string{}, payload.WorkItemIDs...), Items: append([]trackplan.Item{}, payload.Items...), RecordedAt: recorded, SchemaVersion: payload.OperationalSchemaVersion}, err
 }
 
-func validPortablePlanItems(items []trackplan.Item) bool {
+func validPortablePlanItems(items []trackplan.Item, validText func(string, bool) bool) bool {
 	ids, positions := map[string]bool{}, map[int]bool{}
 	for _, item := range items {
-		if !portableIncomingIdentifier(item.ID) || item.Position < 0 || positions[item.Position] || !validTrackPlanText(item.Title, true) || !validTrackPlanText(item.ProgressNote, false) || !validTrackPlanText(item.AcceptanceCriteria, false) || !validTrackPlanText(item.Detail, false) || !oneOfValue(item.Status, "pending", "ready", "active", "blocked", "completed", "superseded") || !validTrackPlanText(item.ParentID, false) || !validTrackPlanStrings(item.DependsOn) || !validTrackPlanStrings(item.EvidenceRefs) || !validTrackPlanStrings(item.WorkItemIDs) || ids[item.ID] {
+		if !portableIncomingIdentifier(item.ID) || item.Position < 0 || positions[item.Position] || !validText(item.Title, true) || !validText(item.ProgressNote, false) || !validText(item.AcceptanceCriteria, false) || !validText(item.Detail, false) || !oneOfValue(item.Status, "pending", "ready", "active", "blocked", "completed", "superseded") || !validText(item.ParentID, false) || !validTrackPlanStrings(item.DependsOn, validText) || !validTrackPlanStrings(item.EvidenceRefs, validText) || !validTrackPlanStrings(item.WorkItemIDs, validText) || ids[item.ID] {
 			return false
 		}
 		positions[item.Position], ids[item.ID] = true, true
@@ -334,14 +335,47 @@ func validTrackPlanText(value string, required bool) bool {
 	return (!required || value != "") && len(value) <= trackPlanTextMaxBytes && strings.TrimSpace(value) == value && strings.IndexByte(value, 0) < 0 && redactSafe(value)
 }
 func redactSafe(value string) bool { return portableText(value, "") == value }
-func validTrackPlanStrings(values []string) bool {
+func validTrackPlanStrings(values []string, validText func(string, bool) bool) bool {
 	if len(values) > 64 {
 		return false
 	}
 	for index, value := range values {
-		if !validTrackPlanText(value, true) || (index > 0 && values[index-1] >= value) {
+		if !validText(value, true) || (index > 0 && values[index-1] >= value) {
 			return false
 		}
 	}
 	return true
+}
+
+// This cache reuses only the pure text predicate within one plan load or bundle
+// decode. Record structure, relationships and current database state are still
+// validated on every call. Clone keys to bound retained backing storage as well
+// as string lengths; a full cache simply uses the original predicate.
+const trackPlanValidationMaxEntries = 1024
+const trackPlanValidationMaxBytes = 1 << 20
+
+type trackPlanTextValidation struct {
+	values map[string]bool
+	bytes  int
+}
+
+func newTrackPlanTextValidation() *trackPlanTextValidation {
+	return &trackPlanTextValidation{}
+}
+func (c *trackPlanTextValidation) valid(value string, required bool) bool {
+	if (required && value == "") || len(value) > trackPlanTextMaxBytes {
+		return false
+	}
+	if safe, ok := c.values[value]; ok {
+		return safe
+	}
+	safe := validTrackPlanText(value, false)
+	if len(value) <= trackPlanTextMaxBytes && len(c.values) < trackPlanValidationMaxEntries && len(value) <= trackPlanValidationMaxBytes-c.bytes {
+		if c.values == nil {
+			c.values = make(map[string]bool)
+		}
+		c.values[strings.Clone(value)] = safe
+		c.bytes += len(value)
+	}
+	return safe
 }

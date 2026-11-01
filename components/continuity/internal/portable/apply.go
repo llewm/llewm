@@ -269,6 +269,7 @@ func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID str
 }
 
 func decodeOperationalBundle(bundle Bundle) (decodedOperationalBundle, error) {
+	validPlanText := newTrackPlanTextValidation().valid
 	decoded := decodedOperationalBundle{
 		checkpoints: make(map[string]checkpoint.Checkpoint), actions: make(map[string]portableCheckpointAction), transitions: make(map[string]portableCheckpointTransition),
 		roadmap:     newPortableRoadmapRecords(),
@@ -454,7 +455,7 @@ func decodeOperationalBundle(bundle Bundle) (decodedOperationalBundle, error) {
 			if err := strictDecode(envelope.Payload, &payload); err != nil {
 				return decoded, fmt.Errorf("decode track plan %s/%d: %w", envelope.RecordID, envelope.RecordRevision, err)
 			}
-			value, err := decodeTrackPlan(envelope, payload)
+			value, err := decodeTrackPlan(envelope, payload, validPlanText)
 			if err != nil {
 				return decoded, err
 			}
