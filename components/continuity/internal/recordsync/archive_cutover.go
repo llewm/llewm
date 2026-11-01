@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/database"
 )
@@ -347,15 +345,7 @@ func (s archiveStore) transact(ctx context.Context, fn func(*sql.Tx) error) erro
 	if err := fn(tx); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if _, rollbackErr := conn.ExecContext(cleanup, `ROLLBACK`); rollbackErr != nil {
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		}
-		return err
-	}
-	return nil
+	return database.CommitPinned(ctx, conn, tx)
 }
 
 func (s archiveStore) view(ctx context.Context, fn func(*sql.Tx) error) error {

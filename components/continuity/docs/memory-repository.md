@@ -322,8 +322,9 @@ envelopes, and returns a receipt including its own retention writes atomically.
 Capture acknowledges this receipt only after durable publication and the final
 database/archive guards. Interrupted retention or publication therefore replays
 through complete export. Updates, deletions, retained-envelope changes, recovery
-graphs, unknown families and more than 128 selected identities in a table retain
-complete validation; journal reads are additionally bounded to 4096 changes.
+changes or affected identities, unknown families and more than 128 selected
+identities in a table retain complete validation. Journal reads and the total
+selected export are additionally bounded to 4096 changes and identities.
 Complete export starts with a read-only snapshot. When new identities need
 retention, it releases that transaction and reserves the writer on the same
 pinned connection. An unchanged SQLite `data_version` permits reuse of the
@@ -381,8 +382,15 @@ graph. Its post-apply canonical journal checks reject unexpected recovery writes
 before commit. Ordinary imports keep complete recovery comparisons and graph
 validation. Recovery lookup probes and checked recovery rows are counted
 separately, so a hidden full graph read cannot appear as bounded point work.
-Canonical capture still takes its complete export path when recoveries exist;
-that export optimization remains separate from semantic replay qualification.
+Canonical capture can also scope recovery lookup after a complete export has
+established its consumer cursor. Corrected selected identities and recovery
+changes require complete export; independent identities use exact lookup probes.
+Before returning a new cursor, export checks the global journal range across its
+retention transaction: only its selected envelope insertions may occur, exactly
+once each. It verifies their actual stored bytes too. Extra or foreign writes,
+suppressed insertion and fabricated journal events cause rollback and an explicit
+error. Failed SQLite commits clear their native transaction on the pinned
+connection before it returns to the pool. The archive writer shares this cleanup.
 Journal pruning is not enabled.
 Existing proofs are discarded by
 migration 086; capture-v2 does not reuse earlier capture proofs.

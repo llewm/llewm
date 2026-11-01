@@ -182,6 +182,7 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	}
 	fresh := newMachine(t, "fresh", remote)
 	fresh.sync(t, OutcomeSynced)
+	qualifyRecoveredLocalCaptureCycle(t, ctx, a)
 	// Replay the recovered history into two empty projects and compare the
 	// block-backed importer with the current full scan.
 	blocks, err := a.syncer.trackedBlocks(ctx, repo, testLineage)
@@ -583,5 +584,34 @@ func qualifyRecoveredJournalArrivals(t *testing.T, ctx context.Context, objects 
 				t.Fatalf("journal changed reference wire bytes for %s %s schema%d", object.Envelope.RecordType, object.Envelope.RecordID, object.Envelope.RecordSchemaVersion)
 			}
 		}
+	}
+}
+
+func qualifyRecoveredLocalCaptureCycle(t *testing.T, ctx context.Context, m machine) {
+	t.Helper()
+	stable := false
+	for n := 0; n < 4; n++ {
+		if result := m.sync(t, OutcomeSynced); result.Unchanged {
+			stable = true
+			break
+		}
+	}
+	if !stable {
+		t.Fatal("recovered capture never settled")
+	}
+	m.decide(t, "captured-after-recovery", "Independent local capture after correction")
+	measured, metrics := syncwork.WithWorkMetrics(ctx)
+	result, err := m.syncer.Sync(measured)
+	if err != nil || result.Outcome != OutcomeSynced || result.ExportedRecords != 1 || result.ImportedRecords != 0 || result.Forks != 0 {
+		t.Fatalf("recovered local cycle: %+v %v", result, err)
+	}
+	counts := metrics.Counts()
+	for _, name := range []string{"capture_full_exports", "operational_full_loads", "semantic_catalog_blocks_read", "recovery_records_checked", "archive_audit_envelopes", "local_state_records_visited"} {
+		if counts[name] != 0 {
+			t.Fatalf("recovered local arrival scanned old state: %s=%d %v", name, counts[name], counts)
+		}
+	}
+	if counts["export_retention_rows_checked"] != 1 || counts["semantic_journal_delta_cycles"] != 1 || counts["dependency_membership_records"] != 1 {
+		t.Fatalf("recovered local cycle did not use guarded deltas: %v", counts)
 	}
 }

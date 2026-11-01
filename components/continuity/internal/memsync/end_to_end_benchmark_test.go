@@ -16,6 +16,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/resource"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"github.com/llewm/llewm/components/continuity/internal/trackplan"
+	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
 // These disposable local fixtures time a complete warmed cycle, including
@@ -98,21 +99,27 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 // Repeated, text-heavy plan revisions exercise the export/validation/redaction
 // costs absent from decision-only fixtures. All history here is synthetic.
 func BenchmarkHistorySyncPlanHistory(b *testing.B) {
-	benchmarkHistorySyncPlanHistory(b, false, false)
+	benchmarkHistorySyncPlanHistory(b, false, false, false)
 }
 
 // A realistic local arrival includes a plan revision, resource observation,
 // checkpoint context and action history, rather than only a decision.
 func BenchmarkHistorySyncMixedHistory(b *testing.B) {
-	benchmarkHistorySyncPlanHistory(b, true, false)
+	benchmarkHistorySyncPlanHistory(b, true, false, false)
 }
 
 // Remote arrivals measure the receiving Git cycle, including semantic appends.
 func BenchmarkHistorySyncRemoteMixedHistory(b *testing.B) {
-	benchmarkHistorySyncPlanHistory(b, true, true)
+	benchmarkHistorySyncPlanHistory(b, true, true, false)
 }
 
-func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
+// Historical correction graphs must not make independent mixed arrivals scan
+// old proofs, canonical rows or complete semantic catalogs.
+func BenchmarkHistorySyncRecoveredMixedHistory(b *testing.B) {
+	benchmarkHistorySyncPlanHistory(b, true, false, true)
+}
+
+func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote, recovered bool) {
 	ctx := context.Background()
 	for _, size := range []int{500, 5669, 10000} {
 		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
@@ -134,6 +141,9 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 				if _, err := service.AppendPlan(ctx, trackplan.Plan{ProjectID: m.project, ID: "history-plan", RoadmapNodeID: "history", Title: "Synthetic plan history", Summary: "Profile repeated historical text", Status: "active", Creator: "benchmark", Items: items}); err != nil {
 					b.Fatal(err)
 				}
+			}
+			if recovered {
+				seedBenchmarkRecovery(b, ctx, m)
 			}
 			for i := 0; i < 2; i++ {
 				m.sync(b, OutcomeSynced)
@@ -183,6 +193,17 @@ func benchmarkHistorySyncPlanHistory(b *testing.B, mixed, remote bool) {
 					}
 				})
 				b.StopTimer()
+				if recovered {
+					counts := metrics.Counts()
+					for _, name := range []string{"capture_full_exports", "operational_full_loads", "semantic_catalog_blocks_read", "recovery_records_checked", "local_state_records_visited"} {
+						if counts[name] != 0 {
+							b.Fatalf("recovered mixed arrival scanned old state: %s=%d %v", name, counts[name], counts)
+						}
+					}
+					if counts["semantic_journal_delta_cycles"] != 1 {
+						b.Fatalf("recovered mixed arrival did not use journal: %v", counts)
+					}
+				}
 				for name, count := range metrics.Counts() {
 					work[name] += count
 				}
@@ -350,5 +371,55 @@ func BenchmarkFolderSyncUnchangedGate(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func seedBenchmarkRecovery(b testing.TB, ctx context.Context, m machine) {
+	b.Helper()
+	foreignRoot, foreignProject := "/foreign/peer/root", "project-0123456789abcdef"
+	if _, err := (worknarrative.Service{DB: m.db}).Append(ctx, worknarrative.Record{ProjectID: m.project, ID: "historical-recovery", Title: "Historical observation", Trigger: "manual", Creator: "benchmark", Claims: []worknarrative.Claim{{Kind: "outcome", Text: foreignRoot + " " + foreignProject, Authority: "caller_asserted"}}}); err != nil {
+		b.Fatal(err)
+	}
+	export, err := portable.EncodeMemoryExport(ctx, m.db, m.project)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var original portable.EncodedEnvelope
+	for _, object := range export.Envelopes {
+		if object.Envelope.RecordType == "work_narrative" && object.Envelope.RecordID == "historical-recovery" {
+			original = object
+			break
+		}
+	}
+	if len(original.Bytes) == 0 {
+		b.Fatal("historical observation absent")
+	}
+	spec, err := portable.DecodeMemoryEnvelope(original.Bytes)
+	if err != nil {
+		b.Fatal(err)
+	}
+	spec.Payload = []byte(strings.ReplaceAll(strings.ReplaceAll(string(spec.Payload), foreignRoot, "[PROJECT_ROOT]"), foreignProject, "[PROJECT_ID]"))
+	derived, err := portable.EncodeEnvelope(spec)
+	if err != nil {
+		b.Fatal(err)
+	}
+	proof, err := portable.RedactionRecoverySpec(portable.RedactionRecovery{Original: original.Bytes, Derived: derived.Bytes, ProjectRoot: foreignRoot, ProjectID: foreignProject, Creator: "benchmark", Reason: "Historical peer re-export"}, spec.RecordedAt)
+	if err != nil {
+		b.Fatal(err)
+	}
+	plan, _, err := portable.ImportMemoryRecords(ctx, m.db, m.project, []portable.EnvelopeSpec{proof}, spec.RecordedAt)
+	if err != nil || !plan.ApplyAllowed {
+		b.Fatalf("correction: %+v %v", plan, err)
+	}
+	block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{derived})
+	if err != nil {
+		b.Fatal(err)
+	}
+	repo, err := m.syncer.repository(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err := commitBlocks(ctx, repo, testLineage, []recordsync.Block{block}, "fixture: historical corrected observation", false); err != nil {
+		b.Fatal(err)
 	}
 }

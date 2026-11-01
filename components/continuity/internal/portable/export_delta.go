@@ -200,7 +200,8 @@ func selectExportChanges(project string, changes []database.SyncChange) (map[str
 	return keys, true
 }
 
-// EncodeMemoryDelta consumes a previously validated journal batch. The returned
+// EncodeMemoryDelta consumes a validated journal batch whose durable consumer
+// was established by a complete export, including recovery graph validation. The returned
 // cursor includes this export's own retention writes, from the same transaction.
 // It may be acknowledged only after durable archive publication. A false result
 // requires complete export; it never advances the caller's cursor.
@@ -210,7 +211,12 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		syncwork.RecordWork(ctx, "fallback_delta_unqualified_changes", 1)
 		return MemoryExport{}, expected, false, nil
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return MemoryExport{}, expected, false, err
+	}
+	defer conn.Close()
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return MemoryExport{}, expected, false, err
 	}
@@ -231,16 +237,6 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		syncwork.RecordWork(ctx, "fallback_delta_snapshot_changed", 1)
 		return MemoryExport{}, expected, false, nil
 	}
-	// Recovery can substitute identities and bytes beyond the changed row.
-	// Keep its complete graph validation until that closure is qualified.
-	var recovery bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM redaction_recoveries WHERE project_id=?)`, expected.Project).Scan(&recovery); err != nil {
-		return MemoryExport{}, expected, false, err
-	}
-	if recovery {
-		syncwork.RecordWork(ctx, "fallback_delta_recovery", 1)
-		return MemoryExport{}, expected, false, nil
-	}
 	identity, err := identityFrom(ctx, tx, expected.Project)
 	if err != nil {
 		return MemoryExport{}, expected, false, err
@@ -253,7 +249,7 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 	if err = tx.QueryRowContext(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&result.DatabaseSchema); err != nil {
 		return MemoryExport{}, expected, false, err
 	}
-	source := &recordSelectionSource{queryer: tx, keys: keys}
+	source := &recordSelectionSource{queryer: recoveryComparisonSource{tx}, keys: keys}
 	specs, missing, err := loadSelectedOperationalSpecs(ctx, source, expected.Project, root, identity.LineageID, nil)
 	if err != nil {
 		return MemoryExport{}, expected, false, err
@@ -262,8 +258,27 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 		syncwork.RecordWork(ctx, "fallback_delta_missing_actors", 1)
 		return MemoryExport{}, expected, false, nil
 	}
+	identities := make([]Envelope, 0, len(specs))
+	for _, spec := range specs {
+		identities = append(identities, Envelope{RecordType: spec.RecordType, RecordID: spec.RecordID, RecordRevision: spec.RecordRevision})
+	}
+	if allowed, err := recoverySelectionAllowed(ctx, source, expected.Project, identities); err != nil {
+		return MemoryExport{}, expected, false, err
+	} else if !allowed {
+		syncwork.RecordWork(ctx, "fallback_delta_recovery", 1)
+		return MemoryExport{}, expected, false, nil
+	}
 	syncwork.RecordWork(ctx, "operational_delta_loads", 1)
 	syncwork.RecordWork(ctx, "operational_specs_loaded", int64(len(specs)))
+	if len(specs) > 4096 {
+		syncwork.RecordWork(ctx, "fallback_delta_record_limit", 1)
+		return MemoryExport{}, expected, false, nil
+	}
+	var retentionStart int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM history_sync_changes`).Scan(&retentionStart); err != nil {
+		return MemoryExport{}, expected, false, err
+	}
+	inserted := make(map[string]EncodedEnvelope)
 	for _, spec := range specs {
 		var body string
 		err = tx.QueryRowContext(ctx, `SELECT envelope_json FROM portable_envelopes WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=?`, expected.Project, spec.RecordType, spec.RecordID, spec.RecordRevision).Scan(&body)
@@ -280,6 +295,7 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 			syncwork.RecordWork(ctx, "snapshot_envelope_encodes", 1)
 			encoded, err = EncodeEnvelope(spec)
 			if err == nil {
+				inserted[recordKey(encoded.Envelope)] = encoded
 				err = retainEnvelope(ctx, tx, expected.Project, "export", encoded)
 			}
 		}
@@ -292,7 +308,14 @@ func EncodeMemoryDelta(ctx context.Context, db *sql.DB, expected database.SyncCu
 	if err != nil {
 		return MemoryExport{}, expected, false, err
 	}
-	return result, current, true, tx.Commit()
+	if err := verifyExportRetentionWithin(ctx, tx, expected.Project, retentionStart, expected.Generation, current.Generation, inserted); err != nil {
+		syncwork.RecordWork(ctx, "delta_retention_rejected", 1)
+		return MemoryExport{}, expected, false, err
+	}
+	if err := database.CommitPinned(ctx, conn, tx); err != nil {
+		return MemoryExport{}, expected, false, err
+	}
+	return result, current, true, nil
 }
 
 // loadSelectedOperationalSpecs shares the opted-in primary readers between
