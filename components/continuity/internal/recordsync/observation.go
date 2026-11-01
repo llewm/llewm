@@ -92,6 +92,10 @@ func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint 
 		return
 	}
 	verified := make([]Block, 0, len(blocks))
+	var auditObjects map[string]portable.EncodedEnvelope
+	if complete {
+		auditObjects = make(map[string]portable.EncodedEnvelope)
+	}
 	total, records := 0, 0
 	seen := map[string]bool{}
 	for _, block := range blocks {
@@ -118,6 +122,11 @@ func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint 
 			return
 		}
 		verified = append(verified, decoded)
+		if complete {
+			for _, object := range decoded.Objects {
+				auditObjects[object.Envelope.EnvelopeSHA256] = object
+			}
+		}
 	}
 	err = a.store().transact(ctx, func(tx *sql.Tx) error {
 		before, trackingErr := s.observationStampWithin(ctx, tx, a)
@@ -142,7 +151,7 @@ func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint 
 			}
 		}
 		if complete {
-			if _, err := a.store().auditWithin(ctx, tx); err != nil {
+			if _, err := a.store().auditVerifiedWithin(ctx, tx, auditObjects); err != nil {
 				return err
 			}
 			// Unknown tracking also invalidates semantic cache shortcuts. Canonical
@@ -197,7 +206,7 @@ func (s Index) observeBlockWithin(ctx context.Context, tx *sql.Tx, a Archive, en
 		return err
 	}
 
-	if _, err := a.store().putWithin(ctx, tx, "ready", endpointHash, block.Objects); err != nil {
+	if _, err := a.store().putValidatedWithin(ctx, tx, "ready", endpointHash, block.Objects); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, endpointHash, block.Hash); err != nil {

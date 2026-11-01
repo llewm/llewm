@@ -890,6 +890,25 @@ warm-up, contain no record contents or identities, and do not authorize reuse.
 Use the same fixture shape and iteration count when comparing histories; these
 counters expose remaining full scans rather than asserting bounded delta work.
 
+Complete Git observations reuse only envelopes freshly decoded from their exact
+block bytes in that call. Duplicate archive insertions compare the durable bytes,
+record identity and initial provenance against that validated input. The final
+audit still reads every durable body, origin and journal entry and checks all
+maintained counts; bodies absent from the observation are decoded independently.
+`archive_verified_bytes_reused/op` counts duplicate insertion comparisons;
+`archive_audit_verified_bytes_reused/op` counts audit comparisons against fresh
+input, and `archive_audit_decodes/op` counts independent audit decodes. Neither
+reuse survives the call or trusts exported parsed envelope fields.
+
+Cold archive snapshots collect canonical envelopes during that same complete
+audit, then select permitted provenance in one query within its read transaction.
+This removes repeated envelope reads, decodes and per-envelope route checks;
+local/source/explicit-relay policy and hash ordering are unchanged. A failed
+audit exposes no partial snapshot. Repeated ingestion/indexing SQL statements
+are prepared once per batch and closed before returning; no prepared statement
+or body cache crosses transactions. `observation_sql_prepares/op` counts these
+explicit preparations. Full archive work remains linear in retained history.
+
 ## Authentication
 
 Syncs run from session hooks and after checkpoints, where nobody can answer a

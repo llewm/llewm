@@ -109,9 +109,6 @@ func (s archiveStore) putWithin(ctx context.Context, tx *sql.Tx, status, originH
 	if (status != "staging" && status != "ready") || !hex64.MatchString(originHash) || len(objects) > portable.MaxRecordCount {
 		return 0, fmt.Errorf("invalid archive batch")
 	}
-	if _, err := s.stampWithin(ctx, tx, status); err != nil {
-		return 0, err
-	}
 	verified := make([]portable.EncodedEnvelope, 0, len(objects))
 	total := 0
 	for _, object := range objects {
@@ -128,10 +125,32 @@ func (s archiveStore) putWithin(ctx context.Context, tx *sql.Tx, status, originH
 		}
 		verified = append(verified, decoded)
 	}
+	return s.putValidatedWithin(ctx, tx, status, originHash, verified)
+}
+
+// putValidatedWithin is private to the ingestion paths which have just decoded
+// these exact bytes. Exported parsed fields must never reach it without decode.
+func (s archiveStore) putValidatedWithin(ctx context.Context, tx *sql.Tx, status, originHash string, verified []portable.EncodedEnvelope) (int, error) {
+	if (status != "staging" && status != "ready") || !hex64.MatchString(originHash) || len(verified) > portable.MaxRecordCount {
+		return 0, fmt.Errorf("invalid archive batch")
+	}
+	if _, err := s.stampWithin(ctx, tx, status); err != nil {
+		return 0, err
+	}
+	statements := statementSet{tx: tx}
+	defer statements.close()
 	added := 0
+	total := 0
 	for _, object := range verified {
+		if err := ctx.Err(); err != nil {
+			return added, err
+		}
+		total += len(object.Bytes) + 1
+		if len(object.Bytes) > MaxObjectBytes || total > portable.MaxRecordsBytes {
+			return added, fmt.Errorf("archive batch exceeds bounds")
+		}
 		e := object.Envelope
-		result, err := tx.ExecContext(ctx, `INSERT INTO history_archive_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,initial_origin_hash,envelope_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, originHash, object.Bytes)
+		result, err := statements.exec(ctx, `INSERT INTO history_archive_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,initial_origin_hash,envelope_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, originHash, object.Bytes)
 		if err != nil {
 			return added, err
 		}
@@ -141,12 +160,23 @@ func (s archiveStore) putWithin(ctx context.Context, tx *sql.Tx, status, originH
 		}
 		if n == 0 {
 			// Never silently repair or overwrite a damaged durable observation.
-			stored, err := s.readObjectWithin(ctx, tx, e.EnvelopeSHA256)
-			if err != nil || !bytes.Equal(stored.Bytes, object.Bytes) {
+			stmt, err := statements.prepare(ctx, `SELECT e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),o.origin_hash FROM history_archive_envelopes e LEFT JOIN history_archive_origins o ON o.project_id=e.project_id AND o.envelope_hash=e.envelope_hash AND o.origin_hash=e.initial_origin_hash WHERE e.project_id=? AND e.envelope_hash=?`)
+			if err != nil {
+				return added, err
+			}
+			var kind, id string
+			var revision int
+			var body []byte
+			var origin sql.NullString
+			err = stmt.QueryRowContext(ctx, MaxObjectBytes+1, s.ProjectID, e.EnvelopeSHA256).Scan(&kind, &id, &revision, &body, &origin)
+			// Exact equality to the already validated input proves its canonical
+			// body; still independently check every stored identity and provenance.
+			if err != nil || !bytes.Equal(body, object.Bytes) || kind != e.RecordType || id != e.RecordID || revision != e.RecordRevision || !origin.Valid || !hex64.MatchString(origin.String) {
 				return added, errArchiveIntegrity
 			}
+			syncwork.RecordWork(ctx, "archive_verified_bytes_reused", 1)
 		}
-		originResult, err := tx.ExecContext(ctx, `INSERT INTO history_archive_origins(project_id,envelope_hash,origin_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, originHash)
+		originResult, err := statements.exec(ctx, `INSERT INTO history_archive_origins(project_id,envelope_hash,origin_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, originHash)
 		if err != nil {
 			return added, err
 		}
@@ -276,6 +306,19 @@ func (s archiveStore) rememberWithin(ctx context.Context, tx *sql.Tx, consumer s
 // auditWithin independently verifies exact durable bodies, all origins, journal
 // references and maintained counts. It never uses a disposable block inventory.
 func (s archiveStore) auditWithin(ctx context.Context, tx *sql.Tx) (archiveAudit, error) {
+	return s.auditVerifiedWithin(ctx, tx, nil)
+}
+
+// The optional map contains only freshly decoded private observation inputs.
+// Exact durable bytes may reuse that parse; every row, identity, origin and
+// maintained count is still independently checked within this transaction.
+func (s archiveStore) auditVerifiedWithin(ctx context.Context, tx *sql.Tx, verified map[string]portable.EncodedEnvelope) (archiveAudit, error) {
+	return s.auditSnapshotWithin(ctx, tx, verified, nil)
+}
+
+// visit receives each completely validated body in hash order. The caller must
+// discard collected contents if any later origin, journal or count check fails.
+func (s archiveStore) auditSnapshotWithin(ctx context.Context, tx *sql.Tx, verified map[string]portable.EncodedEnvelope, visit func(portable.EncodedEnvelope)) (archiveAudit, error) {
 	var audit archiveAudit
 	stamp, err := s.stampWithin(ctx, tx, "")
 	if err != nil {
@@ -302,10 +345,20 @@ func (s archiveStore) auditWithin(ctx context.Context, tx *sql.Tx) (archiveAudit
 			rows.Close()
 			return audit, errArchiveIntegrity
 		}
-		object, err := portable.DecodeTransportEnvelope(body)
+		object, reused := verified[hash]
+		var err error
+		if !reused {
+			object, err = portable.DecodeTransportEnvelope(body)
+			syncwork.RecordWork(ctx, "archive_audit_decodes", 1)
+		} else {
+			syncwork.RecordWork(ctx, "archive_audit_verified_bytes_reused", 1)
+		}
 		if err != nil || !bytes.Equal(object.Bytes, body) || object.Envelope.LineageID != s.Lineage || object.Envelope.EnvelopeSHA256 != hash || object.Envelope.RecordType != kind || object.Envelope.RecordID != id || object.Envelope.RecordRevision != revision {
 			rows.Close()
 			return audit, errArchiveIntegrity
+		}
+		if visit != nil {
+			visit(object)
 		}
 		objects.Write([]byte(hash + "\x00"))
 		syncwork.RecordWork(ctx, "archive_audit_envelopes", 1)

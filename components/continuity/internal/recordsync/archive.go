@@ -87,48 +87,42 @@ func (a Archive) objects(ctx context.Context, endpoint string, relay bool) ([]po
 		if _, err := a.store().stampWithin(ctx, tx, "ready"); err != nil {
 			return err
 		}
-		if _, err := a.store().auditWithin(ctx, tx); err != nil {
+		if _, err := a.store().auditSnapshotWithin(ctx, tx, nil, func(object portable.EncodedEnvelope) {
+			all = append(all, object)
+		}); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT envelope_hash FROM history_archive_envelopes WHERE project_id=? ORDER BY envelope_hash`, a.ProjectID)
+		// This transaction holds the same audited snapshot. Resolve provenance
+		// in one range query, retaining the explicit local/source/relay policy.
+		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT envelope_hash FROM history_archive_origins WHERE project_id=? AND (? OR origin_hash IN (?,?))`, a.ProjectID, relay, Hash("local"), Hash(endpoint))
 		if err != nil {
 			return err
 		}
-		var hashes []string
+		permitted := make(map[string]bool)
 		for rows.Next() {
 			var hash string
 			if err := rows.Scan(&hash); err != nil {
 				rows.Close()
 				return err
 			}
-			if len(hashes) == portable.MaxRecordCount {
-				rows.Close()
-				return errArchiveIntegrity
-			}
-			hashes = append(hashes, hash)
+			permitted[hash] = true
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
 			return err
 		}
-		for _, hash := range hashes {
-			object, err := a.store().readObjectWithin(ctx, tx, hash)
-			if err != nil {
-				return err
-			}
-			all = append(all, object)
-			permitted, err := a.store().authorizedWithin(ctx, tx, hash, Hash(endpoint), relay)
-			if err != nil {
-				return err
-			}
-			if permitted {
+		for _, object := range all {
+			if permitted[object.Envelope.EnvelopeSHA256] {
 				allowed = append(allowed, object)
 			}
 		}
 		return nil
 	})
-	return allowed, all, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return allowed, all, nil
 }
 
 func (a Archive) ChangeStamp(ctx context.Context) (string, error) {

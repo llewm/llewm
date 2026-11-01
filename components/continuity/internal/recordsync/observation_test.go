@@ -1,9 +1,112 @@
 package recordsync
 
 import (
-	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"database/sql"
 	"testing"
+
+	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
+
+func TestCompleteObservationAuditsUnobservedArchiveBodies(t *testing.T) {
+	ctx, store := archiveStoreFixture(t)
+	activateEmptyArchive(t, ctx, store)
+	archive := Archive{DB: store.DB, ProjectID: store.ProjectID, Lineage: store.Lineage}
+	index := Index{DB: store.DB, ProjectID: store.ProjectID, Lineage: store.Lineage}
+	local := archiveObject(t, "local-only", `{"value":1}`)
+	if err := archive.CaptureLocal([]portable.EncodedEnvelope{local}); err != nil {
+		t.Fatal(err)
+	}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{archiveObject(t, "observed", `{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, metrics := syncwork.WithWorkMetrics(ctx)
+	if _, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block}); err != nil || !ok {
+		t.Fatalf("observe: %v %v", ok, err)
+	}
+	counts := metrics.Counts()
+	if counts["archive_audit_decodes"] != 1 || counts["archive_audit_verified_bytes_reused"] != 1 || counts["archive_audit_envelopes"] != 2 {
+		t.Fatalf("audit coverage: %v", counts)
+	}
+	if _, err := store.DB.Exec(`DROP TRIGGER history_archive_envelope_immutable_update`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.Exec(`UPDATE history_archive_envelopes SET envelope_json=? WHERE project_id=? AND envelope_hash=?`, []byte(`{}`), store.ProjectID, local.Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block}); err == nil || ok {
+		t.Fatal("complete observation hid corruption outside transport")
+	}
+	if allowed, all, err := archive.objects(ctx, "git:fixture", false); err == nil || allowed != nil || all != nil {
+		t.Fatal("failed audit exposed a partial archive snapshot")
+	}
+}
+
+func TestObservationExactByteReuseRejectsStoredIdentityAndProvenanceDamage(t *testing.T) {
+	for _, field := range []string{"envelope_json", "record_type", "record_id", "record_revision", "initial_origin_hash"} {
+		t.Run(field, func(t *testing.T) {
+			ctx, store := archiveStoreFixture(t)
+			activateEmptyArchive(t, ctx, store)
+			archive := Archive{DB: store.DB, ProjectID: store.ProjectID, Lineage: store.Lineage}
+			index := Index{DB: store.DB, ProjectID: store.ProjectID, Lineage: store.Lineage}
+			object := archiveObject(t, "stored", `{}`)
+			block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{object})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block}); err != nil || !ok {
+				t.Fatalf("seed: %v %v", ok, err)
+			}
+			if _, err := store.DB.Exec(`DROP TRIGGER history_archive_envelope_immutable_update`); err != nil {
+				t.Fatal(err)
+			}
+			value := any("damaged")
+			switch field {
+			case "envelope_json":
+				value = append(append([]byte(nil), object.Bytes...), '\n')
+			case "record_revision":
+				value = 2
+			case "initial_origin_hash":
+				value = Hash("missing-origin")
+			}
+			conn, err := store.DB.Conn(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Model offline damage that bypassed the durable schema guards.
+			if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+				t.Fatal(err)
+			}
+			_, damageErr := conn.ExecContext(ctx, `UPDATE history_archive_envelopes SET `+field+`=? WHERE project_id=? AND envelope_hash=?`, value, store.ProjectID, object.Envelope.EnvelopeSHA256)
+			_, restoreErr := conn.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
+			conn.Close()
+			if damageErr != nil {
+				t.Fatal(damageErr)
+			}
+			if restoreErr != nil {
+				t.Fatal(restoreErr)
+			}
+			// The duplicate path must reject damage before adding new provenance.
+			if _, ok, err := index.ObservePublicationBatch(ctx, archive, "git:new", ObservationStamp{}, true, []Block{block}); err == nil || ok {
+				t.Fatal("damaged durable observation accepted")
+			}
+			var count int
+			if err := store.DB.QueryRow(`SELECT count(*) FROM history_archive_origins WHERE project_id=? AND origin_hash=?`, store.ProjectID, Hash("git:new")).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("provenance leaked on failure: %d %v", count, err)
+			}
+			// Independently exercise audit reuse, rather than letting insertion's
+			// duplicate check mask a missing audit identity/body/provenance check.
+			err = store.view(ctx, func(tx *sql.Tx) error {
+				_, err := store.auditVerifiedWithin(ctx, tx, map[string]portable.EncodedEnvelope{object.Envelope.EnvelopeSHA256: object})
+				return err
+			})
+			if err == nil {
+				t.Fatal("audit reused a damaged durable observation")
+			}
+		})
+	}
+}
 
 func TestObservationBatchAtomicallyBindsEpochInventoryAndVerifiedBytes(t *testing.T) {
 	ctx, store := archiveStoreFixture(t)
