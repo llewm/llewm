@@ -222,6 +222,8 @@ triggers on the selector tables require complete semantic validation.
 Its covering envelope membership index also lets publication stream at most
 257 memberships before checking endpoint markers. A larger fanout requires
 reference materialization, including when none of those blocks has a marker.
+Schema 094 adds exact recovery-identity lookup. Complete recovery readers check
+that lookup metadata matches the correction's validated immutable proof.
 
 Git observation receipts bind the build, physical clone, endpoint, lineage,
 index interpretation, SQLite schema, inventory generation and durable archive
@@ -360,10 +362,27 @@ Unexpected canonical, selector or raw projection side effects decline replay.
 Replay is bounded to 128 bodies and 4096 journal changes or dependency rows.
 Missing, damaged or crossed receipts, competing envelope versions, supersession
 changes, recovery records, unsupported input and larger closures use the complete
-reference importer. Baselines currently require exact canonical archive bytes
-and no supersession forks. Complete validation repairs disposable selectors and
-can resume replay afterward. These constraints preserve reference semantics at
-the cost of repeated full imports for histories outside the qualified subset.
+reference importer. A complete baseline uses the reference importer's recovery
+normalization and narrow roadmap schema-equivalence rule. Competing heads must
+already exist in both fork stores. Retired records remain archived and ignored;
+unknown deferred input prevents a baseline. Every supplied semantic identity must
+match canonical state, and omitted canonical records prevent seeding except for
+local invocation activity.
+
+Historical corrections and resolutions carry conservative dependency guards.
+Correction guards include the subject and dependencies in both original and
+additionally redacted payloads. Reaching a guard requires reference replay.
+Dependency rule versions are independent of block index versions. Complete
+validation repairs disposable selectors and can resume replay afterward.
+
+Only a journal consumer holding this guarded baseline can scope recovery
+comparisons to selected identities and reuse an unchanged validated correction
+graph. Its post-apply canonical journal checks reject unexpected recovery writes
+before commit. Ordinary imports keep complete recovery comparisons and graph
+validation. Recovery lookup probes and checked recovery rows are counted
+separately, so a hidden full graph read cannot appear as bounded point work.
+Canonical capture still takes its complete export path when recoveries exist;
+that export optimization remains separate from semantic replay qualification.
 Journal pruning is not enabled.
 Existing proofs are discarded by
 migration 086; capture-v2 does not reuse earlier capture proofs.

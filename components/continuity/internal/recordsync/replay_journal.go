@@ -59,7 +59,7 @@ func (s Index) ImportArchiveJournal(ctx context.Context, a Archive, scope Journa
 		return ImportResult{}, fmt.Errorf("%w: complete semantic snapshot receipt changed", ErrIndexRebuild)
 	}
 	result, err = s.ImportBlocks(ctx, plan.Snapshot)
-	if err != nil || result.Collisions+result.Forks+result.SupersessionForks+result.DeferredRecords != 0 {
+	if err != nil || result.Collisions+result.DeferredRecords != 0 {
 		return result, err
 	}
 	if err := s.seedReplayJournal(ctx, a, scope, plan); err != nil && !errors.Is(err, errReplayJournalFull) {
@@ -93,7 +93,7 @@ func (s Index) loadReplayStateWithin(ctx context.Context, tx *sql.Tx, consumer s
 		return state, "", errReplayJournalFull
 	}
 	canonical, _ := json.Marshal(state)
-	if string(canonical) != body || state.Version != 1 || state.Consumer != consumer || state.Schema <= 0 || len(state.Dependencies) != 32 || !hex64.MatchString(state.Dependencies+state.Dependencies) || !validArchiveStamp(state.Archive) || state.CanonicalGeneration == "" || len(state.CanonicalGeneration) > 256 || state.CanonicalSequence < 0 {
+	if string(canonical) != body || state.Version != 2 || state.Consumer != consumer || state.Schema <= 0 || len(state.Dependencies) != 32 || !hex64.MatchString(state.Dependencies+state.Dependencies) || !validArchiveStamp(state.Archive) || state.CanonicalGeneration == "" || len(state.CanonicalGeneration) > 256 || state.CanonicalSequence < 0 {
 		return state, "", errReplayJournalFull
 	}
 	// Bind both independently checksummed cursors to this same baseline. A
@@ -128,7 +128,7 @@ func (s Index) rememberReplayWithin(ctx context.Context, tx *sql.Tx, a Archive, 
 	if err != nil {
 		return err
 	}
-	state := semanticReplayState{Version: 1, Consumer: scope.Consumer, Schema: scope.Observed.Schema, Dependencies: dependencies, Archive: archive, CanonicalGeneration: canonical.Generation, CanonicalSequence: canonical.Sequence}
+	state := semanticReplayState{Version: 2, Consumer: scope.Consumer, Schema: scope.Observed.Schema, Dependencies: dependencies, Archive: archive, CanonicalGeneration: canonical.Generation, CanonicalSequence: canonical.Sequence}
 	body, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -190,38 +190,36 @@ func (s Index) seedReplayJournal(ctx context.Context, a Archive, scope JournalPu
 		if int64(len(objects)) != archive.Records || size != archive.Bytes {
 			return errReplayJournalFull
 		}
-		local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
-		if err != nil {
-			return err
-		}
 		all := make([]portable.EncodedEnvelope, 0, len(objects))
 		for _, object := range objects {
-			e := object.Envelope
-			held, exists := local[portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)]
-			if !exists || !bytes.Equal(held.Bytes, object.Bytes) {
-				return errReplayJournalFull
-			}
-			if _, supported := portable.ImportDependencies(e); !supported {
-				return errReplayJournalFull
-			}
 			all = append(all, object)
 		}
-		for _, object := range local {
-			if _, held := objects[object.Envelope.EnvelopeSHA256]; !held && object.Envelope.RecordType != "actor_invocation" {
-				return errReplayJournalFull
-			}
-		}
-		forks, err := supersessionForkRefs(ctx, tx, s.ProjectID)
+		local, recovered, covered, complete, err := s.completeReferenceSnapshotWithin(ctx, tx, all)
 		if err != nil {
 			return err
 		}
-		if len(forks) != 0 {
+		if !complete {
 			return errReplayJournalFull
+		}
+		for _, object := range all {
+			if _, supported := portable.ImportDependencies(object.Envelope); !supported {
+				_, guarded := portable.ImportInvalidationGuards(object)
+				_, corrected := recovered[object.Envelope.EnvelopeSHA256]
+				if !guarded && !corrected {
+					return errReplayJournalFull
+				}
+			}
+		}
+		for _, object := range local {
+			e := object.Envelope
+			if !covered[portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)] && e.RecordType != "actor_invocation" {
+				return errReplayJournalFull
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_dependency_records WHERE project_id=? AND NOT EXISTS(SELECT 1 FROM history_archive_envelopes a WHERE a.project_id=history_index_dependency_records.project_id AND a.envelope_hash=history_index_dependency_records.envelope_hash)`, s.ProjectID); err != nil {
 			return err
 		}
-		if _, err := s.dependencySelectorsWithin(ctx, tx, all, false, true); err != nil {
+		if _, err := s.dependencySelectorsWithin(ctx, tx, all, true, true); err != nil {
 			return err
 		}
 		// Complete validation may recreate a missing disposable generation row.
@@ -304,7 +302,7 @@ func (s Index) tryReplayJournal(ctx context.Context, a Archive, scope JournalPub
 			if s.Now != nil {
 				now = s.Now().UTC()
 			}
-			plan, receipt, err := portable.ImportMemoryRecordsTx(ctx, tx, s.ProjectID, specs, now)
+			plan, receipt, err := portable.ImportMemoryRecordsTx(ctx, tx, s.ProjectID, specs, now, portable.RecoveryComparisonGuarded)
 			if err != nil {
 				return fmt.Errorf("%w: %v", ErrSemanticPending, err)
 			}
@@ -351,7 +349,7 @@ func (s Index) tryReplayJournal(ctx context.Context, a Archive, scope JournalPub
 }
 
 func (s Index) verifyReplayCanonicalWithin(ctx context.Context, tx *sql.Tx, changes []database.SyncChange, objects *replayObjectSet) ([]string, error) {
-	current, qualified, err := portable.CanonicalJournalEnvelopesTx(ctx, tx, s.ProjectID, changes)
+	current, qualified, err := portable.CanonicalJournalEnvelopesTx(ctx, tx, s.ProjectID, changes, portable.RecoveryComparisonGuarded)
 	if err != nil {
 		return nil, err
 	}

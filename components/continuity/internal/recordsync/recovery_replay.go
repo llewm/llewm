@@ -65,76 +65,12 @@ func (s Index) recoveryReplaySnapshot(ctx context.Context, setHash string, objec
 			return "", false, err
 		}
 	}
-	recovered, err := portable.RecoveredEnvelopes(ctx, tx, s.ProjectID)
+	local, recovered, _, complete, err := s.completeReferenceSnapshotWithin(ctx, tx, objects)
 	if err != nil {
 		return "", false, err
 	}
-	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
-	if err != nil {
-		return "", false, err
-	}
-	groups := make(map[string][]portable.EncodedEnvelope)
-	for _, object := range objects {
-		if portable.RetiredRecordType(object.Envelope.RecordType) {
-			continue
-		}
-		e := object.Envelope
-		key := portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)
-		groups[key] = append(groups[key], object)
-	}
-	normalized := make(map[string]bool, len(groups))
-	for _, group := range groups {
-		object := group[0]
-		if len(group) > 1 {
-			// Recovery records are imported together before fork handling. A
-			// duplicate correction identity must take the reference path.
-			if object.Envelope.RecordType == "redaction_recovery" {
-				return "", false, nil
-			}
-			// Mirror the reference importer's grouping, including recovery
-			// normalization and its explicit roadmap equivalence rule.
-			heads, err := forkHeads(group, recovered)
-			if err != nil || len(heads) == 0 {
-				return "", false, nil
-			}
-			if len(heads) > 1 {
-				// A full replay would record each competing head plus the local
-				// head. Skip only when both append-only stores already contain
-				// every observation it would write.
-				first := heads[0]
-				held, ok := local[portable.RecordKey(first.RecordType, first.RecordID, first.Revision)]
-				if !ok {
-					return "", false, nil
-				}
-				for _, head := range withLocalHead(heads, held) {
-					var known int
-					err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM fork_heads WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=? AND content_sha256=?) AND EXISTS(SELECT 1 FROM fork_head_observations WHERE project_id=? AND envelope_sha256=?)`, s.ProjectID, head.RecordType, head.RecordID, head.Revision, head.ContentSHA256, s.ProjectID, head.EnvelopeSHA256).Scan(&known)
-					if err != nil || known == 0 {
-						return "", false, err
-					}
-				}
-				continue
-			}
-			object, err = portable.DecodeTransportEnvelope(heads[0].Envelope)
-			if err != nil {
-				return "", false, nil
-			}
-		}
-		e := object.Envelope
-		key := portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)
-		// Different raw identities resolving to the same selected identity
-		// would be submitted twice to the reference importer.
-		if normalized[key] {
-			return "", false, nil
-		}
-		normalized[key] = true
-		held, ok := local[key]
-		if !ok || (!bytes.Equal(held.Bytes, object.Bytes) && !fork.EquivalentRoadmapNodeEnvelopes([][]byte{held.Bytes, object.Bytes})) {
-			return "", false, nil
-		}
-	}
-	if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
-		return "", false, err
+	if !complete {
+		return "", false, nil
 	}
 	state, _ := localStateHashes(ctx, local, recoveryInvocationExclusions(local, objects, recovered), false)
 	if expected != "" {
@@ -214,4 +150,87 @@ func recoveryInvocationExclusions(local map[string]portable.EncodedEnvelope, obj
 		}
 	}
 	return excluded
+}
+
+// completeReferenceSnapshotWithin shares the reference grouping, recovery and
+// known-head checks with full replay proofs. It certifies supplied identities,
+// not omitted canonical state. A baseline owner separately checks coverage.
+func (s Index) completeReferenceSnapshotWithin(ctx context.Context, tx *sql.Tx, objects []portable.EncodedEnvelope) (map[string]portable.EncodedEnvelope, map[string]portable.EncodedEnvelope, map[string]bool, bool, error) {
+	recovered, err := portable.RecoveredEnvelopes(ctx, tx, s.ProjectID)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	local, err := portable.LocalEnvelopesForImport(ctx, tx, s.ProjectID)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	groups := make(map[string][]portable.EncodedEnvelope)
+	for _, object := range objects {
+		if portable.RetiredRecordType(object.Envelope.RecordType) {
+			continue
+		}
+		if !portable.SupportedEnvelope(object.Envelope) {
+			return nil, nil, nil, false, nil
+		}
+		e := object.Envelope
+		key := portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)
+		groups[key] = append(groups[key], object)
+	}
+	normalized := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		object := group[0]
+		if len(group) > 1 {
+			// Recovery records are imported together before fork handling. A
+			// duplicate correction identity must take the reference path.
+			if object.Envelope.RecordType == "redaction_recovery" {
+				return nil, nil, nil, false, nil
+			}
+			// Mirror the reference importer's grouping, including recovery
+			// normalization and its explicit roadmap equivalence rule.
+			heads, err := forkHeads(group, recovered)
+			if err != nil || len(heads) == 0 {
+				return nil, nil, nil, false, nil
+			}
+			if len(heads) > 1 {
+				// A full replay would record each competing head plus the local
+				// head. Skip only when both append-only stores already contain
+				// every observation it would write.
+				first := heads[0]
+				held, ok := local[portable.RecordKey(first.RecordType, first.RecordID, first.Revision)]
+				if !ok {
+					return nil, nil, nil, false, nil
+				}
+				for _, head := range withLocalHead(heads, held) {
+					var known int
+					err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM fork_heads WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=? AND content_sha256=?) AND EXISTS(SELECT 1 FROM fork_head_observations WHERE project_id=? AND envelope_sha256=?)`, s.ProjectID, head.RecordType, head.RecordID, head.Revision, head.ContentSHA256, s.ProjectID, head.EnvelopeSHA256).Scan(&known)
+					if err != nil || known == 0 {
+						return nil, nil, nil, false, err
+					}
+				}
+				normalized[portable.RecordKey(first.RecordType, first.RecordID, first.Revision)] = true
+				continue
+			}
+			object, err = portable.DecodeTransportEnvelope(heads[0].Envelope)
+			if err != nil {
+				return nil, nil, nil, false, nil
+			}
+		}
+		e := object.Envelope
+		key := portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)
+		// Different raw identities resolving to the same selected identity
+		// would be submitted twice to the reference importer.
+		if normalized[key] {
+			return nil, nil, nil, false, nil
+		}
+		normalized[key] = true
+		held, ok := local[key]
+		if !ok || (!bytes.Equal(held.Bytes, object.Bytes) && !fork.EquivalentRoadmapNodeEnvelopes([][]byte{held.Bytes, object.Bytes})) {
+			return nil, nil, nil, false, nil
+		}
+	}
+	if _, err := supersessionForkRefs(ctx, tx, s.ProjectID); err != nil {
+		return nil, nil, nil, false, err
+	}
+
+	return local, recovered, normalized, true, nil
 }

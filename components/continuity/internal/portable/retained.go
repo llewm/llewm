@@ -64,9 +64,23 @@ func retainedSpecs(ctx context.Context, source queryer, projectID, lineageID str
 			}
 		}
 	}
-	recovered, err := RecoveredEnvelopes(ctx, source, projectID)
-	if err != nil {
-		return nil, err
+	var recovered map[string]EncodedEnvelope
+	guarded := false
+	if guardedRecoveryComparison(source) {
+		identities := make([]Envelope, 0, len(specs))
+		for _, spec := range specs {
+			identities = append(identities, Envelope{RecordType: spec.RecordType, RecordID: spec.RecordID, RecordRevision: spec.RecordRevision})
+		}
+		guarded, err = recoverySelectionAllowed(ctx, source, projectID, identities)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !guarded {
+		recovered, err = RecoveredEnvelopes(ctx, source, projectID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	for i, spec := range specs {
 		hash := ""

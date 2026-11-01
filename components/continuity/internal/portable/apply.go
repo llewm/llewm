@@ -20,6 +20,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/release"
 	"github.com/llewm/llewm/components/continuity/internal/roadmap"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"github.com/llewm/llewm/components/continuity/internal/trackplan"
 	"github.com/llewm/llewm/components/continuity/internal/workitem"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
@@ -132,7 +133,7 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 			return ImportApplyResult{}, err
 		}
 	}
-	result, err := applyOperationalBundleWithin(ctx, tx, projectID, bundle, decoded, plan, appliedAt, within)
+	result, err := applyOperationalBundleWithin(ctx, tx, projectID, bundle, decoded, plan, appliedAt, within, RecoveryComparisonComplete)
 	if err != nil {
 		return result, err
 	}
@@ -147,7 +148,7 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 // applyOperationalBundleWithin is the shared canonical writer. Its caller owns
 // the transaction and must roll it back on failure. Results describe staged
 // writes until that caller commits successfully.
-func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID string, bundle Bundle, decoded decodedOperationalBundle, plan ImportPlan, appliedAt time.Time, within func(context.Context, *sql.Tx) error) (ImportApplyResult, error) {
+func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID string, bundle Bundle, decoded decodedOperationalBundle, plan ImportPlan, appliedAt time.Time, within func(context.Context, *sql.Tx) error, recoveryMode RecoveryComparison) (ImportApplyResult, error) {
 	result := ImportApplyResult{Plan: plan}
 	if !plan.ApplyAllowed {
 		return result, fmt.Errorf("portable import plan is not applicable")
@@ -212,9 +213,11 @@ func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID str
 	}
 	// Retain the exact incoming form atomically with its operational rows. Do
 	// not adopt a differing schema-equivalent observation over a local record.
+	recoveryChanged := false
 	for _, encoded := range bundle.Records {
 		if _, appended := appendKeys[recordKey(encoded.Envelope)]; appended {
 			if encoded.Envelope.RecordType == "redaction_recovery" {
+				recoveryChanged = true
 				if err := appendRedactionRecovery(ctx, tx, projectID, encoded); err != nil {
 					return result, err
 				}
@@ -226,8 +229,14 @@ func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID str
 	}
 	// Check relationships between all retained proofs inside the transaction.
 	// A malformed chain must never strand the store after a successful import.
-	if _, err := RecoveredEnvelopes(ctx, tx, projectID); err != nil {
-		return result, err
+	if recoveryMode != RecoveryComparisonGuarded || recoveryChanged {
+		if _, err := RecoveredEnvelopes(ctx, tx, projectID); err != nil {
+			return result, err
+		}
+	} else {
+		// The journal consumer must check all canonical side effects before it
+		// commits this staged result. A recovery mutation requires reference replay.
+		syncwork.RecordWork(ctx, "recovery_graph_reuses", 1)
 	}
 	if appliedAt.IsZero() {
 		appliedAt = time.Now().UTC()

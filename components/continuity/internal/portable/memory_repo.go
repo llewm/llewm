@@ -382,7 +382,11 @@ func memoryImportBundle(ctx context.Context, source queryer, projectID string, s
 // that same commit. It reserves the writer before planning and uses the shared
 // canonical apply implementation. Results are provisional until the caller
 // commits; the caller must roll back on error or when refusing the plan.
-func ImportMemoryRecordsTx(ctx context.Context, tx *sql.Tx, projectID string, specs []EnvelopeSpec, at time.Time) (ImportPlan, *ImportReceipt, error) {
+func ImportMemoryRecordsTx(ctx context.Context, tx *sql.Tx, projectID string, specs []EnvelopeSpec, at time.Time, recoveryMode RecoveryComparison) (ImportPlan, *ImportReceipt, error) {
+	source, err := recoveryComparisonReader(tx, recoveryMode)
+	if err != nil {
+		return ImportPlan{}, nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE projects SET name=name WHERE id=? AND 0`, projectID); err != nil {
 		return ImportPlan{}, nil, err
 	}
@@ -401,7 +405,7 @@ func ImportMemoryRecordsTx(ctx context.Context, tx *sql.Tx, projectID string, sp
 	if err != nil {
 		return invalidImportPlan(projectID, err), nil, nil
 	}
-	plan, err := planValidatedOperationalImport(ctx, tx, projectID, bundle, nil)
+	plan, err := planValidatedOperationalImport(ctx, source, projectID, bundle, nil)
 	if err != nil || !plan.ApplyAllowed {
 		return plan, nil, err
 	}
@@ -411,7 +415,7 @@ func ImportMemoryRecordsTx(ctx context.Context, tx *sql.Tx, projectID string, sp
 	if plan.Counts[PlanAppend] == 0 {
 		return plan, nil, nil
 	}
-	applied, err := applyOperationalBundleWithin(ctx, tx, projectID, bundle, decoded, plan, at, nil)
+	applied, err := applyOperationalBundleWithin(ctx, tx, projectID, bundle, decoded, plan, at, nil, recoveryMode)
 	return applied.Plan, applied.Receipt, err
 }
 

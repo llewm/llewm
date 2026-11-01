@@ -141,6 +141,10 @@ func ImportDependencies(e Envelope) ([]ImportDependency, bool) {
 			return nil, false
 		}
 	}
+	return normalizeImportDependencies(result), true
+}
+
+func normalizeImportDependencies(result []ImportDependency) []ImportDependency {
 	sort.Slice(result, func(i, j int) bool {
 		a, b := result[i], result[j]
 		if a.RecordType != b.RecordType {
@@ -160,5 +164,5 @@ func ImportDependencies(e Envelope) ([]ImportDependency, bool) {
 			unique = append(unique, v)
 		}
 	}
-	return unique, true
+	return unique
 }

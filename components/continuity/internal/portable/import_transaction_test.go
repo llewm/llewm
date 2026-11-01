@@ -30,7 +30,7 @@ func TestImportMemoryRecordsTxSharesCommitAndRollbackWithConsumerCursor(t *testi
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
-			plan, receipt, err := ImportMemoryRecordsTx(ctx, tx, project, specs, at)
+			plan, receipt, err := ImportMemoryRecordsTx(ctx, tx, project, specs, at, RecoveryComparisonComplete)
 			if err != nil || !plan.ApplyAllowed || receipt == nil || receipt.AppendedRecords != 4 || plan.WritesPerformed != 5 {
 				t.Fatalf("staged import: %+v %+v %v", plan, receipt, err)
 			}
@@ -78,7 +78,7 @@ func TestImportMemoryRecordsTxSharesCommitAndRollbackWithConsumerCursor(t *testi
 				t.Fatal(err)
 			}
 			defer repeat.Rollback()
-			plan, receipt, err = ImportMemoryRecordsTx(ctx, repeat, project, specs, at)
+			plan, receipt, err = ImportMemoryRecordsTx(ctx, repeat, project, specs, at, RecoveryComparisonComplete)
 			if err != nil || !plan.ApplyAllowed || plan.Counts[PlanAlreadyPresent] != 4 || plan.WritesPerformed != 0 || receipt != nil {
 				t.Fatalf("repeat staged writes: %+v %+v %v", plan, receipt, err)
 			}

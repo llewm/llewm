@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/redact"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // RedactionRecovery is a correction to transport interpretation. Both observed
@@ -191,20 +192,36 @@ func decodeRedactionRecovery(envelope EncodedEnvelope) (RedactionRecovery, error
 }
 
 func loadRedactionRecoverySpecs(ctx context.Context, source queryer, projectID string) ([]EnvelopeSpec, error) {
-	rows, err := source.QueryContext(ctx, `SELECT envelope_json FROM redaction_recoveries WHERE project_id=? ORDER BY id`, projectID)
+	rows, err := source.QueryContext(ctx, `SELECT id,record_type,record_id,record_revision,original_sha256,derived_sha256,original_content_sha256,derived_content_sha256,envelope_json FROM redaction_recoveries WHERE project_id=? ORDER BY id`, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var specs []EnvelopeSpec
 	for rows.Next() {
-		var body string
-		if err := rows.Scan(&body); err != nil {
+		syncwork.RecordWork(ctx, "recovery_records_checked", 1)
+		var id, kind, record, originalHash, derivedHash, originalContent, derivedContent, body string
+		var revision int
+		if err := rows.Scan(&id, &kind, &record, &revision, &originalHash, &derivedHash, &originalContent, &derivedContent, &body); err != nil {
 			return nil, err
 		}
 		spec, err := DecodeMemoryEnvelope([]byte(body))
 		if err != nil {
 			return nil, err
+		}
+		encoded, err := EncodeEnvelope(spec)
+		if err != nil {
+			return nil, err
+		}
+		proof, err := decodeRedactionRecovery(encoded)
+		if err != nil {
+			return nil, err
+		}
+		original, _ := recoveryEnvelope(proof.Original)
+		derived, _ := recoveryEnvelope(proof.Derived)
+		o, d := original.Envelope, derived.Envelope
+		if id != spec.RecordID || kind != o.RecordType || record != o.RecordID || revision != o.RecordRevision || originalHash != o.EnvelopeSHA256 || derivedHash != d.EnvelopeSHA256 || originalContent != o.ContentSHA256 || derivedContent != d.ContentSHA256 {
+			return nil, fmt.Errorf("redaction recovery lookup metadata differs from its verified proof")
 		}
 		specs = append(specs, spec)
 	}

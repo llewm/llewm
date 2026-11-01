@@ -12,6 +12,9 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
+// Dependency rules have their own disposable version, independent of block indexing.
+const dependencyIndexVersion = 6
+
 type indexedDependencies struct {
 	Supported bool
 	Selectors []portable.ImportDependency
@@ -27,7 +30,7 @@ func dependencyDigest(hash string, value indexedDependencies) string {
 		Version      int
 		Envelope     string
 		Dependencies indexedDependencies
-	}{IndexVersion, hash, value})
+	}{dependencyIndexVersion, hash, value})
 	return Hash(string(body))
 }
 
@@ -122,7 +125,7 @@ func (s Index) dependencySelectorsWithin(ctx context.Context, tx *sql.Tx, object
 		end := min(start+128, len(unique))
 		batch := unique[start:end]
 		syncwork.RecordWork(ctx, "dependency_records_checked", int64(len(batch)))
-		args := []any{s.ProjectID, IndexVersion}
+		args := []any{s.ProjectID, dependencyIndexVersion}
 		for _, object := range batch {
 			args = append(args, object.Envelope.EnvelopeSHA256)
 		}
@@ -183,6 +186,11 @@ func (s Index) dependencySelectorsWithin(ctx context.Context, tx *sql.Tx, object
 					return nil, errDependencyRepair
 				}
 				refs, supported := portable.ImportDependencies(object.Envelope)
+				if !supported {
+					if guards, known := portable.ImportInvalidationGuards(object); known {
+						refs = guards
+					}
+				}
 				value = indexedDependencies{Supported: supported, Selectors: refs}
 				values[hash] = value
 				repairs[hash] = value
@@ -224,7 +232,7 @@ func (s Index) saveDependencySelectorsWithin(ctx context.Context, tx *sql.Tx, va
 		if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_dependency_records WHERE project_id=? AND envelope_hash=?`, s.ProjectID, hash); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_dependency_records(project_id,envelope_hash,index_version,supported,selectors_sha256) VALUES(?,?,?,?,?)`, s.ProjectID, hash, IndexVersion, value.Supported, dependencyDigest(hash, value)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_dependency_records(project_id,envelope_hash,index_version,supported,selectors_sha256) VALUES(?,?,?,?,?)`, s.ProjectID, hash, dependencyIndexVersion, value.Supported, dependencyDigest(hash, value)); err != nil {
 			return err
 		}
 		if err := insertDependencyEdges(ctx, tx, s.ProjectID, hash, value.Selectors); err != nil {

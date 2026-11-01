@@ -23,7 +23,7 @@ func verifyCanonicalJournalSelection(t *testing.T, ctx context.Context, db *sql.
 	if err != nil || reason != "" {
 		t.Fatalf("journal selection input: %q %v", reason, err)
 	}
-	selected, used, err := CanonicalJournalEnvelopesTx(ctx, tx, project, changes)
+	selected, used, err := CanonicalJournalEnvelopesTx(ctx, tx, project, changes, RecoveryComparisonComplete)
 	if err != nil || !used || len(selected) != len(expected) {
 		t.Fatalf("journal selection: got=%d expected=%d used=%t %v", len(selected), len(expected), used, err)
 	}

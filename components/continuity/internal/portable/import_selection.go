@@ -107,16 +107,20 @@ func loadImportSelection(ctx context.Context, source queryer, project, root, lin
 			seenRoots[rootKey] = true
 		}
 	}
-	var recovery bool
-	if err := source.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM redaction_recoveries WHERE project_id=?)`, project).Scan(&recovery); err != nil {
-		return nil, true, err
-	}
-	if recovery {
-		return nil, false, nil
+	allowed, err := recoverySelectionAllowed(ctx, source, project, selection.retainedKeys)
+	if err != nil || !allowed {
+		return nil, false, err
 	}
 	specs, _, err := loadSelectedOperationalSpecs(ctx, selection, project, root, lineage, actors)
 	if err != nil {
 		return nil, true, err
+	}
+	identities := make([]Envelope, 0, len(specs))
+	for _, spec := range specs {
+		identities = append(identities, Envelope{RecordType: spec.RecordType, RecordID: spec.RecordID, RecordRevision: spec.RecordRevision})
+	}
+	if allowed, err := recoverySelectionAllowed(ctx, source, project, identities); err != nil || !allowed {
+		return nil, false, err
 	}
 	syncwork.RecordWork(ctx, "operational_selected_loads", 1)
 	syncwork.RecordWork(ctx, "operational_specs_loaded", int64(len(specs)))

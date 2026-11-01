@@ -3,6 +3,7 @@ package recordsync
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -368,5 +369,97 @@ func TestSemanticJournalMissingDamagedAndCrossedReceiptsRequireReference(t *test
 				t.Fatalf("receipt recovery failed: %+v %v %v", result, err, metrics.Counts())
 			}
 		})
+	}
+}
+
+func TestSemanticJournalUnknownSchemaPreservesDeferredReferenceResult(t *testing.T) {
+	f := newReplayFixture(t)
+	value := archiveObject(t, "future", `{}`).Envelope
+	value.RecordSchemaVersion = 999
+	value.EnvelopeSHA256 = ""
+	unsigned, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsigned, err = portable.CanonicalizeJSON(unsigned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.EnvelopeSHA256 = Hash(string(unsigned))
+	wire, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err = portable.CanonicalizeJSON(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown, err := portable.DecodeTransportEnvelope(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.archive.Put(unknown, f.scope.Endpoint); err != nil {
+		t.Fatal(err)
+	}
+	f.stage(t)
+	result, err := f.replay(t)
+	if err != nil || result.DeferredRecords != 1 || result.ImportedRecords != 0 {
+		t.Fatalf("unknown input: %+v %v", result, err)
+	}
+	f.arrive(t, "after-future")
+	f.stage(t)
+	measured, metrics := syncwork.WithWorkMetrics(context.Background())
+	f.ctx = measured
+	result, err = f.replay(t)
+	if err != nil || result.DeferredRecords != 1 || result.ImportedRecords != 1 || metrics.Counts()["fallback_semantic_journal_full"] != 1 {
+		t.Fatalf("unknown input lost its deferred result: %+v %v %v", result, err, metrics.Counts())
+	}
+	var baselines int
+	if err := f.store.DB.QueryRow(`SELECT count(*) FROM history_archive_status WHERE project_id=? AND consumer=?`, f.store.ProjectID, Hash(replayJournalKey(f.scope.Consumer))).Scan(&baselines); err != nil || baselines != 0 {
+		t.Fatalf("unknown interpretation established baseline: %d %v", baselines, err)
+	}
+}
+
+func TestSemanticJournalRecoverySideEffectRollsBackBeforeGraphReuseCommits(t *testing.T) {
+	f := newReplayFixture(t)
+	for _, statement := range []string{
+		`CREATE TABLE fixture_recovery_sideeffect(enabled INTEGER NOT NULL)`,
+		`INSERT INTO fixture_recovery_sideeffect VALUES(1)`,
+		`CREATE TRIGGER disturb_recovery AFTER INSERT ON decision_records WHEN new.id='arrival' AND (SELECT enabled FROM fixture_recovery_sideeffect)=1 BEGIN INSERT INTO redaction_recoveries(project_id,id,record_type,record_id,record_revision,original_sha256,derived_sha256,original_content_sha256,derived_content_sha256,envelope_json) VALUES(new.project_id,'unexpected-proof','work_narrative','unexpected',0,'original','derived','original-content','derived-content','{}'); END`,
+	} {
+		if _, err := f.store.DB.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var err error
+	f.scope.Observed, err = f.index.ObservationStamp(f.ctx, f.archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.arrive(t, "baseline")
+	f.stage(t)
+	if result, err := f.replay(t); err != nil || result.ImportedRecords != 1 {
+		t.Fatalf("baseline: %+v %v", result, err)
+	}
+	before := f.state(t)
+	f.arrive(t, "arrival")
+	f.stage(t)
+	if result, err := f.index.tryReplayJournal(f.ctx, f.archive, f.scope); !errors.Is(err, errReplayJournalFull) || result.ImportedRecords != 0 || f.state(t) != before {
+		t.Fatalf("unexpected correction acknowledged: %+v %v", result, err)
+	}
+	var proofs, records int
+	if err := f.store.DB.QueryRow(`SELECT count(*) FROM redaction_recoveries WHERE project_id=?`, f.store.ProjectID).Scan(&proofs); err != nil || proofs != 0 {
+		t.Fatalf("invalid correction survived rollback: %d %v", proofs, err)
+	}
+	if err := f.store.DB.QueryRow(`SELECT count(*) FROM decision_records WHERE project_id=? AND id='arrival'`, f.store.ProjectID).Scan(&records); err != nil || records != 0 {
+		t.Fatalf("canonical arrival survived rollback: %d %v", records, err)
+	}
+	if _, err := f.store.DB.Exec(`UPDATE fixture_recovery_sideeffect SET enabled=0`); err != nil {
+		t.Fatal(err)
+	}
+	measured, metrics := syncwork.WithWorkMetrics(context.Background())
+	f.ctx = measured
+	if result, err := f.replay(t); err != nil || result.ImportedRecords != 1 || metrics.Counts()["semantic_journal_delta_cycles"] != 1 || metrics.Counts()["recovery_graph_reuses"] != 1 || metrics.Counts()["recovery_records_checked"] != 0 {
+		t.Fatalf("guarded retry did not reuse graph: %+v %v %v", result, err, metrics.Counts())
 	}
 }

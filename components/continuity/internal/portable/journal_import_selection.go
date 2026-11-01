@@ -18,7 +18,11 @@ import (
 // invocation inserts are checked through the same operational readers. This
 // performs no writes or acknowledgements, and does not certify omitted state.
 // The caller must hold the writer from reading its batch through its commit.
-func CanonicalJournalEnvelopesTx(ctx context.Context, tx *sql.Tx, project string, changes []database.SyncChange) ([]EncodedEnvelope, bool, error) {
+func CanonicalJournalEnvelopesTx(ctx context.Context, tx *sql.Tx, project string, changes []database.SyncChange, recoveryMode RecoveryComparison) ([]EncodedEnvelope, bool, error) {
+	source, err := recoveryComparisonReader(tx, recoveryMode)
+	if err != nil {
+		return nil, false, err
+	}
 	if len(changes) > 4096 {
 		return nil, false, nil
 	}
@@ -80,13 +84,6 @@ func CanonicalJournalEnvelopesTx(ctx context.Context, tx *sql.Tx, project string
 	if len(keys) == 0 && len(extra) == 0 {
 		return nil, true, nil
 	}
-	var recovery bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM redaction_recoveries WHERE project_id=?)`, project).Scan(&recovery); err != nil {
-		return nil, false, err
-	}
-	if recovery {
-		return nil, false, nil
-	}
 	identity, err := identityFrom(ctx, tx, project)
 	if err != nil {
 		return nil, false, err
@@ -98,7 +95,7 @@ func CanonicalJournalEnvelopesTx(ctx context.Context, tx *sql.Tx, project string
 	validated := make(snapshotEncodings)
 	var specs []EnvelopeSpec
 	if len(keys) != 0 {
-		selection := &recordSelectionSource{queryer: tx, keys: keys}
+		selection := &recordSelectionSource{queryer: source, keys: keys}
 		var missing []Reference
 		specs, missing, err = loadSelectedOperationalSpecs(ctx, selection, project, root, identity.LineageID, nil)
 		if err != nil || len(missing) != 0 {
@@ -119,7 +116,7 @@ func CanonicalJournalEnvelopesTx(ctx context.Context, tx *sql.Tx, project string
 		}
 	}
 	if len(extra) != 0 {
-		selected, used, err := loadImportSelection(ctx, tx, project, root, identity.LineageID, extra, validated)
+		selected, used, err := loadImportSelection(ctx, source, project, root, identity.LineageID, extra, validated)
 		if err != nil || !used {
 			return nil, false, err
 		}
@@ -133,6 +130,13 @@ func CanonicalJournalEnvelopesTx(ctx context.Context, tx *sql.Tx, project string
 			}
 		}
 		specs = append(specs, selected...)
+	}
+	identities := make([]Envelope, 0, len(specs))
+	for _, spec := range specs {
+		identities = append(identities, Envelope{RecordType: spec.RecordType, RecordID: spec.RecordID, RecordRevision: spec.RecordRevision})
+	}
+	if allowed, err := recoverySelectionAllowed(ctx, source, project, identities); err != nil || !allowed {
+		return nil, false, err
 	}
 	unique := map[string]EncodedEnvelope{}
 	var total int

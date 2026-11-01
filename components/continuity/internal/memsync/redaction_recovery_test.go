@@ -17,6 +17,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/procedures"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
@@ -75,7 +76,7 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	if _, err := (checkpoint.Service{DB: a.db}).CreateWithActions(ctx, checkpoint.Checkpoint{ProjectID: a.project, TaskID: "recovery", Task: "Recover", Summary: text, NextAction: "Verify", Status: "in_progress"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (worknarrative.Service{DB: a.db}).Append(ctx, worknarrative.Record{ID: "original", ProjectID: a.project, Title: "Original", Trigger: "manual", Creator: "codex", Claims: []worknarrative.Claim{{Kind: "outcome", Text: text, Authority: "caller_asserted"}}}); err != nil {
+	if _, err := (worknarrative.Service{DB: a.db}).Append(ctx, worknarrative.Record{ID: "original", ProjectID: a.project, Title: "Original", Trigger: "manual", Creator: "codex", Source: &worknarrative.Source{URL: "https://example.test/recovery-observation", AccessedAt: "2026-01-01T00:00:00Z", Authority: "machine_observed"}, Claims: []worknarrative.Claim{{Kind: "outcome", Text: text, Authority: "caller_asserted"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (procedures.Service{DB: a.db}).Append(ctx, procedures.Procedure{ProjectID: a.project, ID: "exact", Title: "Exact", Purpose: text, Kind: "runbook", Status: "accepted", Platforms: []string{"linux"}, DeclaredEffects: []string{"install"}, Steps: []procedures.Step{{ID: "copy", Description: "Copy", ArgvTemplate: []string{"copy", text}}}, Source: "test"}); err != nil {
@@ -223,6 +224,7 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 	}
 	objects = append(objects, retiredObject)
 	blocks = append(blocks, retiredBlock)
+	qualifyRecoveredJournalArrivals(t, ctx, objects, blocks)
 	reference := localHistoryMachine(t, "recovery-reference")
 	indexed := localHistoryMachine(t, "recovery-indexed")
 	want, wantErr := (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
@@ -446,6 +448,139 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 				if err != nil || !bytes.Equal(bodies[e.Envelope.EnvelopeSHA256], e.Bytes) {
 					t.Fatal("immutable observation changed")
 				}
+			}
+		}
+	}
+}
+
+// Exercise the journal against the same correction/schema/retired history as
+// the independent full importer, including a later dependent of a corrected ID.
+func qualifyRecoveredJournalArrivals(t *testing.T, ctx context.Context, objects []portable.EncodedEnvelope, blocks []recordsync.Block) {
+	t.Helper()
+	target := localHistoryMachine(t, "recovered-journal")
+	reference := localHistoryMachine(t, "recovered-journal-reference")
+	source := localHistoryMachine(t, "recovered-journal-source")
+	archive := archiveMachine(t, &target)
+	index := recordsync.Index{DB: target.db, ProjectID: target.project, Lineage: testLineage}
+	endpoint := "git:recovered-journal-fixture"
+	mutation, ok, err := index.ObservePublicationBatch(ctx, archive, endpoint, recordsync.ObservationStamp{}, true, blocks)
+	if err != nil || !ok {
+		t.Fatalf("journal observation: %t %v", ok, err)
+	}
+	committed := map[string]bool{}
+	for _, block := range blocks {
+		committed[block.Hash] = true
+	}
+	scope := recordsync.JournalPublicationScope{Endpoint: endpoint, Consumer: recordsync.Hash("recovered-journal-fixture"), Observed: mutation.After, Tree: strings.Repeat("1", 40), HasBlock: func(_ context.Context, hash string) (bool, error) { return committed[hash], nil }, AppendOnly: func(context.Context, string) (bool, error) { return true, nil }}
+	var referenceObjects []portable.EncodedEnvelope
+	replay := func(ctx context.Context) (recordsync.ImportResult, error) {
+		return index.ImportArchiveJournal(ctx, archive, scope, func(ctx context.Context) (recordsync.JournalPublicationPlan, error) {
+			plan, err := index.PlanJournalPublication(ctx, archive, scope, true)
+			if err == nil && referenceObjects == nil {
+				// Equivalent old schemas intentionally retain the reference importer's
+				// first observation. Compare both paths with the same complete ordering.
+				seen := map[string]bool{}
+				for _, block := range plan.Snapshot {
+					for _, object := range block.Objects {
+						if !seen[object.Envelope.EnvelopeSHA256] {
+							seen[object.Envelope.EnvelopeSHA256] = true
+							referenceObjects = append(referenceObjects, object)
+						}
+					}
+				}
+			}
+			return plan, err
+		})
+	}
+	got, err := replay(ctx)
+	objects = referenceObjects
+	want, wantErr := (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
+	if err != nil || wantErr != nil || got != want {
+		t.Fatalf("recovered baseline differs: %+v/%+v %v/%v", got, want, err, wantErr)
+	}
+	if _, err := (recordsync.Importer{DB: source.db, ProjectID: source.project}).Import(ctx, objects); err != nil {
+		t.Fatal(err)
+	}
+	var baselines int
+	if err := target.db.QueryRow(`SELECT count(*) FROM history_archive_status WHERE project_id=? AND consumer=?`, target.project, recordsync.Hash("semantic-replay-v1:"+scope.Consumer)).Scan(&baselines); err != nil || baselines != 1 {
+		t.Fatalf("recovered baseline absent: %d %v", baselines, err)
+	}
+	source.decide(t, "journal-independent", "Independent after recovery")
+	if _, err := (worknarrative.Service{DB: source.db}).Append(ctx, worknarrative.Record{ProjectID: source.project, ID: "references-recovered", Title: "Depends on corrected observation", Trigger: "manual", Creator: "test", Claims: []worknarrative.Claim{{Kind: "outcome", Text: "Known source", Authority: "caller_asserted", Citations: []worknarrative.Citation{{Source: "narrative:original", Relation: "supports"}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	export, err := portable.EncodeMemoryExport(ctx, source.db, source.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"journal-independent", "references-recovered"} {
+		var arrival portable.EncodedEnvelope
+		for _, object := range export.Envelopes {
+			if object.Envelope.RecordID == id {
+				arrival = object
+				break
+			}
+		}
+		if len(arrival.Bytes) == 0 {
+			t.Fatal("arrival absent")
+		}
+		block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{arrival})
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope.Observed, err = index.ObservationStamp(ctx, archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutation, ok, err = index.ObservePublicationBatch(ctx, archive, endpoint, scope.Observed, false, []recordsync.Block{block})
+		if err != nil || !ok {
+			t.Fatalf("new observation: %t %v", ok, err)
+		}
+		scope.Observed = mutation.After
+		scope.Tree = recordsync.Hash(scope.Tree + id)[:40]
+		committed[block.Hash] = true
+		if err := index.AdvancePublicationObservation(ctx, archive, scope, mutation); err != nil {
+			t.Fatal(err)
+		}
+		measured, metrics := syncwork.WithWorkMetrics(ctx)
+		publication, err := index.PlanJournalPublication(measured, archive, scope, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if publication.Observed != (recordsync.ObservationStamp{}) {
+			scope.Observed = publication.Observed
+		}
+		got, err = replay(measured)
+		objects = append(objects, arrival)
+		want, wantErr = (recordsync.Importer{DB: reference.db, ProjectID: reference.project}).Import(ctx, objects)
+		if err != nil || wantErr != nil || got != want || got.ImportedRecords != 1 {
+			t.Fatalf("%s differs: %+v/%+v %v/%v", id, got, want, err, wantErr)
+		}
+		counts := metrics.Counts()
+		if id == "journal-independent" && (counts["semantic_journal_delta_cycles"] != 1 || counts["operational_full_loads"] != 0 || counts["semantic_catalog_blocks_read"] != 0 || counts["dependency_membership_records"] != 1 || counts["recovery_records_checked"] != 0 || counts["recovery_graph_reuses"] != 1) {
+			t.Fatalf("unrelated recovery forced complete import: %v", counts)
+		}
+		if id == "references-recovered" && counts["fallback_semantic_journal_full"] != 1 {
+			t.Fatalf("affected recovery was partially replayed: %v", counts)
+		}
+		actual, err := portable.EncodeMemoryExport(ctx, target.db, target.project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected, err := portable.EncodeMemoryExport(ctx, reference.db, reference.project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byHash := map[string][]byte{}
+		for _, object := range expected.Envelopes {
+			byHash[object.Envelope.EnvelopeSHA256] = object.Bytes
+		}
+		if len(actual.Envelopes) != len(byHash) {
+			t.Fatal("journal changed canonical export size")
+		}
+		for _, object := range actual.Envelopes {
+			if !bytes.Equal(object.Bytes, byHash[object.Envelope.EnvelopeSHA256]) {
+				t.Fatalf("journal changed reference wire bytes for %s %s schema%d", object.Envelope.RecordType, object.Envelope.RecordID, object.Envelope.RecordSchemaVersion)
 			}
 		}
 	}
