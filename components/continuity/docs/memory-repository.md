@@ -177,6 +177,15 @@ object alternates connect the bare clone to the original. This coordinator is
 not yet a public migration command or the normal sync backend. Its runtime
 qualification is on Linux; Windows lock code is compile checked only.
 
+Private commit primitives independently verify bounded commit bytes before
+using tree/parent identities. A merge requires namespace policy validation,
+including before fast-forward adoption, and retains both divergent parents.
+Unrelated initial histories can join; multiple merge bases refuse rather than
+selecting an arbitrary base. Branch publication checks the resolved HEAD and
+expected tip, requires ancestry preservation and uses a durable compare-and-swap
+without replacing symbolic links. These primitives create no index or working
+tree and do not yet replace the normal sync cycle.
+
 ### Unchanged syncs
 
 Migration 081 adds device-local completion proofs for Git sync. SQL triggers
