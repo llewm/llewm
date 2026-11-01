@@ -169,7 +169,19 @@ func writeCanonicalValue(output *bytes.Buffer, value any) error {
 
 func writeCanonicalString(output *bytes.Buffer, value string) {
 	output.WriteByte('"')
-	for _, current := range value {
+	start := 0
+	for index, current := range value {
+		// Copy ordinary UTF-8 spans in one write instead of one buffer call
+		// per rune. Preserve range's replacement behavior for invalid bytes.
+		if current >= 0x20 && current != '"' && current != '\\' {
+			if current != utf8.RuneError {
+				continue
+			}
+			if _, size := utf8.DecodeRuneInString(value[index:]); size > 1 {
+				continue
+			}
+		}
+		output.WriteString(value[start:index])
 		switch current {
 		case '"', '\\':
 			output.WriteByte('\\')
@@ -191,7 +203,9 @@ func writeCanonicalString(output *bytes.Buffer, value string) {
 				output.WriteRune(current)
 			}
 		}
+		start = index + 1 // Escapes and invalid UTF-8 consume one input byte.
 	}
+	output.WriteString(value[start:])
 	output.WriteByte('"')
 }
 

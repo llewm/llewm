@@ -43,6 +43,32 @@ func TestCompleteObservationAuditsUnobservedArchiveBodies(t *testing.T) {
 	}
 }
 
+func TestExactObservationSkipsRedundantEnvelopeMembershipAndOriginInserts(t *testing.T) {
+	ctx, store := archiveStoreFixture(t)
+	activateEmptyArchive(t, ctx, store)
+	archive := Archive{DB: store.DB, ProjectID: store.ProjectID, Lineage: store.Lineage}
+	index := Index{DB: store.DB, ProjectID: store.ProjectID, Lineage: store.Lineage}
+	block, err := EncodeBlock(lineage, []portable.EncodedEnvelope{archiveObject(t, "known", `{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block}); err != nil || !ok {
+		t.Fatalf("seed: %v %v", ok, err)
+	}
+	for _, table := range []string{"history_archive_envelopes", "history_archive_origins", "history_index_envelopes", "history_index_block_members"} {
+		if _, err := store.DB.Exec(`CREATE TRIGGER fixture_noop_` + table + ` BEFORE INSERT ON ` + table + ` BEGIN SELECT RAISE(ABORT,'redundant insert'); END`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok, err := index.ObservePublicationBatch(ctx, archive, "git:fixture", ObservationStamp{}, true, []Block{block}); err != nil || !ok {
+		t.Fatalf("exact observation attempted redundant writes: %v %v", ok, err)
+	}
+	// A new source is a real provenance write, which must still be attempted.
+	if _, ok, err := index.ObservePublicationBatch(ctx, archive, "git:new", ObservationStamp{}, true, []Block{block}); err == nil || ok {
+		t.Fatal("new origin skipped its insert")
+	}
+}
+
 func TestObservationExactByteReuseRejectsStoredIdentityAndProvenanceDamage(t *testing.T) {
 	for _, field := range []string{"envelope_json", "record_type", "record_id", "record_revision", "initial_origin_hash"} {
 		t.Run(field, func(t *testing.T) {

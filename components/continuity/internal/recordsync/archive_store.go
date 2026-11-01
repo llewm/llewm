@@ -137,10 +137,7 @@ func (s archiveStore) putValidatedWithin(ctx context.Context, tx *sql.Tx, status
 	if _, err := s.stampWithin(ctx, tx, status); err != nil {
 		return 0, err
 	}
-	statements := statementSet{tx: tx}
-	defer statements.close()
-	added := 0
-	total := 0
+	added, total := 0, 0
 	for _, object := range verified {
 		if err := ctx.Err(); err != nil {
 			return added, err
@@ -150,39 +147,42 @@ func (s archiveStore) putValidatedWithin(ctx context.Context, tx *sql.Tx, status
 			return added, fmt.Errorf("archive batch exceeds bounds")
 		}
 		e := object.Envelope
-		result, err := statements.exec(ctx, `INSERT INTO history_archive_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,initial_origin_hash,envelope_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, originHash, object.Bytes)
-		if err != nil {
-			return added, err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return added, err
-		}
-		if n == 0 {
-			// Never silently repair or overwrite a damaged durable observation.
-			stmt, err := statements.prepare(ctx, `SELECT e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),o.origin_hash FROM history_archive_envelopes e LEFT JOIN history_archive_origins o ON o.project_id=e.project_id AND o.envelope_hash=e.envelope_hash AND o.origin_hash=e.initial_origin_hash WHERE e.project_id=? AND e.envelope_hash=?`)
+		var kind, id string
+		var revision int
+		var body []byte
+		var origin sql.NullString
+		var hasOrigin bool
+		err := tx.QueryRowContext(ctx, `SELECT e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),o.origin_hash,EXISTS(SELECT 1 FROM history_archive_origins p WHERE p.project_id=e.project_id AND p.envelope_hash=e.envelope_hash AND p.origin_hash=?) FROM history_archive_envelopes e LEFT JOIN history_archive_origins o ON o.project_id=e.project_id AND o.envelope_hash=e.envelope_hash AND o.origin_hash=e.initial_origin_hash WHERE e.project_id=? AND e.envelope_hash=?`, MaxObjectBytes+1, originHash, s.ProjectID, e.EnvelopeSHA256).Scan(&kind, &id, &revision, &body, &origin, &hasOrigin)
+		var n, originCount int64
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			result, err := tx.ExecContext(ctx, `INSERT INTO history_archive_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,initial_origin_hash,envelope_json) VALUES(?,?,?,?,?,?,?)`, s.ProjectID, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, originHash, object.Bytes)
 			if err != nil {
 				return added, err
 			}
-			var kind, id string
-			var revision int
-			var body []byte
-			var origin sql.NullString
-			err = stmt.QueryRowContext(ctx, MaxObjectBytes+1, s.ProjectID, e.EnvelopeSHA256).Scan(&kind, &id, &revision, &body, &origin)
-			// Exact equality to the already validated input proves its canonical
-			// body; still independently check every stored identity and provenance.
-			if err != nil || !bytes.Equal(body, object.Bytes) || kind != e.RecordType || id != e.RecordID || revision != e.RecordRevision || !origin.Valid || !hex64.MatchString(origin.String) {
+			n, err = result.RowsAffected()
+			if err != nil {
+				return added, err
+			}
+		case err != nil:
+			return added, err
+		default:
+			// The same reserved writer owns both the comparison and any writes.
+			// Exact canonical bytes never authorize repairing durable damage.
+			if !bytes.Equal(body, object.Bytes) || kind != e.RecordType || id != e.RecordID || revision != e.RecordRevision || !origin.Valid || !hex64.MatchString(origin.String) {
 				return added, errArchiveIntegrity
 			}
 			syncwork.RecordWork(ctx, "archive_verified_bytes_reused", 1)
 		}
-		originResult, err := statements.exec(ctx, `INSERT INTO history_archive_origins(project_id,envelope_hash,origin_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, originHash)
-		if err != nil {
-			return added, err
-		}
-		originCount, err := originResult.RowsAffected()
-		if err != nil {
-			return added, err
+		if !hasOrigin {
+			result, err := tx.ExecContext(ctx, `INSERT INTO history_archive_origins(project_id,envelope_hash,origin_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, originHash)
+			if err != nil {
+				return added, err
+			}
+			originCount, err = result.RowsAffected()
+			if err != nil {
+				return added, err
+			}
 		}
 		syncwork.RecordWork(ctx, "archive_envelopes_inserted", n)
 		syncwork.RecordWork(ctx, "archive_origins_inserted", originCount)

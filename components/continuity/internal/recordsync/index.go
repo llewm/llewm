@@ -84,25 +84,36 @@ func (s Index) addBlockWithin(ctx context.Context, tx *sql.Tx, verified Block) e
 }
 
 func (s Index) insertBlockObjects(ctx context.Context, tx *sql.Tx, verified Block) error {
-	statements := statementSet{tx: tx}
-	defer statements.close()
 	for _, object := range verified.Objects {
 		e := object.Envelope
-		if _, err := statements.exec(ctx, `INSERT INTO history_index_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,envelope_json) VALUES(?,?,?,?,?,?)
+		var kind, id string
+		var revision int
+		var body []byte
+		var member bool
+		err := tx.QueryRowContext(ctx, `SELECT e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),EXISTS(SELECT 1 FROM history_index_block_members m WHERE m.project_id=e.project_id AND m.envelope_hash=e.envelope_hash AND m.block_hash=?) FROM history_index_envelopes e WHERE e.project_id=? AND e.envelope_hash=?`, MaxObjectBytes+1, verified.Hash, s.ProjectID, e.EnvelopeSHA256).Scan(&kind, &id, &revision, &body, &member)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err != nil || kind != e.RecordType || id != e.RecordID || revision != e.RecordRevision || !bytes.Equal(body, object.Bytes) {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_envelopes(project_id,envelope_hash,record_type,record_id,record_revision,envelope_json) VALUES(?,?,?,?,?,?)
  ON CONFLICT(project_id,envelope_hash) DO UPDATE SET record_type=excluded.record_type,record_id=excluded.record_id,record_revision=excluded.record_revision,envelope_json=excluded.envelope_json
  WHERE history_index_envelopes.record_type IS NOT excluded.record_type OR history_index_envelopes.record_id IS NOT excluded.record_id OR history_index_envelopes.record_revision IS NOT excluded.record_revision OR history_index_envelopes.envelope_json IS NOT excluded.envelope_json`, s.ProjectID, e.EnvelopeSHA256, e.RecordType, e.RecordID, e.RecordRevision, string(object.Bytes)); err != nil {
-			return err
+				return err
+			}
 		}
-		if _, err := statements.exec(ctx, `INSERT INTO history_index_block_members(project_id,block_hash,envelope_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, verified.Hash, e.EnvelopeSHA256); err != nil {
-			return err
+		if !member {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_block_members(project_id,block_hash,envelope_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, verified.Hash, e.EnvelopeSHA256); err != nil {
+				return err
+			}
 		}
+
 		// References belong to immutable envelope content, not each block copy.
 		// A verified transport block can also repair a damaged shared entry.
 		expected := make(map[portable.Reference]bool, len(e.Refs))
 		for _, ref := range e.Refs {
 			expected[ref] = true
 		}
-		rows, err := statements.query(ctx, `SELECT ref_kind,ref_id FROM history_index_refs WHERE project_id=? AND envelope_hash=?`, s.ProjectID, e.EnvelopeSHA256)
+		rows, err := tx.QueryContext(ctx, `SELECT ref_kind,ref_id FROM history_index_refs WHERE project_id=? AND envelope_hash=?`, s.ProjectID, e.EnvelopeSHA256)
 		if err != nil {
 			return err
 		}
@@ -126,11 +137,11 @@ func (s Index) insertBlockObjects(ctx context.Context, tx *sql.Tx, verified Bloc
 		if matches && count == len(expected) {
 			continue
 		}
-		if _, err := statements.exec(ctx, `DELETE FROM history_index_refs WHERE project_id=? AND envelope_hash=?`, s.ProjectID, e.EnvelopeSHA256); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_refs WHERE project_id=? AND envelope_hash=?`, s.ProjectID, e.EnvelopeSHA256); err != nil {
 			return err
 		}
 		for ref := range expected {
-			if _, err := statements.exec(ctx, `INSERT INTO history_index_refs(project_id,envelope_hash,ref_kind,ref_id) VALUES(?,?,?,?)`, s.ProjectID, e.EnvelopeSHA256, ref.Kind, ref.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_refs(project_id,envelope_hash,ref_kind,ref_id) VALUES(?,?,?,?)`, s.ProjectID, e.EnvelopeSHA256, ref.Kind, ref.ID); err != nil {
 				return err
 			}
 		}

@@ -11,6 +11,25 @@ import (
 	"unicode/utf16"
 )
 
+func BenchmarkCanonicalString(b *testing.B) {
+	for _, text := range []struct{ name, value string }{
+		{"plain", strings.Repeat("Retained history text and provenance. ", 512)},
+		{"escaped", strings.Repeat("Unicode 😀 and quote \" slash \\ tab\t newline\n", 512)},
+	} {
+		b.Run(text.name, func(b *testing.B) {
+			var output bytes.Buffer
+			output.Grow(len(text.value)*2 + 2)
+			b.SetBytes(int64(len(text.value)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				output.Reset()
+				writeCanonicalString(&output, text.value)
+			}
+		})
+	}
+}
+
 func TestCanonicalizeJSONProfile(t *testing.T) {
 	input := []byte("{\"z\":0,\"😀\":1,\"a\":{\"line\":\"x\\ny\",\"control\":\"\\u000f\"},\"€\":2}")
 	want := "{\"a\":{\"control\":\"\\u000f\",\"line\":\"x\\ny\"},\"z\":0,\"€\":2,\"😀\":1}"
@@ -29,6 +48,24 @@ func TestCanonicalizeJSONProfile(t *testing.T) {
 	} {
 		if _, err := CanonicalizeJSON(invalid); err == nil {
 			t.Fatalf("accepted invalid canonical profile input %q", invalid)
+		}
+	}
+}
+
+func TestCanonicalStringSpansPreserveWireEscapes(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"", `""`},
+		{"plain <>& / 😀 €  �", "\"plain <>& / 😀 €  �\""},
+		{"a\"b\\c", `"a\"b\\c"`},
+		{"\b\t\n\f\r", `"\b\t\n\f\r"`},
+		{"a\x00b\x01c\x1f", `"a\u0000b\u0001c\u001f"`},
+		{string([]byte{'a', 0xff, 'b', 0xc0, 0xaf, 'c'}), "\"a�b��c\""},
+		{"😀\n\"€\\end", "\"😀\\n\\\"€\\\\end\""},
+	} {
+		var output bytes.Buffer
+		writeCanonicalString(&output, pair[0])
+		if output.String() != pair[1] {
+			t.Fatalf("string %q: got %q want %q", pair[0], output.String(), pair[1])
 		}
 	}
 }

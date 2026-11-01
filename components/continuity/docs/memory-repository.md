@@ -904,10 +904,13 @@ Cold archive snapshots collect canonical envelopes during that same complete
 audit, then select permitted provenance in one query within its read transaction.
 This removes repeated envelope reads, decodes and per-envelope route checks;
 local/source/explicit-relay policy and hash ordering are unchanged. A failed
-audit exposes no partial snapshot. Repeated ingestion/indexing SQL statements
-are prepared once per batch and closed before returning; no prepared statement
-or body cache crosses transactions. `observation_sql_prepares/op` counts these
-explicit preparations. Full archive work remains linear in retained history.
+audit exposes no partial snapshot. Under the same reserved writer, ingestion and
+indexing compare exact bytes, metadata, provenance and membership before attempting
+inserts or repairs. Already matching entries avoid no-op writes and their trigger
+compilation. The SQLite driver recompiles native statements even through Go's
+prepared-statement interface, so that interface alone does not remove this cost.
+No body or comparison cache crosses transactions. Full archive work remains
+linear in retained history.
 
 ## Authentication
 
