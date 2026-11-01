@@ -148,8 +148,30 @@ func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint st
 // validated archive snapshot from the same scan, for local semantic import.
 // Records arriving after the snapshot are picked up on the next cycle.
 func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, []Block, error) {
+	return s.planPublicationWithInventory(ctx, archive, endpoint, relay)
+}
+
+// PlanObservedPublicationWithInventory may advance a prior transport observation
+// through only this plan's verified inventory mutations. A zero returned stamp
+// requires complete transport validation before another observation can be reused.
+// It remains a full archive/publication planner; it is not a journal delta API.
+func (s Index) PlanObservedPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool, expected ObservationStamp) ([]Block, []Block, ObservationStamp, error) {
+	tracking := &publicationTracking{expected: expected, valid: expected != (ObservationStamp{})}
+	blocks, inventory, err := s.planPublicationWithInventory(ctx, archive, endpoint, relay, tracking)
+	if err != nil || !tracking.valid {
+		return blocks, inventory, ObservationStamp{}, err
+	}
+	return blocks, inventory, tracking.expected, nil
+}
+
+type publicationTracking struct {
+	expected ObservationStamp
+	valid    bool
+}
+
+func (s Index) planPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool, tracking ...*publicationTracking) ([]Block, []Block, error) {
 	var inventory []portable.EncodedEnvelope
-	blocks, err := s.planPublicationWithRecovery(ctx, archive, endpoint, relay, &inventory)
+	blocks, err := s.planPublicationWithRecovery(ctx, archive, endpoint, relay, &inventory, tracking...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -179,28 +201,31 @@ func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive
 	// the planner checks stored membership against it and packs only additions.
 	extra, err := s.planPublicationWithScanRecovery(ctx, archive, "local-snapshot:"+s.Lineage, true, nil, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
 		return remaining, remaining, nil
-	})
+	}, tracking...)
 	if err != nil {
 		return nil, nil, err
 	}
 	return blocks, append(all, extra...), nil
 }
 
-func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope) ([]Block, error) {
+func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, tracking ...*publicationTracking) ([]Block, error) {
 	return s.planPublicationWithScanRecovery(ctx, archive, endpoint, relay, inventory, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
 		return archive.objects(ctx, endpoint, relay)
-	})
+	}, tracking...)
 }
 
-func (s Index) planPublicationWithScanRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, scan func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error)) ([]Block, error) {
+func (s Index) planPublicationWithScanRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, scan func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error), tracking ...*publicationTracking) ([]Block, error) {
 	repaired := false
 	for attempt := 0; attempt < 3; attempt++ {
-		blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory, scan)
+		blocks, err := s.planPublication(ctx, archive, endpoint, relay, inventory, scan, tracking...)
 		if errors.Is(err, errPublicationChanged) {
 			continue
 		}
 		if !errors.Is(err, ErrIndexRebuild) || repaired {
 			return blocks, err
+		}
+		if len(tracking) > 0 {
+			tracking[0].valid = false
 		}
 		if repairErr := s.repairStored(ctx, endpoint); repairErr != nil {
 			// The archive retains exact validated observations even when a cached
@@ -223,7 +248,7 @@ func (s Index) planPublicationWithScanRecovery(ctx context.Context, archive Arch
 	return nil, fmt.Errorf("publication changed repeatedly: %w", errPublicationChanged)
 }
 
-func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, scan func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error)) ([]Block, error) {
+func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, scan func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error), tracking ...*publicationTracking) ([]Block, error) {
 	if endpoint == "" || archive.Lineage != s.Lineage || archive.ProjectID != s.ProjectID || archive.DB != s.DB {
 		return nil, fmt.Errorf("publication endpoint and matching lineage are required")
 	}
@@ -244,6 +269,16 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 	// endpoint membership, and retry outside the writer transaction.
 	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
 		return nil, err
+	}
+	var observed *publicationTracking
+	if len(tracking) > 0 {
+		observed = tracking[0]
+	}
+	if observed != nil && observed.valid {
+		current, err := s.observationStampWithin(ctx, tx, archive)
+		if err != nil || current != observed.expected {
+			observed.valid = false
+		}
 	}
 	after, err := s.publicationFingerprint(ctx, tx, endpoint)
 	if err != nil {
@@ -383,8 +418,19 @@ func (s Index) planPublication(ctx context.Context, archive Archive, endpoint st
 		block.validated = sealBlockContents(s.Lineage, block.Objects)
 		result = append(result, block)
 	}
+	var nextObservation ObservationStamp
+	if observed != nil && observed.valid {
+		var err error
+		nextObservation, err = s.observationStampWithin(ctx, tx, archive)
+		if err != nil || nextObservation.ArchiveEpoch != observed.expected.ArchiveEpoch || nextObservation.Schema != observed.expected.Schema {
+			observed.valid = false
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	if observed != nil && observed.valid {
+		observed.expected = nextObservation
 	}
 	if inventory != nil {
 		*inventory = all

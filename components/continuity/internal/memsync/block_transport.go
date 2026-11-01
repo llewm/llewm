@@ -101,7 +101,11 @@ func (s Syncer) RebuildInventory(ctx context.Context, other func(context.Context
 		return fmt.Errorf("duplicate Git inventory endpoint")
 	}
 	inventories[s.Endpoint()] = blocks
-	return (recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID, Now: s.Now}).Rebuild(ctx, inventories)
+	if err := (recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: identity.LineageID, Now: s.Now}).Rebuild(ctx, inventories); err != nil {
+		return err
+	}
+	_, _, err = s.observeGitPublications(ctx, repo, identity.LineageID, true)
+	return err
 }
 
 // trackedBlockObservations resolves exact envelope hashes from tracked blocks;
@@ -129,12 +133,22 @@ func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage 
 	return bodies, nil
 }
 
-func (s Syncer) publishBlocks(ctx context.Context, lineage string) ([]recordsync.Block, []recordsync.Block, error) {
+func (s Syncer) publishBlocks(ctx context.Context, lineage string, observation ...*gitObservationReceipt) ([]recordsync.Block, []recordsync.Block, error) {
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return nil, nil, fmt.Errorf("matching history archive is required for block publication")
 	}
 	index := recordsync.Index{DB: s.DB, ProjectID: s.ProjectID, Lineage: lineage, Now: s.Now}
-	return index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay)
+	if len(observation) == 0 || observation[0] == nil {
+		return index.PlanPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay)
+	}
+	blocks, snapshot, stamp, err := index.PlanObservedPublicationWithInventory(ctx, *s.Archive, s.Endpoint(), s.Relay, observation[0].Stamp)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.advanceObservedInventory(lineage, observation[0], stamp); err != nil {
+		return nil, nil, err
+	}
+	return blocks, snapshot, nil
 }
 
 // commitBlocks publishes only exact validated objects through an attached
@@ -186,7 +200,7 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return recordsync.ImportResult{}, fmt.Errorf("matching history archive is required for block import")
 	}
-	blocks, err := s.trackedPublications(ctx, repo, lineage)
+	blocks, _, err := s.observeGitPublications(ctx, repo, lineage, false)
 	if err != nil {
 		return recordsync.ImportResult{}, err
 	}

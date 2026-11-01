@@ -835,3 +835,13 @@ func TestAutomaticSyncAuthenticationKeepsLocalCommit(t *testing.T) {
 		}
 	}
 }
+
+func warmUnchanged(t *testing.T, m machine) {
+	t.Helper()
+	for i := 0; i < 6; i++ {
+		if m.sync(t, OutcomeSynced).Unchanged {
+			return
+		}
+	}
+	t.Fatal("steady state never used completion proof")
+}

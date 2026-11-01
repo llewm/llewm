@@ -94,13 +94,22 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 			}
 		}
 	}
-	if _, err := s.trackedPublications(local, repo, identity.LineageID); err != nil {
-		return result, err
+	var observation *gitObservationReceipt
+	if p.convert {
+		if _, err := s.trackedPublications(local, repo, identity.LineageID); err != nil {
+			return result, err
+		}
+	} else {
+		_, observed, err := s.observeGitPublications(local, repo, identity.LineageID, false)
+		if err != nil {
+			return result, err
+		}
+		observation = observed
 	}
 	if _, err := s.Archive.CaptureProject(local, s.DB, s.ProjectID); err != nil {
 		return result, err
 	}
-	blocks, snapshot, err := s.publishBlocks(local, identity.LineageID)
+	blocks, snapshot, err := s.publishBlocks(local, identity.LineageID, observation)
 	if err != nil {
 		return result, err
 	}

@@ -210,6 +210,29 @@ published verification receipt, retain it and create a fresh plan instead of
 inferring ownership. Do not remove recovery evidence to force normal opening.
 The audit may acquire a local clone coordination lock; it does not alter history.
 
+Schema 092 adds project-scoped mutation tokens for block inventory, envelope
+metadata, references, memberships and publication intent. Canonical history
+changes leave these tokens alone; raw inventory changes, including moves between
+projects, invalidate them transactionally. Rollback restores the prior token.
+
+Git observation receipts bind the build, physical clone, endpoint, lineage,
+index interpretation, SQLite schema, inventory generation and durable archive
+epoch. Before reuse, installed archive/inventory tracking triggers must match
+their embedded migration definitions. Missing or changed tracking requires
+complete transport validation and a durable archive audit; unavailable tracking
+cannot issue a reusable receipt. Verified blocks, inventory repair and provenance
+commit in one writer transaction. Publication can advance a receipt through its
+own verified inventory writes only if the prior stamp still matches under that
+writer lock. It never advances the observed Git tree before a Git commit exists.
+Interrupted staged intent remains publishable on the next cycle.
+
+A known observation reads only changed selected blocks through the Git tree
+delta. Previously observed bytes remain covered by explicit full audits;
+out-of-band corruption of an old object is not promised detection on every
+cycle. Full archive/publication snapshots and semantic guards still run on
+changed cycles, and the flat block directory still incurs linear tree work.
+This observation optimization is not a complete-cycle scaling claim.
+
 Private commit primitives independently verify bounded commit bytes before
 using tree/parent identities. A merge requires namespace policy validation,
 including before fast-forward adoption, and retains both divergent parents.
