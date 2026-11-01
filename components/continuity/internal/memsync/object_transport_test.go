@@ -2,6 +2,7 @@ package memsync
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"fmt"
 	"io"
@@ -205,8 +206,8 @@ func TestObjectTransportRejectsReplacedBlobAndUnsafeDelta(t *testing.T) {
 	if _, err := transport.repo.run(ctx, "replace", a.oid, b.oid); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transport.readBlob(ctx, a, 100); err == nil {
-		t.Fatal("Git replacement escaped object identity verification")
+	if got, err := transport.readBlob(ctx, a, 100); err != nil || string(got) != "original" {
+		t.Fatalf("Git replacement changed transport object: %q %v", got, err)
 	}
 	if _, err := transport.repo.run(ctx, "replace", "-d", a.oid); err != nil {
 		t.Fatal(err)
@@ -230,5 +231,29 @@ func TestObjectTransportRejectsReplacedBlobAndUnsafeDelta(t *testing.T) {
 	deleted, err := transport.changedLeaves(ctx, before, empty, "selected", 1)
 	if err != nil || len(deleted) != 1 || deleted[0].before != a || deleted[0].after.name != "" {
 		t.Fatalf("namespace deletion lost: %+v %v", deleted, err)
+	}
+}
+
+func TestObjectTransportRejectsCorruptLooseBlob(t *testing.T) {
+	ctx := context.Background()
+	transport := objectTransportFixture(t, "sha1")
+	object := objectBlob(t, transport, "record", "original", 40)
+	path := filepath.Join(transport.repo.Dir, "objects", object.oid[:2], object.oid[2:])
+	var compressed bytes.Buffer
+	writer := zlib.NewWriter(&compressed)
+	if _, err := writer.Write([]byte("blob 8\x00replaced")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, compressed.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transport.readBlob(ctx, object, 100); err == nil {
+		t.Fatal("damaged Git object escaped independent identity check")
 	}
 }

@@ -18,6 +18,12 @@ import (
 // sync can never block on interaction or run repository-provided code.
 type git struct {
 	Dir string
+	// Durable asks Git to flush object and reference writes before reporting
+	// success. Storage migration checks that these settings are supported.
+	Durable bool
+	// WorkTree is a temporary physical route for reading a retired migration
+	// source whose unchanged config may still name its original location.
+	WorkTree string
 	// Identity is extra -c options naming a fallback committer when the user has
 	// no Git identity configured.
 	Identity []string
@@ -51,7 +57,11 @@ func (g git) run(ctx context.Context, args ...string) (string, error) {
 }
 
 func (g git) execOut(ctx context.Context, stdin io.Reader, stdout io.Writer, args []string) error {
-	base := append([]string{"-C", g.Dir}, g.config()...)
+	base := []string{"--no-replace-objects", "-C", g.Dir}
+	if g.WorkTree != "" {
+		base = append(base, "--work-tree="+g.WorkTree)
+	}
+	base = append(base, g.config()...)
 	command := gitenv.Command(ctx, append(base, args...)...)
 	if !g.Interactive || g.NoPrompt {
 		// A separate process group cannot read the terminal, so a Git that may
@@ -89,6 +99,9 @@ func (g git) config() []string {
 	}
 	if g.NoPrompt {
 		options = append(options, "-c", "core.askPass=")
+	}
+	if g.Durable {
+		options = append(options, "-c", "core.fsync=all", "-c", "core.fsyncMethod=fsync")
 	}
 	if g.Helper != "" {
 		// The empty value clears helpers inherited from other configuration.

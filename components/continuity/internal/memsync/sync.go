@@ -177,13 +177,15 @@ func Init(ctx context.Context, remote, clone string, access Access, setup Setup)
 // fetch and push, differs from the configured remote: an edited clone config, a
 // push URL, or a url.*.insteadOf rewrite in any Git configuration.
 func verifyRemote(ctx context.Context, repo git, remote string) error {
-	for _, args := range [][]string{{"remote", "get-url", "origin"}, {"remote", "get-url", "--push", "origin"}} {
+	for _, args := range [][]string{{"remote", "get-url", "--all", "origin"}, {"remote", "get-url", "--push", "--all", "origin"}} {
 		got, err := repo.run(ctx, args...)
 		if err != nil {
 			return err
 		}
-		if got != remote {
-			return fmt.Errorf("the memory clone would contact %s instead of %s (check the clone's remote and any url.*.insteadOf in your Git config); refusing to sync", redact.String(got), redact.String(remote))
+		for _, endpoint := range strings.Split(got, "\n") {
+			if endpoint != remote {
+				return fmt.Errorf("the memory clone would contact %s instead of %s (check the clone's remote and any url.*.insteadOf in your Git config); refusing to sync", redact.String(endpoint), redact.String(remote))
+			}
 		}
 	}
 	return nil

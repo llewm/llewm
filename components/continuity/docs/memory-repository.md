@@ -160,6 +160,23 @@ Namespace policy and new-object protocol validation must precede publication.
 These primitives do not by themselves convert or activate an existing managed
 clone, change its remote, or replace the current sync route.
 
+The private bare-clone cutover coordinator takes nonblocking migration and
+legacy sync locks and inventories the clean source, all resolved refs, immediate
+symbolic-ref links, object format and private configuration. It refuses dangling
+or unsupported loose refs rather than losing refs omitted by Git's listing.
+An immutable checksummed preparation binds sibling stage and retained-source
+paths, the configured remote and source hashes; receipts contain no credential
+values. An owned stage can resume initialization and fetch without deleting
+partial storage. All refs are fetched locally, symbolic links restored and
+private configuration retained with only the bare/worktree settings changed.
+Both configured fetch/push URLs and the local source route must remain exact.
+Strict object checks and a second source inventory precede activation. The
+original working clone is retained, namespace switches and completion are
+durable, and interrupted retirement/switch/completion can resume. No index or
+object alternates connect the bare clone to the original. This coordinator is
+not yet a public migration command or the normal sync backend. Its runtime
+qualification is on Linux; Windows lock code is compile checked only.
+
 ### Unchanged syncs
 
 Migration 081 adds device-local completion proofs for Git sync. SQL triggers
