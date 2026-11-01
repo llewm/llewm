@@ -12,166 +12,121 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
-type captureGuard struct{ route, generation, archive string }
-
 func (a Archive) captureRoute() (string, error) {
 	build := buildinfo.Current()
 	if build.BuildDirty {
 		return "", fmt.Errorf("uncommitted build cannot reuse capture proofs")
 	}
-	body, _ := json.Marshal([]any{"capture-v2", build.GitCommit, a.Directory, a.Lineage})
+	body, _ := json.Marshal([]any{"capture-sqlite-v1", build.GitCommit, a.ProjectID, a.Lineage})
 	return Hash(string(body)), nil
 }
 
-func (a Archive) captureInputs(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {
-	var g captureGuard
-	var err error
-	g.route, err = a.captureRoute()
-	if err == nil {
-		g.generation, err = database.SyncGeneration(ctx, db, projectID)
+// CaptureProject binds canonical export progress to the immutable archive epoch.
+// Archive insertion and cursor acknowledgement share the writer transaction;
+// foreign arrivals and ordinary appends need no filesystem receipt or scan.
+func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, project string) (bool, error) {
+	if db != a.DB || project != a.ProjectID {
+		return false, fmt.Errorf("matching project/archive database required")
 	}
-	return g, err
-}
-
-func (a Archive) captureGuard(ctx context.Context, db *sql.DB, projectID string) (captureGuard, error) {
-	g, err := a.captureInputs(ctx, db, projectID)
-	if err == nil {
-		g.archive, err = a.ChangeStamp(ctx)
-	}
-	return g, err
-}
-
-// Retaining the first metadata walk avoids a second pre-publication walk when
-// canonical changes need new files. The saved generation is only an allocation
-// hint: the normal cursor, generation and final filesystem checks still decide
-// reuse. An unchanged capture keeps no per-file snapshot map.
-func (a Archive) captureStart(ctx context.Context, db *sql.DB, projectID string) (captureGuard, map[string]archiveMetadata, error) {
-	g, err := a.captureInputs(ctx, db, projectID)
-	if err != nil {
-		return g, nil, err
-	}
-	var saved string
-	err = db.QueryRowContext(ctx, `SELECT generation FROM history_sync_cursors WHERE project_id=? AND consumer=?`, projectID, g.route).Scan(&saved)
-	retain := err != nil || saved != g.generation
-	stamp, snapshot, err := directoryChangeSnapshot(ctx, a.Directory, retain)
-	g.archive = stamp
-	return g, snapshot, err
-}
-
-// CaptureProject reuses a completed local export/capture only while both its
-// database dependencies and archive remain unchanged. It says nothing about
-// endpoint publication. Uncertain or missing proofs take the complete export.
-func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, projectID string) (bool, error) {
-	identity, err := (portable.Service{DB: db}).Get(ctx, projectID)
-	if err != nil {
-		return false, err
-	}
-	if identity == nil || identity.LineageID != a.Lineage {
-		return false, fmt.Errorf("matching project/archive lineage required")
-	}
-	before, snapshot, guardErr := a.captureStart(ctx, db, projectID)
-	if guardErr != nil {
-		syncwork.RecordWork(ctx, "fallback_capture_initial_guard", 1)
-	}
+	route, routeErr := a.captureRoute()
+	var epoch string
 	var cursor database.SyncCursor
 	var changes []database.SyncChange
 	var fallback string
-	var deltaEligible bool
-	if guardErr == nil && before.generation != "" {
-		cursor, changes, fallback, err = database.ReadSyncChanges(ctx, db, projectID, before.route, before.archive, 4096)
-		recordCaptureCursorFallback(ctx, fallback, err)
-		deltaEligible = err == nil && fallback == "" && cursor.Generation == before.generation
-		if err == nil && fallback == "" && cursor.Generation == before.generation && captureMetadataOnly(changes) {
-			after, err := a.captureGuard(ctx, db, projectID)
-			if err == nil && after == before {
-				// Consume only the observed batch. A racing canonical write
-				// prevents acknowledgement and will be retried next time.
-				_, _ = database.RememberSyncCursor(ctx, db, cursor, before.archive)
-				return true, nil
-			}
-			// A failed second guard is uncertainty about the archive, not
-			// evidence that an empty selected export would validate it.
-			syncwork.RecordWork(ctx, "fallback_capture_metadata_guard", 1)
-			deltaEligible = false
+	var cursorErr error
+	if err := a.store().view(ctx, func(tx *sql.Tx) error {
+		stamp, err := a.store().stampWithin(ctx, tx, "ready")
+		if err != nil {
+			return err
 		}
+		epoch = stamp.Epoch
+		if routeErr == nil {
+			cursor, changes, fallback, cursorErr = database.ReadSyncChangesWithin(ctx, tx, project, route, epoch, 4096)
+		}
+		return nil
+	}); err != nil {
+		return false, err
 	}
-	var export portable.MemoryExport
-	var delta bool
-	if deltaEligible {
-		export, cursor, delta, err = portable.EncodeMemoryDelta(ctx, db, cursor, changes)
+	recordCaptureCursorFallback(ctx, fallback, cursorErr)
+	qualified := routeErr == nil && cursorErr == nil && fallback == ""
+	if qualified && captureMetadataOnly(changes) {
+		reused := false
+		err := a.store().transact(ctx, func(tx *sql.Tx) error {
+			stamp, err := a.store().stampWithin(ctx, tx, "ready")
+			if err != nil {
+				return err
+			}
+			if stamp.Epoch != epoch {
+				return nil
+			}
+			reused, err = database.RememberSyncCursorWithin(ctx, tx, cursor, epoch)
+			return err
+		})
 		if err != nil {
 			return false, err
 		}
-		if delta {
-			// The exporter retained only these selected identities while
-			// holding the writer. Its receipt includes those exact writes.
-			before.generation = cursor.Generation
+		if reused {
+			return true, nil
+		}
+		qualified = false
+	}
+	var exported portable.MemoryExport
+	var delta bool
+	var err error
+	if qualified {
+		exported, cursor, delta, err = portable.EncodeMemoryDelta(ctx, db, cursor, changes)
+		if err != nil {
+			return false, err
 		}
 	}
 	if !delta {
 		syncwork.RecordWork(ctx, "capture_full_exports", 1)
-		export, err = portable.EncodeMemoryExport(ctx, db, projectID)
+		exported, err = portable.EncodeMemoryExport(ctx, db, project)
 	}
 	if err != nil {
 		return false, err
 	}
-	if export.Identity.LineageID != a.Lineage {
+	if exported.Identity.LineageID != a.Lineage {
 		return false, fmt.Errorf("project lineage changed during export")
 	}
-	var publication *capturePublication
-	var beforeCreate func()
-	eligible := guardErr == nil && before.generation != "" && cursor.Generation == before.generation && captureDependenciesClosed(export.Envelopes)
 	acknowledged := false
-	if eligible {
-		// The exporter may itself retain new envelopes. Do not build a
-		// filesystem receipt for a database snapshot it already invalidated.
-		generation, err := database.SyncGeneration(ctx, db, projectID)
-		eligible = err == nil && generation == before.generation
-		if eligible {
-			// Prepare a receipt only for an actual publication. Prefer the
-			// initial snapshot; the final check also detects mutations between
-			// that observation and the first write. A missing allocation hint
-			// takes a fresh matching snapshot instead.
-			attempted := false
-			beforeCreate = func() {
-				if !attempted {
-					attempted = true
-					if snapshot == nil {
-						stamp, held, err := directoryChangeSnapshot(ctx, a.Directory, true)
-						if err != nil || stamp != before.archive {
-							return
-						}
-						snapshot = held
-					}
-					publication = prepareCapturePublication(snapshot, export.Envelopes)
-				}
+	err = a.store().transact(ctx, func(tx *sql.Tx) error {
+		stamp, err := a.store().stampWithin(ctx, tx, "ready")
+		if err != nil {
+			return err
+		}
+		if !delta || stamp.Epoch != epoch {
+			if _, err := a.store().auditWithin(ctx, tx); err != nil {
+				return err
 			}
 		}
-	}
-	if err := a.captureLocal(export.Envelopes, beforeCreate); err != nil {
-		return false, err
-	}
-	if eligible {
-		published := publication.completedStamp(ctx, a)
-		after, err := a.captureGuard(ctx, db, projectID)
-		if err == nil && after.route == before.route && after.generation == before.generation && cursor.Generation == before.generation && (after.archive == before.archive || published != "" && after.archive == published) {
-			acknowledged, _ = database.RememberSyncCursor(ctx, db, cursor, after.archive)
+		if err := a.captureLocalWithin(ctx, tx, exported.Envelopes); err != nil {
+			return err
 		}
+		if routeErr == nil && cursorErr == nil && stamp.Epoch == epoch && captureDependenciesClosed(exported.Envelopes) {
+			acknowledged, err = database.RememberSyncCursorWithin(ctx, tx, cursor, epoch)
+		}
+		return err
+	})
+	if err != nil {
+		return false, err
 	}
 	if delta && !acknowledged {
 		syncwork.RecordWork(ctx, "fallback_capture_publication_receipt", 1)
 		syncwork.RecordWork(ctx, "capture_full_exports", 1)
-		// Never let a failed publication receipt turn selected export into
-		// partial validation. Repair/validate all local records this cycle;
-		// leave the old cursor untouched so recovery remains conservative.
-		complete, err := portable.EncodeMemoryExport(ctx, db, projectID)
+		complete, err := portable.EncodeMemoryExport(ctx, db, project)
 		if err != nil {
 			return false, err
 		}
 		if complete.Identity.LineageID != a.Lineage {
 			return false, fmt.Errorf("project lineage changed during export")
 		}
-		if err := a.captureLocal(complete.Envelopes, nil); err != nil {
+		if err := a.store().transact(ctx, func(tx *sql.Tx) error {
+			if _, err := a.store().auditWithin(ctx, tx); err != nil {
+				return err
+			}
+			return a.captureLocalWithin(ctx, tx, complete.Envelopes)
+		}); err != nil {
 			return false, err
 		}
 	}

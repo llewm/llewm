@@ -5,13 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
@@ -24,7 +22,7 @@ var errPublicationChanged = errors.New("publication membership changed during ar
 // The objects are handed directly from ReadBlock, never from caller-owned
 // parsed fields or a snapshot retained across a later inventory mutation.
 func (s Index) ReadPublication(ctx context.Context, root *os.Root, path string, archive Archive, endpoint string) (Block, error) {
-	if endpoint == "" || archive.Lineage != s.Lineage {
+	if endpoint == "" || archive.Lineage != s.Lineage || archive.ProjectID != s.ProjectID || archive.DB != s.DB {
 		return Block{}, fmt.Errorf("publication endpoint and matching lineage are required")
 	}
 	block, err := s.ReadBlock(ctx, root, path)
@@ -74,7 +72,7 @@ func (s Index) publicationFingerprint(ctx context.Context, reader publicationRea
 // destination provenance, and then records publication membership. Inventory
 // rows are not semantic import receipts; callers import only after this succeeds.
 func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint string, block Block) (int, error) {
-	if endpoint == "" || archive.Lineage != s.Lineage {
+	if endpoint == "" || archive.Lineage != s.Lineage || archive.ProjectID != s.ProjectID || archive.DB != s.DB {
 		return 0, fmt.Errorf("publication endpoint and matching lineage are required")
 	}
 	if err := validateBlockBytes(block); err != nil || block.Hash == "" {
@@ -97,72 +95,27 @@ func (s Index) ObservePublication(ctx context.Context, archive Archive, endpoint
 // and checked against the derived inventory. Keep the membership writer lock
 // and stale-version guard shared with the standalone observation path.
 func (s Index) observePublicationObjects(ctx context.Context, archive Archive, endpoint, hash string, objects []portable.EncodedEnvelope) (int, error) {
-	conn, err := s.DB.Conn(ctx)
-	if err != nil {
-		return 0, err
+	if archive.DB != s.DB || archive.ProjectID != s.ProjectID || archive.Lineage != s.Lineage || endpoint == "" {
+		return 0, fmt.Errorf("matching project archive and endpoint required")
 	}
-	defer conn.Close()
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE history_index_blocks SET index_version=index_version WHERE project_id=? AND 0`, s.ProjectID); err != nil {
-		return 0, err
-	}
-	var stale int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_index_blocks WHERE project_id=? AND block_hash=? AND index_version<>?`, s.ProjectID, hash, IndexVersion).Scan(&stale); err != nil {
-		return 0, err
-	}
-	if stale != 0 {
-		return 0, fmt.Errorf("%w: version changed", ErrIndexRebuild)
-	}
-	root, err := OpenRoot(archive.Directory)
-	if err != nil {
-		return 0, err
-	}
-	defer root.Close()
-	addedCount := 0
-	var observation *captureObservation
-	attempted := false
-	beforeCreate := func() {
-		if !attempted {
-			attempted = true
-			observation = archive.prepareCaptureObservation(ctx, tx, s.ProjectID, endpoint, objects)
+	added := 0
+	err := archive.store().transact(ctx, func(tx *sql.Tx) error {
+		var stale int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM history_index_blocks WHERE project_id=? AND block_hash=? AND index_version<>?`, s.ProjectID, hash, IndexVersion).Scan(&stale); err != nil {
+			return err
 		}
-	}
-	for _, object := range objects {
-		if err := ctx.Err(); err != nil {
-			return addedCount, err
+		if stale != 0 {
+			return fmt.Errorf("%w: version changed", ErrIndexRebuild)
 		}
-		added, err := putValidatedRootObserved(root, object, endpoint, beforeCreate)
+		var err error
+		added, err = archive.store().putWithin(ctx, tx, "ready", Hash(endpoint), objects)
 		if err != nil {
-			return addedCount, err
+			return err
 		}
-		if added {
-			addedCount++
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, Hash(endpoint), hash); err != nil {
-		return addedCount, err
-	}
-	acknowledged := observation.complete(ctx, tx, archive, s.ProjectID)
-	err = tx.Commit()
-	if err != nil {
-		// SQLite can leave a failed COMMIT transaction active (for example a
-		// deferred FK violation). database/sql has already closed the Tx, so
-		// retain its connection and clean it before returning it to the pool.
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if _, rollbackErr := conn.ExecContext(cleanup, `ROLLBACK`); rollbackErr != nil {
-			// A connection whose transaction state is uncertain cannot be reused.
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		}
-	}
-	if err == nil && acknowledged {
-		syncwork.RecordWork(ctx, "capture_observation_receipts", 1)
-	}
-	return addedCount, err
+		_, err = tx.ExecContext(ctx, `INSERT INTO history_index_publications(project_id,endpoint_hash,block_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, Hash(endpoint), hash)
+		return err
+	})
+	return added, err
 }
 
 // PlanPublication stages immutable publication intent before returning blocks
@@ -172,15 +125,15 @@ func (s Index) observePublicationObjects(ctx context.Context, archive Archive, e
 // verified destination blocks before planning additions. An incomplete or
 // invalid destination scan must be retried before rebuilding its catalog.
 func (s Index) PlanPublication(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, error) {
-	return s.planPublicationWithRecovery(ctx, archive, endpoint, relay, nil, nil)
+	return s.planPublicationWithRecovery(ctx, archive, endpoint, relay, nil)
 }
 
 // PlanPublicationWithInventory returns the publication plan and a complete
 // validated archive snapshot from the same scan, for local semantic import.
 // Records arriving after the snapshot are picked up on the next cycle.
-func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool, known []Block) ([]Block, []Block, error) {
+func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive, endpoint string, relay bool) ([]Block, []Block, error) {
 	var inventory []portable.EncodedEnvelope
-	blocks, err := s.planPublicationWithRecovery(ctx, archive, endpoint, relay, &inventory, known)
+	blocks, err := s.planPublicationWithRecovery(ctx, archive, endpoint, relay, &inventory)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -217,9 +170,9 @@ func (s Index) PlanPublicationWithInventory(ctx context.Context, archive Archive
 	return blocks, append(all, extra...), nil
 }
 
-func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, known []Block) ([]Block, error) {
+func (s Index) planPublicationWithRecovery(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope) ([]Block, error) {
 	return s.planPublicationWithScanRecovery(ctx, archive, endpoint, relay, inventory, func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error) {
-		return archive.objectsWithBlocks(ctx, endpoint, relay, known)
+		return archive.objects(ctx, endpoint, relay)
 	})
 }
 
@@ -255,7 +208,7 @@ func (s Index) planPublicationWithScanRecovery(ctx context.Context, archive Arch
 }
 
 func (s Index) planPublication(ctx context.Context, archive Archive, endpoint string, relay bool, inventory *[]portable.EncodedEnvelope, scan func() ([]portable.EncodedEnvelope, []portable.EncodedEnvelope, error)) ([]Block, error) {
-	if endpoint == "" || archive.Lineage != s.Lineage {
+	if endpoint == "" || archive.Lineage != s.Lineage || archive.ProjectID != s.ProjectID || archive.DB != s.DB {
 		return nil, fmt.Errorf("publication endpoint and matching lineage are required")
 	}
 	before, err := s.publicationFingerprint(ctx, s.DB, endpoint)

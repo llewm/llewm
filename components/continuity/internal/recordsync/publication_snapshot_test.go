@@ -13,7 +13,7 @@ import (
 
 func TestPublicationReusesOnlyPermittedExactEnvelopes(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "publication-envelope-reuse")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestPublicationSnapshotPreservesIndexedMembership(t *testing.T) {
 
 func TestPublicationStreamsMixedBlocksAndRejectsLateDamage(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "publication-stream")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestPublicationStreamsMixedBlocksAndRejectsLateDamage(t *testing.T) {
 
 func TestForeignSnapshotRecoveryAndOriginChange(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "foreign-snapshot-recovery")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestForeignSnapshotRecoveryAndOriginChange(t *testing.T) {
 	index := Index{DB: db, ProjectID: project, Lineage: lineage}
 	plan := func() []Block {
 		t.Helper()
-		outbound, snapshot, err := index.PlanPublicationWithInventory(ctx, archive, "git:destination", false, nil)
+		outbound, snapshot, err := index.PlanPublicationWithInventory(ctx, archive, "git:destination", false)
 		if err != nil || len(outbound) != 0 || len(snapshot) != 1 || len(snapshot[0].Objects) != 1 || !bytes.Equal(snapshot[0].Objects[0].Bytes, object.Bytes) {
 			t.Fatalf("foreign snapshot: outbound=%+v snapshot=%+v err=%v", outbound, snapshot, err)
 		}
@@ -190,7 +190,7 @@ func TestForeignSnapshotRecoveryAndOriginChange(t *testing.T) {
 	if _, err := archive.Put(object, "local"); err != nil {
 		t.Fatal(err)
 	}
-	outbound, snapshot, err := index.PlanPublicationWithInventory(ctx, archive, "git:destination", false, nil)
+	outbound, snapshot, err := index.PlanPublicationWithInventory(ctx, archive, "git:destination", false)
 	if err != nil || len(outbound) != 1 || len(snapshot) != 1 || outbound[0].Hash != initial[0].Hash || snapshot[0].Hash != initial[0].Hash {
 		t.Fatalf("origin promotion lost exact record: %+v %+v %v", outbound, snapshot, err)
 	}
@@ -198,7 +198,7 @@ func TestForeignSnapshotRecoveryAndOriginChange(t *testing.T) {
 
 func testPublicationSnapshotPreservesIndexedMembership(t *testing.T, origin string) {
 	ctx, db, project := indexedTestProject(t, "snapshot-growth")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func testPublicationSnapshotPreservesIndexedMembership(t *testing.T, origin stri
 				t.Fatal(err)
 			}
 		}
-		published, snapshot, err := index.PlanPublicationWithInventory(ctx, archive, "git:destination", false, nil)
+		published, snapshot, err := index.PlanPublicationWithInventory(ctx, archive, "git:destination", false)
 		if err != nil {
 			t.Fatal(err)
 		}

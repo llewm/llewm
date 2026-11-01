@@ -209,7 +209,7 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 	if err := aa.CaptureLocal(export.Envelopes); err != nil {
 		t.Fatal(err)
 	}
-	paths, count, snapshot, err := a.syncer.publishBlocks(ctx, testLineage, nil)
+	paths, count, snapshot, err := a.syncer.publishBlocks(ctx, testLineage)
 	if err != nil || count != len(export.Envelopes) {
 		t.Fatalf("publish: %d %v", count, err)
 	}

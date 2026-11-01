@@ -287,20 +287,13 @@ func TestUnchangedSyncDetectsArchiveEditsAndRouteChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(archive.Directory, portable.MemoryRecordPath(export.Envelopes[0].Envelope))
-	info, err := os.Stat(path)
-	if err != nil {
+	if _, err := m.db.Exec(`DROP TRIGGER history_archive_envelope_immutable_update`); err != nil {
 		t.Fatal(err)
 	}
-	body := portable.MemoryFileBytes(export.Envelopes[0])
-	body[len(body)-2] ^= 1
-	if err := os.WriteFile(path, body, 0600); err != nil {
+	if _, err := m.db.Exec(`UPDATE history_archive_envelopes SET envelope_json=cast('corrupt' as blob) WHERE project_id=? AND envelope_hash=?`, m.project, export.Envelopes[0].Envelope.EnvelopeSHA256); err != nil {
 		t.Fatal(err)
 	}
-	// Same size and restored mtime still changes ctime.
-	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-		t.Fatal(err)
-	}
+
 	if got, err := m.syncer.Sync(ctx); err == nil || got.Unchanged {
 		t.Fatalf("archive corruption skipped: %+v %v", got, err)
 	}

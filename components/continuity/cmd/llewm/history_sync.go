@@ -27,7 +27,7 @@ func projectArchive(application *app.App) (recordsync.Archive, error) {
 	if identity == nil {
 		return recordsync.Archive{}, fmt.Errorf("portable identity required; explicitly create or join a lineage with sync init")
 	}
-	return recordsync.OpenArchive(filepath.Join(config.StateDir(application.Root), "history"), identity.LineageID)
+	return recordsync.OpenArchive(context.Background(), application.DB, application.ProjectID, identity.LineageID, filepath.Join(config.StateDir(application.Root), "history"))
 }
 
 func rebuildHistoryInventory(ctx context.Context, application *app.App, archive recordsync.Archive) error {
@@ -376,7 +376,7 @@ func readFolderStatuses(application *app.App) []foldersync.Result {
 	if err != nil || identity == nil {
 		return result
 	}
-	archive := recordsync.Archive{Directory: filepath.Join(config.StateDir(application.Root), "history"), Lineage: identity.LineageID}
+	archive := recordsync.Archive{DB: application.DB, ProjectID: application.ProjectID, Lineage: identity.LineageID}
 	for _, e := range application.Config.Sync.Folders {
 		value := foldersync.Result{Endpoint: e.Name, Outcome: "never_run", PeerReceipt: "unknown"}
 		if err := archive.Status(e.ID(), &value); err != nil && !errors.Is(err, os.ErrNotExist) {

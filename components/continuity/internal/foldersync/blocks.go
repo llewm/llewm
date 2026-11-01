@@ -113,7 +113,7 @@ func (s Syncer) Sync(ctx context.Context) (result Result, err error) {
 			return result, err
 		}
 	}
-	blocks, all, err := index.PlanPublicationWithInventory(ctx, s.Archive, s.Endpoint.ID(), s.Endpoint.Relay, scan.Blocks)
+	blocks, all, err := index.PlanPublicationWithInventory(ctx, s.Archive, s.Endpoint.ID(), s.Endpoint.Relay)
 	if err != nil {
 		return result, err
 	}

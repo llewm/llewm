@@ -17,11 +17,11 @@ func TestBlockFlowAcrossTwoPeers(t *testing.T) {
 	ctx, aDB, aID := indexedTestProject(t, "block-flow-a")
 	_, bDB, bID := indexedTestProject(t, "block-flow-b")
 	_, referenceDB, referenceID := indexedTestProject(t, "block-flow-reference")
-	aArchive, err := OpenArchive(t.TempDir(), lineage)
+	aArchive, err := openTestArchive(t, aDB, aID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bArchive, err := OpenArchive(t.TempDir(), lineage)
+	bArchive, err := openTestArchive(t, bDB, bID)
 	if err != nil {
 		t.Fatal(err)
 	}

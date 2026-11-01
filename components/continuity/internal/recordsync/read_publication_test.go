@@ -2,8 +2,6 @@ package recordsync
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,7 +11,7 @@ import (
 
 func TestReadPublicationChecksInventoryOnceAndRepairs(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "read-publication")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +73,9 @@ func TestReadPublicationChecksInventoryOnceAndRepairs(t *testing.T) {
 			if err != nil || len(retained) != 1 || !bytes.Equal(retained[0].Bytes, object.Bytes) {
 				t.Fatalf("observation did not retain exact envelope: %+v %v", retained, err)
 			}
-			if _, err := os.Stat(filepath.Join(archive.Directory, "origins", object.Envelope.EnvelopeSHA256, Hash(endpoint))); err != nil {
-				t.Fatalf("observation lost endpoint provenance: %v", err)
+			var origins int
+			if err := db.QueryRow(`SELECT count(*) FROM history_archive_origins WHERE project_id=? AND envelope_hash=? AND origin_hash=?`, project, object.Envelope.EnvelopeSHA256, Hash(endpoint)).Scan(&origins); err != nil || origins != 1 {
+				t.Fatalf("observation lost endpoint provenance: %d %v", origins, err)
 			}
 			// Publication provenance is required even for a warm indexed read;
 			// observation alone must never authorize delivery to another endpoint.

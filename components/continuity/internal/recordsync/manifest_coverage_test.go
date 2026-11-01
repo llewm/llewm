@@ -18,7 +18,7 @@ import (
 func TestManifestCoveragePersistsAndValidatesWorkingBytes(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "coverage")
 	index := Index{DB: db, ProjectID: project, Lineage: lineage}
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestManifestCoveragePersistsAndValidatesWorkingBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	archive, err = OpenArchive(archive.Directory, lineage)
+	archive, err = openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestManifestCoverageNeverHidesUnannouncedOrInvalidEntries(t *testing.T) {
 		t.Run(mutation, func(t *testing.T) {
 			ctx, db, project := indexedTestProject(t, mutation)
 			index := Index{DB: db, ProjectID: project, Lineage: lineage}
-			archive, err := OpenArchive(t.TempDir(), lineage)
+			archive, err := openTestArchive(t, db, project)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +164,7 @@ func TestManifestCoverageNeverHidesUnannouncedOrInvalidEntries(t *testing.T) {
 func TestManifestCoverageIsScopedAndCancellationIsNotCompletion(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "scope")
 	index := Index{DB: db, ProjectID: project, Lineage: lineage}
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestManifestCoverageRejectsConcurrentUnannouncedPublication(t *testing.T) {
 		t.Run(map[bool]string{false: "establish", true: "reuse"}[saved], func(t *testing.T) {
 			ctx, db, project := indexedTestProject(t, "concurrent-coverage")
 			index := Index{DB: db, ProjectID: project, Lineage: lineage}
-			archive, err := OpenArchive(t.TempDir(), lineage)
+			archive, err := openTestArchive(t, db, project)
 			if err != nil {
 				t.Fatal(err)
 			}

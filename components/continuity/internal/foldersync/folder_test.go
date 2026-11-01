@@ -37,7 +37,7 @@ func receiverLineage(t *testing.T, directory, storeID, lineage string) Syncer {
 	if _, err := (portable.Service{DB: db}).Initialize(ctx, id, lineage); err != nil {
 		t.Fatal(err)
 	}
-	archive, err := recordsync.OpenArchive(t.TempDir(), lineage)
+	archive, err := recordsync.OpenArchive(ctx, db, id, lineage, filepath.Join(t.TempDir(), "unused-legacy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,14 +235,23 @@ func TestPartialConflictAndCorruptFilesCannotBecomeRecords(t *testing.T) {
 	if _, err := target.Sync(context.Background()); err == nil {
 		t.Fatal("overwrote or silently accepted corrupt existing object")
 	}
-	root, err := recordsync.OpenRoot(target.Archive.Directory)
+	retained, err := target.Archive.Objects(context.Background(), "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
-	if _, err := recordsync.ReadObject(root, portable.MemoryRecordPath(e.Envelope), testLineage); err != nil {
-		t.Fatalf("local verified copy corrupted: %v", err)
+	found := false
+	for _, object := range retained {
+		if object.Envelope.EnvelopeSHA256 == e.Envelope.EnvelopeSHA256 {
+			found = true
+			if string(object.Bytes) != string(e.Bytes) {
+				t.Fatal("local verified bytes changed")
+			}
+		}
 	}
+	if !found {
+		t.Fatal("local verified copy was lost")
+	}
+
 }
 func TestSharedFolderRefusesProtectedStorage(t *testing.T) {
 	root := t.TempDir()

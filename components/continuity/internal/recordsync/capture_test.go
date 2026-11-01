@@ -1,10 +1,6 @@
-//go:build linux
-
 package recordsync
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,9 +11,9 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
-func TestCaptureProjectReuseAndRepair(t *testing.T) {
+func TestCaptureProjectReuseAndImmutableDamage(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "capture")
-	a, err := OpenArchive(t.TempDir(), lineage)
+	a, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,38 +64,26 @@ func TestCaptureProjectReuseAndRepair(t *testing.T) {
 	if len(export.Envelopes) != 4 {
 		t.Fatalf("missing attribution ancestors: %d", len(export.Envelopes))
 	}
-	path := filepath.Join(a.Directory, portable.MemoryRecordPath(export.Envelopes[0].Envelope))
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	measured, repairWork := syncwork.WithWorkMetrics(ctx)
-	if reused, err := a.CaptureProject(measured, db, project); err != nil || reused {
-		t.Fatalf("missing archive file not repaired: %t %v", reused, err)
-	}
-	if counts := repairWork.Counts(); counts["fallback_capture_archive_changed"] != 1 || counts["capture_full_exports"] != 1 {
-		t.Fatalf("archive repair fallback work: %v", counts)
+	hash := export.Envelopes[0].Envelope.EnvelopeSHA256
+	if _, err := db.Exec(`UPDATE history_archive_envelopes SET envelope_json=cast('corrupt' as blob) WHERE project_id=? AND envelope_hash=?`, project, hash); err == nil {
+		t.Fatal("immutable archive body changed")
 	}
 	warm()
-	info, err := os.Stat(path)
-	if err != nil {
+	if _, err := db.Exec(`DROP TRIGGER history_archive_envelope_immutable_update`); err != nil {
 		t.Fatal(err)
 	}
-	body := portable.MemoryFileBytes(export.Envelopes[0])
-	body[len(body)-2] ^= 1
-	if err := os.WriteFile(path, body, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+	if _, err := db.Exec(`UPDATE history_archive_envelopes SET envelope_json=cast('corrupt' as blob) WHERE project_id=? AND envelope_hash=?`, project, hash); err != nil {
 		t.Fatal(err)
 	}
 	if reused, err := a.CaptureProject(ctx, db, project); err == nil || reused {
-		t.Fatalf("corrupt archive file reused: %t %v", reused, err)
+		t.Fatalf("damaged immutable archive accepted: %v %v", reused, err)
 	}
+
 }
 
 func TestCaptureProjectConsumesOnlyDerivedChanges(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "cursor")
-	a, err := OpenArchive(t.TempDir(), lineage)
+	a, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,8 +119,9 @@ func TestCaptureProjectConsumesOnlyDerivedChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, object := range reference.Envelopes {
-		body, err := os.ReadFile(filepath.Join(a.Directory, portable.MemoryRecordPath(object.Envelope)))
-		if err != nil || string(body) != string(portable.MemoryFileBytes(object)) {
+		var body []byte
+		err := db.QueryRow(`SELECT envelope_json FROM history_archive_envelopes WHERE project_id=? AND envelope_hash=?`, project, object.Envelope.EnvelopeSHA256).Scan(&body)
+		if err != nil || string(body) != string(object.Bytes) {
 			t.Fatalf("reference differs: %v", err)
 		}
 	}

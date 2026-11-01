@@ -18,7 +18,7 @@ func (s Syncer) completionGuard(ctx context.Context) (completionGuard, error) {
 	if build.BuildDirty {
 		return g, fmt.Errorf("uncommitted build cannot reuse completion proofs")
 	}
-	body, _ := json.Marshal([]any{"folder-v1", build.GitCommit, recordsync.IndexVersion, s.Endpoint.ID(), s.Endpoint.Directory, s.Endpoint.LineageID, s.Endpoint.StoreID, s.Endpoint.Relay, s.Archive.Directory})
+	body, _ := json.Marshal([]any{"folder-sqlite-v1", build.GitCommit, recordsync.IndexVersion, s.Endpoint.ID(), s.Endpoint.Directory, s.Endpoint.LineageID, s.Endpoint.StoreID, s.Endpoint.Relay, s.Archive.ProjectID})
 	g.route = recordsync.Hash(string(body))
 	var generationErr error
 	g.generation, generationErr = database.SyncGeneration(ctx, s.DB, s.ProjectID)

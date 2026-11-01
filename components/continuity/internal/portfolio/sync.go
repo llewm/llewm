@@ -130,7 +130,7 @@ func ConvertRoute(ctx context.Context, c Catalog, projectName, destinationName s
 	if err != nil || identity == nil || identity.LineageID != selected.Lineage || a.ProjectID != selected.ProjectID {
 		return fmt.Errorf("project binding changed before conversion")
 	}
-	archive, err := recordsync.OpenArchive(filepath.Join(config.StateDir(selected.Root), "history"), selected.Lineage)
+	archive, err := recordsync.OpenArchive(ctx, a.DB, a.ProjectID, selected.Lineage, filepath.Join(config.StateDir(selected.Root), "history"))
 	if err != nil {
 		return err
 	}
@@ -215,7 +215,7 @@ func ReadStatus(ctx context.Context, c Catalog, name string, all bool) ([]Result
 		for j := range r.Destinations {
 			d := &r.Destinations[j]
 			if d.Kind == "folder" {
-				archive := recordsync.Archive{Directory: filepath.Join(config.StateDir(r.Root), "history"), Lineage: r.Lineage}
+				archive := recordsync.Archive{DB: a.DB, ProjectID: a.ProjectID, Lineage: r.Lineage}
 				value := foldersync.Result{Endpoint: d.Name, Outcome: "never_run", PeerReceipt: "unknown"}
 				err := archive.Status("folder:"+d.StoreID, &value)
 				if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -298,7 +298,7 @@ func runProject(ctx context.Context, c Catalog, p Project, dryRun, inspectFolder
 	if identity == nil || identity.LineageID != p.Lineage || a.ProjectID != p.ProjectID {
 		return result, fmt.Errorf("project binding changed before sync")
 	}
-	archive, err := recordsync.OpenArchive(filepath.Join(config.StateDir(p.Root), "history"), p.Lineage)
+	archive, err := recordsync.OpenArchive(ctx, a.DB, a.ProjectID, p.Lineage, filepath.Join(config.StateDir(p.Root), "history"))
 	if err != nil {
 		return result, err
 	}

@@ -13,7 +13,7 @@ import (
 
 func TestDurableArchiveLegacyMigrationPreservesForksAndOrigins(t *testing.T) {
 	ctx, store := archiveStoreFixture(t)
-	legacy, err := OpenArchive(filepath.Join(t.TempDir(), "archive"), lineage)
+	legacy, err := openLegacyArchiveFixture(filepath.Join(t.TempDir(), "archive"), lineage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestDurableArchiveLegacyMigrationRejectsUnaccountedData(t *testing.T) {
 				}
 				return
 			}
-			legacy, err := OpenArchive(directory, lineage)
+			legacy, err := openLegacyArchiveFixture(directory, lineage)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,7 +147,7 @@ func TestDurableArchiveLegacyMigrationRejectsUnaccountedData(t *testing.T) {
 
 func TestDurableArchiveLegacyMigrationEmptyAndContaminatedStaging(t *testing.T) {
 	ctx, store := archiveStoreFixture(t)
-	legacy, err := OpenArchive(filepath.Join(t.TempDir(), "empty"), lineage)
+	legacy, err := openLegacyArchiveFixture(filepath.Join(t.TempDir(), "empty"), lineage)
 	if err != nil {
 		t.Fatal(err)
 	}

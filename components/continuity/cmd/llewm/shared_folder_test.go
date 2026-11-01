@@ -78,9 +78,8 @@ func TestGitFolderCoordinatorRecoversTrackedStagedBlock(t *testing.T) {
 			t.Fatalf("git fixture: %v %s", err, output)
 		}
 	}
-	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
-		t.Fatal(err)
-	}
+	// Durable observations survive disposable index damage; recovery must
+	// rebuild membership without deleting or overwriting the archive source.
 	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, application.ProjectID, staged[0].Hash); err != nil {
 		t.Fatal(err)
 	}
@@ -136,9 +135,8 @@ func TestFolderOnlyCoordinatorRecoversFromAnotherEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
-		t.Fatal(err)
-	}
+	// Durable observations survive disposable index damage; recovery must
+	// rebuild membership without deleting or overwriting the archive source.
 	if _, err := application.DB.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=? AND envelope_hash IN (SELECT envelope_hash FROM history_index_block_members WHERE block_hash=?)`, application.ProjectID, staged[0].Hash); err != nil {
 		t.Fatal(err)
 	}
@@ -225,8 +223,15 @@ func TestSharedFolderCLIJoinsExistingHistoryWithoutGit(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(directory, foldersync.MarkerFile)); err != nil {
 		t.Fatal("removed shared files while removing endpoint")
 	}
-	if _, err := os.Stat(filepath.Join(config.StateDir(rootA), "history", "lineage")); err != nil {
-		t.Fatal("no durable local archive")
+	source, err := app.OpenReadOnly(context.Background(), rootA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	archive := recordsync.Archive{DB: source.DB, ProjectID: source.ProjectID, Lineage: identity.LineageID}
+	objects, err := archive.Objects(context.Background(), "", true)
+	if err != nil || len(objects) == 0 {
+		t.Fatalf("durable observations missing after endpoint removal: %d %v", len(objects), err)
 	}
 }
 func TestFolderSessionHookQueuesBackgroundWithoutReadingEndpoint(t *testing.T) {
@@ -265,6 +270,11 @@ func TestFolderSessionHookQueuesBackgroundWithoutReadingEndpoint(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(config.StateDir(root), "history")); !os.IsNotExist(err) {
 		t.Fatal("session hook unexpectedly scanned/created local archive")
+	}
+	var archiveStatus string
+	var archiveRecords int
+	if err := application.DB.QueryRow(`SELECT status,record_count FROM history_archive_state WHERE project_id=?`, application.ProjectID).Scan(&archiveStatus, &archiveRecords); err != nil || archiveStatus != "staging" || archiveRecords != 0 {
+		t.Fatalf("session hook synchronously opened/captured SQLite archive: %s %d %v", archiveStatus, archiveRecords, err)
 	}
 	enableAutomaticSync(application)
 	if application.AfterCheckpoint == nil {

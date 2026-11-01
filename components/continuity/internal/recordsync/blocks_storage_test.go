@@ -59,7 +59,7 @@ func TestBlockPublicationAndIncompleteScan(t *testing.T) {
 
 func TestAuthorizedBlocksRespectRecordOrigins(t *testing.T) {
 	ctx := context.Background()
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := standaloneTestArchive(t)
 	if err != nil {
 		t.Fatal(err)
 	}

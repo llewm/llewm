@@ -16,7 +16,7 @@ func archiveCutoverFixture(t testing.TB) (context.Context, archiveStore, archive
 	ctx, store := archiveStoreFixture(t)
 	parent := t.TempDir()
 	paths := archiveCutoverPaths{Source: filepath.Join(parent, "history"), Retained: filepath.Join(parent, "retained-history"), DatabaseBackup: filepath.Join(parent, "before.db")}
-	legacy, err := OpenArchive(paths.Source, store.Lineage)
+	legacy, err := openLegacyArchiveFixture(paths.Source, store.Lineage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestDurableArchiveCutoverRecoversEveryBoundary(t *testing.T) {
 			if err := completeArchiveCutover(ctx, store, paths); err != nil {
 				t.Fatalf("completion not idempotent: %v", err)
 			}
-			if _, err := OpenArchive(paths.Source, store.Lineage); err == nil {
+			if _, err := openLegacyArchiveFixture(paths.Source, store.Lineage); err == nil {
 				t.Fatal("legacy writer recreated fenced archive")
 			}
 			retained, err := collectArchiveMigration(ctx, paths.Retained, store.Lineage)
@@ -136,7 +136,7 @@ func TestDurableArchiveCutoverRefusesChangedRecoveryInputs(t *testing.T) {
 			}
 			put := func(directory string) {
 				t.Helper()
-				legacy, err := OpenArchive(directory, store.Lineage)
+				legacy, err := openLegacyArchiveFixture(directory, store.Lineage)
 				if err != nil {
 					t.Fatal(err)
 				}

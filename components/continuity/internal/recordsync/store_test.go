@@ -16,9 +16,9 @@ import (
 
 const lineage = "lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-func TestArchiveValidatedHintsPreserveIntegrity(t *testing.T) {
+func TestArchiveIsIndependentOfCallerBlockFields(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "archive-hints")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,12 +52,12 @@ func TestArchiveValidatedHintsPreserveIntegrity(t *testing.T) {
 	known.Objects[0].Bytes[0] = 'x'
 	known.Objects[0].Envelope.RecordID = "forged"
 	known.Objects[0].Envelope.Payload[0] = 'x'
-	_, got, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known})
+	_, got, err := archive.objects(ctx, "folder:target", false)
 	if err != nil || len(got) != 1 || !bytes.Equal(got[0].Bytes, object.Bytes) {
 		t.Fatalf("valid cached result changed: %+v %v", got, err)
 	}
 	got[0].Bytes[0] = 'x'
-	_, got, err = archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known})
+	_, got, err = archive.objects(ctx, "folder:target", false)
 	if err != nil || len(got) != 1 || !bytes.Equal(got[0].Bytes, object.Bytes) {
 		t.Fatalf("cached result aliased caller data: %+v %v", got, err)
 	}
@@ -68,7 +68,7 @@ func TestArchiveValidatedHintsPreserveIntegrity(t *testing.T) {
 	if _, err := archive.Put(foreign, "folder:other"); err != nil {
 		t.Fatal(err)
 	}
-	allowed, all, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known})
+	allowed, all, err := archive.objects(ctx, "folder:target", false)
 	if err != nil || len(allowed) != 1 || len(all) != 2 || allowed[0].Envelope.EnvelopeSHA256 != object.Envelope.EnvelopeSHA256 {
 		t.Fatalf("hint changed provenance or missed new data: %d %d %v", len(allowed), len(all), err)
 	}
@@ -77,19 +77,21 @@ func TestArchiveValidatedHintsPreserveIntegrity(t *testing.T) {
 		relay    bool
 	}{{"folder:target", false}, {"folder:other", false}, {"folder:target", true}} {
 		wantAllowed, wantAll, wantErr := archive.objects(ctx, route.endpoint, route.relay)
-		gotAllowed, gotAll, gotErr := archive.objectsWithBlocks(ctx, route.endpoint, route.relay, []Block{known})
+		gotAllowed, gotAll, gotErr := archive.objects(ctx, route.endpoint, route.relay)
 		if wantErr != nil || gotErr != nil || !reflect.DeepEqual(wantAllowed, gotAllowed) || !reflect.DeepEqual(wantAll, gotAll) {
 			t.Fatalf("cached scan differs for %+v: %v %v", route, wantErr, gotErr)
 		}
 	}
-	path := filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))
-	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
+	if _, err := db.Exec(`DROP TRIGGER history_archive_envelope_immutable_update`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{known}); err == nil {
+	if _, err := db.Exec(`UPDATE history_archive_envelopes SET envelope_json=cast('corrupt' as blob) WHERE project_id=? AND envelope_hash=?`, project, object.Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := archive.objects(ctx, "folder:target", false); err == nil {
 		t.Fatal("cached hint accepted damaged archive bytes")
 	}
-	if _, _, err := archive.objectsWithBlocks(ctx, "folder:target", false, []Block{{Objects: []portable.EncodedEnvelope{object}}}); err == nil {
+	if _, _, err := archive.objects(ctx, "folder:target", false); err == nil {
 		t.Fatal("forged unsealed hint accepted damaged archive bytes")
 	}
 }
@@ -103,7 +105,7 @@ func fixture(t *testing.T) portable.EncodedEnvelope {
 	return e
 }
 func TestArchiveProvenanceAndConcurrentPublication(t *testing.T) {
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := standaloneTestArchive(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,8 +136,9 @@ func TestArchiveProvenanceAndConcurrentPublication(t *testing.T) {
 			t.Fatalf("provenance permission bypass: %+v %d %v", tc, len(records), err)
 		}
 	}
-	actual, err := os.ReadFile(filepath.Join(archive.Directory, portable.MemoryRecordPath(e.Envelope)))
-	if err != nil || !bytes.Equal(actual, portable.MemoryFileBytes(e)) {
+	var actual []byte
+	err = archive.DB.QueryRow(`SELECT envelope_json FROM history_archive_envelopes WHERE project_id=? AND envelope_hash=?`, archive.ProjectID, e.Envelope.EnvelopeSHA256).Scan(&actual)
+	if err != nil || !bytes.Equal(actual, e.Bytes) {
 		t.Fatal("archive changed canonical bytes")
 	}
 }
@@ -176,32 +179,5 @@ func TestTransportPublicationRefusesSymlinksReplacementAndWrongPaths(t *testing.
 	scan, err := Scan(context.Background(), root, lineage)
 	if err != nil || scan.Pending != 1 || len(scan.Objects) != 0 {
 		t.Fatalf("unsafe scan: %+v %v", scan, err)
-	}
-}
-func TestOriginSurvivesInterruptedArchivePublication(t *testing.T) {
-	archive, err := OpenArchive(t.TempDir(), lineage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := fixture(t)
-	root, err := OpenRoot(archive.Directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = WriteFile(root, filepath.Join("origins", e.Envelope.EnvelopeSHA256, Hash("folder:source")), []byte("observed\n"), false)
-	root.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := archive.CaptureLocal([]portable.EncodedEnvelope{e}); err != nil {
-		t.Fatal(err)
-	}
-	values, err := archive.Objects(context.Background(), "git:other", false)
-	if err != nil || len(values) != 0 {
-		t.Fatal("crash turned a received record into local origin")
-	}
-	values, err = archive.Objects(context.Background(), "folder:source", false)
-	if err != nil || len(values) != 1 {
-		t.Fatal("could not recover staged record from local semantic state")
 	}
 }

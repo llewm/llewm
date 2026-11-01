@@ -18,7 +18,7 @@ import (
 
 // Bump when the completion proof's interpretation changes. These device-local
 // proofs are disposable; a miss or uncertainty always runs the reference cycle.
-const syncProofVersion = 1
+const syncProofVersion = 2
 
 type syncGuard struct{ route, generation, tree, archive string }
 
@@ -28,20 +28,23 @@ func (s Syncer) guard(ctx context.Context, repo git) (syncGuard, error) {
 	if err != nil || identity == nil {
 		return g, err
 	}
-	directory := ""
+	var projectRoot string
+	if err := s.DB.QueryRowContext(ctx, `SELECT root FROM projects WHERE id=?`, s.ProjectID).Scan(&projectRoot); err != nil {
+		return g, err
+	}
+	directory := filepath.Join(config.StateDir(projectRoot), "history")
+	var a recordsync.Archive
 	if s.Archive != nil {
-		if s.Archive.Lineage != identity.LineageID {
-			return g, fmt.Errorf("archive lineage differs")
+		a = *s.Archive
+		if a.Lineage != identity.LineageID || a.DB != s.DB || a.ProjectID != s.ProjectID {
+			return g, fmt.Errorf("archive project binding differs")
 		}
-		directory = s.Archive.Directory
 	} else {
-		var projectRoot string
-		if err := s.DB.QueryRowContext(ctx, `SELECT root FROM projects WHERE id=?`, s.ProjectID).Scan(&projectRoot); err != nil {
+		a, err = recordsync.OpenArchive(ctx, s.DB, s.ProjectID, identity.LineageID, directory)
+		if err != nil {
 			return g, err
 		}
-		directory = filepath.Join(config.StateDir(projectRoot), "history")
 	}
-	a := recordsync.Archive{Directory: directory, Lineage: identity.LineageID}
 	g.archive, err = a.ChangeStamp(ctx)
 	if err != nil {
 		return g, err

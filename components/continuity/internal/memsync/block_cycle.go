@@ -58,7 +58,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		if err := s.DB.QueryRowContext(local, `SELECT root FROM projects WHERE id=?`, s.ProjectID).Scan(&projectRoot); err != nil {
 			return result, err
 		}
-		archive, err := recordsync.OpenArchive(filepath.Join(config.StateDir(projectRoot), "history"), identity.LineageID)
+		archive, err := recordsync.OpenArchive(local, s.DB, s.ProjectID, identity.LineageID, filepath.Join(config.StateDir(projectRoot), "history"))
 		if err != nil {
 			return result, err
 		}
@@ -67,14 +67,14 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if s.Archive.Lineage != identity.LineageID {
 		return result, fmt.Errorf("matching history archive is required")
 	}
-	if cache, err := openBlockTreeCache(s.Archive.Directory); err == nil {
+	if cache, err := openBlockTreeCache(filepath.Join(s.Clone, ".git")); err == nil {
 		defer cache.Close()
 		s.discovery.cache = cache
 	}
 	// Rebuild receipt membership and provenance from already tracked local
 	// history before classifying operational records as locally originated or
 	// planning publication. This also repairs damaged entries that are present.
-	tracked, err := s.trackedPublications(local, repo, identity.LineageID)
+	_, err = s.trackedPublications(local, repo, identity.LineageID)
 	if err != nil {
 		return result, err
 	}
@@ -93,7 +93,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	if _, err := s.Archive.CaptureProject(local, s.DB, s.ProjectID); err != nil {
 		return result, err
 	}
-	paths, count, snapshot, err := s.publishBlocks(local, identity.LineageID, tracked)
+	paths, count, snapshot, err := s.publishBlocks(local, identity.LineageID)
 	result.ExportedRecords = count
 	if err != nil {
 		return result, err

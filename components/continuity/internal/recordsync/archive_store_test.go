@@ -26,6 +26,17 @@ func archiveStoreFixture(t testing.TB) (context.Context, archiveStore) {
 	return ctx, s
 }
 
+func openTestArchive(t testing.TB, db *sql.DB, project string) (Archive, error) {
+	t.Helper()
+	return OpenArchive(context.Background(), db, project, lineage, filepath.Join(t.TempDir(), "unused-legacy"))
+}
+
+func standaloneTestArchive(t testing.TB) (Archive, error) {
+	t.Helper()
+	_, db, project := indexedTestProject(t, "standalone-archive")
+	return openTestArchive(t, db, project)
+}
+
 func archiveTransaction(t testing.TB, s archiveStore, fn func(*sql.Tx) error) {
 	t.Helper()
 	tx, err := s.DB.BeginTx(context.Background(), nil)
@@ -390,10 +401,10 @@ func TestDurableArchiveIntegrityFailureFallbacks(t *testing.T) {
 				wantReason = "damaged_cursor"
 			case "sequence":
 				exec(`UPDATE history_archive_state SET last_sequence=last_sequence+1 WHERE project_id=?`, s.ProjectID)
-				wantReason = "tracking_changed"
+				wantReason = "archive_changed"
 			case "counts":
 				exec(`UPDATE history_archive_state SET record_bytes=record_bytes+1 WHERE project_id=?`, s.ProjectID)
-				wantReason = "tracking_changed"
+				wantReason = "archive_changed"
 			}
 			archiveTransaction(t, s, func(tx *sql.Tx) error {
 				_, changes, reason, err := s.changesWithin(ctx, tx, consumer, 10)

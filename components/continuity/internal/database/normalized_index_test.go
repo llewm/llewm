@@ -43,7 +43,7 @@ func TestNormalizedIndexMigrationPreservesIntentAndUncoveredData(t *testing.T) {
 		`SELECT count(*) FROM history_index_blocks WHERE block_hash='obsolete'`:                      0,
 		`SELECT count(*) FROM history_index_blocks WHERE block_hash='uncovered' AND index_version=4`: 1,
 		`SELECT count(*) FROM history_index_blocks WHERE index_version=6`:                            2,
-		`SELECT mcp_api FROM writer_floor WHERE singleton=1`:                                         136,
+		`SELECT mcp_api FROM writer_floor WHERE singleton=1`:                                         137,
 	} {
 		var got int
 		if err := db.QueryRow(q).Scan(&got); err != nil || got != want {

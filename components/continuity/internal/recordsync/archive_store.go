@@ -17,9 +17,9 @@ import (
 var errArchiveNotReady = errors.New("durable archive requires verified storage migration")
 var errArchiveIntegrity = errors.New("durable archive integrity check failed")
 
-// archiveStore is the durable observation layer being introduced for managed
-// storage. It is independent of disposable history_index_* tables. The existing
-// filesystem Archive is not switched over until its explicit migration is ready.
+// archiveStore is Archive's durable observation layer, independent of disposable
+// history_index_* tables. Existing filesystem observations enter only through
+// explicit, verified migration; absence never implies an empty replacement.
 type archiveStore struct {
 	DB                 *sql.DB
 	ProjectID, Lineage string
@@ -146,9 +146,16 @@ func (s archiveStore) putWithin(ctx context.Context, tx *sql.Tx, status, originH
 				return added, errArchiveIntegrity
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO history_archive_origins(project_id,envelope_hash,origin_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, originHash); err != nil {
+		originResult, err := tx.ExecContext(ctx, `INSERT INTO history_archive_origins(project_id,envelope_hash,origin_hash) VALUES(?,?,?) ON CONFLICT DO NOTHING`, s.ProjectID, e.EnvelopeSHA256, originHash)
+		if err != nil {
 			return added, err
 		}
+		originCount, err := originResult.RowsAffected()
+		if err != nil {
+			return added, err
+		}
+		syncwork.RecordWork(ctx, "archive_envelopes_inserted", n)
+		syncwork.RecordWork(ctx, "archive_origins_inserted", originCount)
 		added += int(n)
 	}
 	return added, nil

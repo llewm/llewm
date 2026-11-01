@@ -39,7 +39,7 @@ func TestImportSnapshotPreservesPrivateContents(t *testing.T) {
 	read.Objects[0].Envelope.Payload[0] ^= 1
 	read.Objects[0].Envelope.RecordID = "changed"
 	want := block.Objects
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}

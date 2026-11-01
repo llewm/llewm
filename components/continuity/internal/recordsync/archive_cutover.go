@@ -216,9 +216,8 @@ func readArchiveCutover(ctx context.Context, store archiveStore, paths archiveCu
 	if err != nil {
 		return receipt, false, err
 	}
-	decoder := json.NewDecoder(strings.NewReader(body.String))
-	decoder.DisallowUnknownFields()
-	if !body.Valid || !checksum.Valid || len(body.String) > 4096 || Hash(body.String) != checksum.String || decoder.Decode(&receipt) != nil || !bytes.Equal(receipt.bytes(), []byte(body.String)) || receipt.Version != 1 || receipt.Project != store.ProjectID || receipt.Lineage != store.Lineage || receipt.PathsSHA256 != paths.hash() || !hex64.MatchString(receipt.DatabaseSHA256) {
+	receipt, err = decodeArchiveCutover(store, body, checksum)
+	if err != nil || receipt.PathsSHA256 != paths.hash() {
 		return receipt, false, fmt.Errorf("archive cutover recovery receipt is invalid or belongs to other paths")
 	}
 	digest, err := archiveBackupDigest(ctx, paths.DatabaseBackup)
@@ -226,6 +225,16 @@ func readArchiveCutover(ctx context.Context, store archiveStore, paths archiveCu
 		return receipt, false, fmt.Errorf("archive cutover database backup is missing or changed")
 	}
 	return receipt, true, nil
+}
+
+func decodeArchiveCutover(store archiveStore, body, checksum sql.NullString) (archiveCutoverReceipt, error) {
+	var receipt archiveCutoverReceipt
+	decoder := json.NewDecoder(strings.NewReader(body.String))
+	decoder.DisallowUnknownFields()
+	if !body.Valid || !checksum.Valid || len(body.String) > 4096 || Hash(body.String) != checksum.String || decoder.Decode(&receipt) != nil || !bytes.Equal(receipt.bytes(), []byte(body.String)) || receipt.Version != 1 || receipt.Project != store.ProjectID || receipt.Lineage != store.Lineage || !hex64.MatchString(receipt.PathsSHA256) || !hex64.MatchString(receipt.DatabaseSHA256) {
+		return receipt, fmt.Errorf("archive cutover recovery receipt is invalid")
+	}
+	return receipt, nil
 }
 
 func publishArchiveFence(root *os.Root, name string, body []byte) error {
@@ -329,6 +338,12 @@ func (s archiveStore) transact(ctx context.Context, fn func(*sql.Tx) error) erro
 		return err
 	}
 	defer tx.Rollback()
+	// Reserve the SQLite writer before any read snapshot can need an upgrade.
+	// Concurrent immutable ingestions must serialize, rather than fail with
+	// SQLITE_BUSY_SNAPSHOT after reading their initial archive stamp.
+	if _, err := tx.ExecContext(ctx, `UPDATE history_archive_state SET status=status WHERE project_id=? AND 0`, s.ProjectID); err != nil {
+		return err
+	}
 	if err := fn(tx); err != nil {
 		return err
 	}
@@ -341,4 +356,13 @@ func (s archiveStore) transact(ctx context.Context, fn func(*sql.Tx) error) erro
 		return err
 	}
 	return nil
+}
+
+func (s archiveStore) view(ctx context.Context, fn func(*sql.Tx) error) error {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return fn(tx)
 }

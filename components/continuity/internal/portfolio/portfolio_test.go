@@ -547,10 +547,12 @@ func TestPortfolioDestinationTypesRejectAmbiguityAndOverlap(t *testing.T) {
 		t.Fatal("folder overlapped live store")
 	}
 	// Archive origin identity is container-scoped inside a lineage-specific archive.
-	archive, err := recordsync.OpenArchive(t.TempDir(), p.Lineage)
+	application, err := app.OpenReadOnly(context.Background(), p.Root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer application.Close()
+	archive := recordsync.Archive{DB: application.DB, ProjectID: application.ProjectID, Lineage: p.Lineage}
 	var absent foldersync.Result
 	if err := archive.Status("folder:"+good.StoreID, &absent); !os.IsNotExist(err) {
 		t.Fatal("invented endpoint receipt")

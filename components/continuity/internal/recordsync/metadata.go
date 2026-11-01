@@ -12,14 +12,6 @@ import (
 	"path/filepath"
 )
 
-// ChangeStamp detects changes to the local archive, including provenance and
-// out-of-band edits, without opening or decoding record contents. It is a local
-// optimization guard, never an assertion about endpoint delivery or semantics.
-// Platforms without inode/change-time metadata decline this optimization.
-func (a Archive) ChangeStamp(ctx context.Context) (string, error) {
-	return DirectoryChangeStamp(ctx, a.Directory)
-}
-
 // DirectoryChangeStamp also supports endpoint guards. It establishes only
 // local filesystem stability, never provider delivery or peer receipt.
 func DirectoryChangeStamp(ctx context.Context, directory string) (string, error) {

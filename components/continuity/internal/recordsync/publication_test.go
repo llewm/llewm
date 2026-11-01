@@ -15,7 +15,7 @@ import (
 
 func TestPublicationMembershipAndRecovery(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "publication")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_publication BEFORE INSERT ON history_index_publications BEGIN SELECT RAISE(ABORT,'injected failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false, nil); err == nil || planned != nil || inventory != nil {
+	if planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false); err == nil || planned != nil || inventory != nil {
 		t.Fatalf("publication failure exposed a partial snapshot: %+v %+v %v", planned, inventory, err)
 	}
 	var staged int
@@ -55,7 +55,7 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 	if err != nil || len(initial) != 1 || len(initial[0].Objects) != 1 || initial[0].Objects[0].Envelope.RecordID != "local" {
 		t.Fatalf("initial plan: %+v %v", initial, err)
 	}
-	planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false, nil)
+	planned, inventory, err := index.PlanPublicationWithInventory(ctx, archive, endpoint, false)
 	if err != nil || len(planned) != 1 || planned[0].Hash != initial[0].Hash || len(inventory) != 2 || inventory[0].Hash != initial[0].Hash || len(inventory[1].Objects) != 1 || inventory[1].Objects[0].Envelope.RecordID != "foreign" {
 		t.Fatalf("restricted plan and complete local inventory: %+v %+v %v", planned, inventory, err)
 	}
@@ -161,7 +161,7 @@ func TestPublicationMembershipAndRecovery(t *testing.T) {
 
 func TestConcurrentPublicationPlansDoNotDuplicateMembership(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "publication-concurrent")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestConcurrentPublicationPlansDoNotDuplicateMembership(t *testing.T) {
 
 func TestPublicationScansWithoutWriterLockAndRejectsStaleSnapshot(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "publication-scan-contention")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestPublicationScansWithoutWriterLockAndRejectsStaleSnapshot(t *testing.T) 
 
 func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "publication-corrupt")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,11 +272,19 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE history_index_envelopes SET envelope_json='{}' WHERE project_id=?`, project); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(object.Envelope))); err != nil {
+	if _, err := db.Exec(`DROP TRIGGER history_archive_envelope_immutable_update`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.PlanPublication(ctx, archive, "folder:destination", false); !errors.Is(err, ErrIndexRebuild) {
-		t.Fatalf("corrupt inventory was not rejected: %v", err)
+	if _, err := db.Exec(`UPDATE history_archive_envelopes SET envelope_json=cast('damaged' as blob) WHERE project_id=? AND envelope_hash=?`, project, object.Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:destination", false); !errors.Is(err, errArchiveIntegrity) {
+		t.Fatalf("corrupt durable archive was not rejected: %v", err)
+	}
+	// Explicit fixture repair restores authoritative bytes; a disposable index
+	// is never allowed to overwrite the damaged durable observation.
+	if _, err := db.Exec(`UPDATE history_archive_envelopes SET envelope_json=? WHERE project_id=? AND envelope_hash=?`, object.Bytes, project, object.Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
 	}
 	if err := index.Clear(ctx); err != nil {
 		t.Fatal(err)
@@ -291,7 +299,7 @@ func TestPublicationRejectsCorruptInventory(t *testing.T) {
 
 func TestPublicationRepairIgnoresCorruptOtherEndpoint(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "repair-destination")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +346,7 @@ func TestPublicationRepairIgnoresCorruptOtherEndpoint(t *testing.T) {
 
 func TestStaleOtherEndpointDoesNotBlockPublication(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "stale-endpoint")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +370,7 @@ func TestStaleOtherEndpointDoesNotBlockPublication(t *testing.T) {
 	}
 	// A different destination containing different authorized records can
 	// progress, while the stale endpoint remains explicitly recoverable.
-	otherArchive, err := OpenArchive(t.TempDir(), lineage)
+	otherArchive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +394,7 @@ func TestStaleOtherEndpointDoesNotBlockPublication(t *testing.T) {
 
 func TestPublicationRepairsDamagedStagedBlockFromArchive(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "archive-repair")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,10 +432,13 @@ func TestPublicationRepairsDamagedStagedBlockFromArchive(t *testing.T) {
 		t.Fatalf("repair lost endpoint membership: %d %v", memberships, err)
 	}
 	damage()
-	if err := os.Remove(filepath.Join(archive.Directory, portable.MemoryRecordPath(first.Envelope))); err != nil {
+	if _, err := db.Exec(`DROP TRIGGER history_archive_envelope_immutable_update`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); !errors.Is(err, ErrIndexRebuild) {
+	if _, err := db.Exec(`UPDATE history_archive_envelopes SET envelope_json=cast('damaged' as blob) WHERE project_id=? AND envelope_hash=?`, project, first.Envelope.EnvelopeSHA256); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.PlanPublication(ctx, archive, "folder:a", false); !errors.Is(err, errArchiveIntegrity) {
 		t.Fatalf("missing archive object was accepted: %v", err)
 	}
 	var damaged string
@@ -438,7 +449,7 @@ func TestPublicationRepairsDamagedStagedBlockFromArchive(t *testing.T) {
 
 func TestArchiveRepairDoesNotAuthorizeRelay(t *testing.T) {
 	ctx, db, project := indexedTestProject(t, "archive-repair-authorization")
-	archive, err := OpenArchive(t.TempDir(), lineage)
+	archive, err := openTestArchive(t, db, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +483,7 @@ func BenchmarkPublicationDiscovery(b *testing.B) {
 	for _, size := range []int{500, 5669} {
 		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
 			ctx, db, project := indexedTestProject(b, "publication-benchmark")
-			archive, err := OpenArchive(b.TempDir(), lineage)
+			archive, err := openTestArchive(b, db, project)
 			if err != nil {
 				b.Fatal(err)
 			}

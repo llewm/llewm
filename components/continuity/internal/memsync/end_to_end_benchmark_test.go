@@ -33,7 +33,7 @@ func BenchmarkHistorySyncEndToEnd(b *testing.B) {
 				}
 				b.Run(fmt.Sprintf("records_%d/%s", size, name), func(b *testing.B) {
 					m := newMachine(b, "benchmark", bareRemote(b))
-					archive, err := recordsync.OpenArchive(filepath.Join(b.TempDir(), "archive"), testLineage)
+					archive, err := recordsync.OpenArchive(context.Background(), m.db, m.project, testLineage, filepath.Join(b.TempDir(), "unused-legacy"))
 					if err != nil {
 						b.Fatal(err)
 					}
@@ -203,7 +203,7 @@ func BenchmarkHistorySyncForeignResidual(b *testing.B) {
 	for _, size := range []int{500, 5669} {
 		b.Run(fmt.Sprintf("records_%d", size), func(b *testing.B) {
 			m := newMachine(b, "foreign-benchmark", bareRemote(b))
-			archive, err := recordsync.OpenArchive(filepath.Join(b.TempDir(), "archive"), testLineage)
+			archive, err := recordsync.OpenArchive(context.Background(), m.db, m.project, testLineage, filepath.Join(b.TempDir(), "unused-legacy"))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -267,7 +267,7 @@ func BenchmarkHistorySyncUnchangedGate(b *testing.B) {
 			b.Cleanup(func() { buildinfo.Commit = original })
 			buildinfo.Commit = "fixture-warm"
 			m := newMachine(b, "gate-benchmark", bareRemote(b))
-			archive, err := recordsync.OpenArchive(filepath.Join(b.TempDir(), "archive"), testLineage)
+			archive, err := recordsync.OpenArchive(context.Background(), m.db, m.project, testLineage, filepath.Join(b.TempDir(), "unused-legacy"))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -308,7 +308,7 @@ func BenchmarkFolderSyncUnchangedGate(b *testing.B) {
 	for _, cached := range []bool{false, true} {
 		b.Run(fmt.Sprintf("proof_%t", cached), func(b *testing.B) {
 			m := newMachine(b, "folder-gate-benchmark", bareRemote(b))
-			archive, err := recordsync.OpenArchive(filepath.Join(b.TempDir(), "archive"), testLineage)
+			archive, err := recordsync.OpenArchive(context.Background(), m.db, m.project, testLineage, filepath.Join(b.TempDir(), "unused-legacy"))
 			if err != nil {
 				b.Fatal(err)
 			}

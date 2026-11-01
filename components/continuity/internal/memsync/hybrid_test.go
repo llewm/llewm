@@ -41,7 +41,7 @@ func localHistoryMachine(t *testing.T, name string) machine {
 }
 func archiveMachine(t *testing.T, m *machine) recordsync.Archive {
 	t.Helper()
-	archive, err := recordsync.OpenArchive(filepath.Join(t.TempDir(), "archive"), testLineage)
+	archive, err := recordsync.OpenArchive(context.Background(), m.db, m.project, testLineage, filepath.Join(t.TempDir(), "unused-legacy"))
 	if err != nil {
 		t.Fatal(err)
 	}

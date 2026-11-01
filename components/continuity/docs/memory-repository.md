@@ -98,7 +98,7 @@ can read every lineage stored there; lineage directories do not enforce access.
 
 ### Durable archive protocol
 
-Schema 091 defines a project-scoped SQLite archive of exact envelope bytes and
+Schema 091 and writer API 137 define a project-scoped SQLite archive of exact envelope bytes and
 append-only origin observations, separate from disposable block indexes. Envelope
 hashes preserve competing versions of one logical record. A first-origin foreign
 key requires body and provenance to commit together. Insertion also appends the
@@ -107,14 +107,25 @@ checksummed, project/lineage/policy-bound receipts; uncertainty requires complet
 validation rather than an inferred delta. Raw endpoint strings are not persisted
 as provenance: origin and consumer identities are hashes.
 
-SQL migration creates no active archive. Explicit storage migration must stage
+SQL migration creates no active archive. New identity insertion creates an
+inactive empty-archive marker in the same transaction; existing identities are
+not backfilled. Only that fresh-identity proof and an absent legacy route allow
+normal opening to initialize empty storage. A legacy identity or an interrupted
+migration cannot silently become an empty replacement. Disposable endpoint status
+is also stored in SQLite, separately from durable observations and import proofs.
+
+Explicit storage migration must stage
 verified observations and compare their complete content/provenance inventory
 before activation. Full audit validates bodies, hashes, origins, journal coverage
 and counts without consulting disposable indexes. Ordinary access verifies the
 selected bytes; changed journal epochs invalidate old consumer receipts. Archive
-rows cannot be silently replaced as cache repair. Activation of this protocol and
-replacement of the loose-file archive require the supported, backup-gated storage
-migration; creating the schema alone does not switch the runtime storage path.
+rows cannot be silently replaced as cache repair. Existing loose-file archives
+require the supported, backup-gated storage migration. Normal opening then checks
+bounded exact fence bytes, and capture binds its canonical cursor to the archive
+epoch. Capture writes and acknowledgement share a reserved writer transaction.
+Counter changes unrelated to the exact appended journal event invalidate that
+epoch, so damaged tracking cannot reuse canonical capture proofs. Old CLI writers
+own a different storage path; drain them before the writer137 cutover.
 
 The legacy migration reader opens an existing archive without creating it. It
 requires the exact lineage marker, canonical file framing, and at least one
