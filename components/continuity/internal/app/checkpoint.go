@@ -5,6 +5,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/config"
 
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -29,35 +30,64 @@ func (a *App) Fence(scopeKind, scopeID string, claim lease.Claim) lease.Fence {
 // claim does not hold.
 func (a *App) AppendPlan(ctx context.Context, value trackplan.Plan) (trackplan.Plan, error) {
 	value.Fence = a.Fence("track_plan", value.ID, value.Fence.Claim)
-	created, err := a.TrackPlans.AppendPlan(ctx, value)
-	if err != nil || created.TaskID == "" || created.RoadmapNodeID == "" {
-		return created, err
+	tx, err := a.TrackPlans.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return trackplan.Plan{}, err
 	}
-	if created.Status == "proposed" {
-		operative, err := a.TrackPlans.EffectivePlan(ctx, a.ProjectID, created.ID)
-		if err != nil {
-			return created, err
-		}
-		if operative != nil && operative.Status != "proposed" {
-			return created, nil
-		}
+	defer tx.Rollback()
+	created, err := a.TrackPlans.AppendPlanTx(ctx, tx, value)
+	if err != nil {
+		return trackplan.Plan{}, err
 	}
-	// A plan naming its task and node binds them, so the track shows the
-	// task without a separate step. Best-effort: the plan stands either way,
-	// and work check reports a task left unbound.
-	_, _ = a.Roadmap.EnsureTaskBinding(ctx, a.ProjectID, created.RoadmapNodeID, created.TaskID,
-		"bound by plan:"+created.ID, fmt.Sprintf("plan-%s-%d-binds-%s", created.ID, created.Revision, created.TaskID))
+	if err := a.bindPlanTx(ctx, tx, created); err != nil {
+		return trackplan.Plan{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return trackplan.Plan{}, err
+	}
 	return created, nil
 }
 
-// AcceptPlan records a human review of a plan's latest revision under the
+func (a *App) bindPlanTx(ctx context.Context, tx *sql.Tx, created trackplan.Plan) error {
+	if created.TaskID == "" || created.RoadmapNodeID == "" || created.Status == "superseded" {
+		return nil
+	}
+	if created.Status == "proposed" {
+		operative, err := a.TrackPlans.EffectivePlanTx(ctx, tx, created.ProjectID, created.ID)
+		if err != nil {
+			return err
+		}
+		if operative != nil && operative.Status != "proposed" {
+			return nil
+		}
+	}
+	_, err := a.Roadmap.EnsureTaskBindingTx(ctx, tx, created.ProjectID, created.RoadmapNodeID, created.TaskID,
+		"bound by plan:"+created.ID, fmt.Sprintf("plan-%s-%d-binds-%s", created.ID, created.Revision, created.TaskID))
+	if err != nil {
+		return fmt.Errorf("bind task %q from plan %q: %w", created.TaskID, created.ID, err)
+	}
+	return nil
+}
+
+// AcceptPlan records a human review and its task binding atomically under the
 // writer's lease claim.
 func (a *App) AcceptPlan(ctx context.Context, id, status, reviewer string, claim lease.Claim) (trackplan.Plan, error) {
-	created, err := a.TrackPlans.Accept(ctx, a.ProjectID, id, status, reviewer, a.Fence("track_plan", id, claim))
-	if err == nil && created.TaskID != "" && created.RoadmapNodeID != "" {
-		_, _ = a.Roadmap.EnsureTaskBinding(ctx, a.ProjectID, created.RoadmapNodeID, created.TaskID, "bound by plan:"+created.ID, fmt.Sprintf("plan-%s-%d-binds-%s", created.ID, created.Revision, created.TaskID))
+	tx, err := a.TrackPlans.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return trackplan.Plan{}, err
 	}
-	return created, err
+	defer tx.Rollback()
+	created, err := a.TrackPlans.AcceptTx(ctx, tx, a.ProjectID, id, status, reviewer, a.Fence("track_plan", id, claim))
+	if err != nil {
+		return trackplan.Plan{}, err
+	}
+	if err := a.bindPlanTx(ctx, tx, created); err != nil {
+		return trackplan.Plan{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return trackplan.Plan{}, err
+	}
+	return created, nil
 }
 
 // UnnarratedCommits is the best-effort narrative coverage check reported after
@@ -189,7 +219,7 @@ func (a *App) saveCheckpointWithReconciliation(ctx context.Context, candidate ch
 			readiness.MaxBytes, readiness.JSONBytes, readiness.MarkdownBytes, readiness.OversizeByBytes,
 		)
 	}
-	created, err := a.Checkpoints.CreateWithReconciliation(ctx, candidate, reconciliation)
+	created, err := a.createBoundCheckpoint(ctx, candidate, reconciliation)
 	if err == nil && coordinateSession && candidate.SessionID != "" && (candidate.Fence.Claim.Token == 0 || candidate.RestartResume != nil) {
 		releaseReason := ""
 		if candidate.Status == "completed" {
@@ -211,6 +241,27 @@ func (a *App) saveCheckpointWithReconciliation(ctx context.Context, candidate ch
 		_ = a.ObserveTaskPresence(ctx, client, candidate.SessionID, candidate.TaskID, presenceStatus, time.Now().UTC())
 	}
 	return created, err
+}
+
+// createBoundCheckpoint commits the checkpoint, actions and pending explicit
+// plan bindings together. A binding failure leaves all of them unchanged.
+func (a *App) createBoundCheckpoint(ctx context.Context, candidate checkpoint.Checkpoint, reconciliation checkpoint.ActionReconciliation) (checkpoint.CreateResult, error) {
+	tx, err := a.Checkpoints.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return checkpoint.CreateResult{}, err
+	}
+	defer tx.Rollback()
+	created, err := checkpoint.CreateWithReconciliationTx(ctx, tx, candidate, reconciliation)
+	if err != nil {
+		return checkpoint.CreateResult{}, err
+	}
+	if err := a.Roadmap.BindPlannedTaskTx(ctx, tx, created.Checkpoint.ProjectID, created.Checkpoint.TaskID); err != nil {
+		return checkpoint.CreateResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return checkpoint.CreateResult{}, err
+	}
+	return created, nil
 }
 
 // SessionLeaseTTL is how long an automatic session lease lasts after a

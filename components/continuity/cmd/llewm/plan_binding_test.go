@@ -27,3 +27,20 @@ func TestRecordingAPlanBindsItsTaskToItsNode(t *testing.T) {
 		t.Fatalf("after the plan:\n%s", got)
 	}
 }
+
+func TestPlanBeforeCheckpointBindsTaskOnFirstSave(t *testing.T) {
+	root := testProject(t)
+	runCLI(t, "", "init")
+	runCLI(t, "", "roadmap", "node", "--id", "work-node", "--title", "Work", "--status", "active", "--source-path", "AGENTS.md")
+	plan := `{"id":"work-plan","roadmap_node_id":"work-node","task_id":"work-task","title":"Work","summary":"Work","status":"proposed","creator":"human","items":[{"id":"one","position":1,"title":"One","status":"pending"}]}`
+	path := filepath.Join(root, "plan.json")
+	if err := os.WriteFile(path, []byte(plan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "", "track-plan", "record", "--file", path)
+	runCLI(t, "", "checkpoint", "create", "--task", "Work", "--task-id", "work-task", "--next", "Continue")
+	got := runCLI(t, "", "work", "inventory", "--node", "work-node")
+	if !strings.Contains(got, `"binding_state": "explicit"`) || !strings.Contains(got, `"selected_task_id": "work-task"`) {
+		t.Fatalf("plan-first task left unbound:\n%s", got)
+	}
+}

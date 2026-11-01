@@ -1941,6 +1941,7 @@ func TestTrackPlanHistoryAddsBoundedMetadataTextWithoutChangingJSON(t *testing.T
 func TestTrackPlanReadyTextPreservesJSONAndLabelsBounds(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
+	runCLI(t, "", "roadmap", "node", "--id", "node-a", "--title", "Ready work", "--status", "active", "--source-path", "AGENTS.md")
 	path := filepath.Join(root, "ready-plan.json")
 	body := `{"id":"ready-plan","roadmap_node_id":"node-a","task_id":"task-a","title":"Ready plan","summary":"Work","status":"accepted","creator":"human","items":[{"id":"first","position":0,"title":"First","detail":"Go","status":"pending"},{"id":"blocked","position":1,"title":"Blocked","detail":"Wait","status":"pending","depends_on":["first"]}]}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

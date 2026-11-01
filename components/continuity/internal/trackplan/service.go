@@ -384,13 +384,30 @@ func validateItems(items []Item) error {
 // be completed or superseded already. Model identity is cleared because the new
 // revision is the reviewer's assertion.
 func (service Service) Accept(ctx context.Context, projectID, id, status, reviewer string, fence lease.Fence) (Plan, error) {
+	tx, err := service.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Plan{}, err
+	}
+	defer tx.Rollback()
+	result, err := service.AcceptTx(ctx, tx, projectID, id, status, reviewer, fence)
+	if err != nil {
+		return Plan{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Plan{}, err
+	}
+	return result, nil
+}
+
+// AcceptTx appends the reviewed revision in a caller-owned transaction.
+func (service Service) AcceptTx(ctx context.Context, tx *sql.Tx, projectID, id, status, reviewer string, fence lease.Fence) (Plan, error) {
 	if !oneOf(status, "accepted", "active", "completed") {
 		return Plan{}, fmt.Errorf("accepted status must be accepted, active, or completed, not %q", status)
 	}
 	if strings.TrimSpace(reviewer) == "" {
 		return Plan{}, fmt.Errorf("reviewer is required")
 	}
-	latest, err := service.Plan(ctx, projectID, id, 0)
+	latest, err := getPlan(ctx, tx, projectID, id, 0)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -411,7 +428,7 @@ func (service Service) Accept(ctx context.Context, projectID, id, status, review
 	next.Revision, next.Status, next.Creator, next.Model, next.Authority = 0, status, reviewer, "", ""
 	next.BaseRevision = latest.Revision
 	next.RecordedAt, next.Fence, next.Lease = time.Time{}, fence, nil
-	return service.AppendPlan(ctx, next)
+	return service.AppendPlanTx(ctx, tx, next)
 }
 
 func (service Service) Plan(ctx context.Context, projectID, id string, revision int) (*Plan, error) {
@@ -421,11 +438,20 @@ func (service Service) Plan(ctx context.Context, projectID, id string, revision 
 // EffectivePlan keeps a proposal from displacing the last operative baseline.
 // A superseded baseline stays superseded; it never revives older work.
 func (service Service) EffectivePlan(ctx context.Context, projectID, id string) (*Plan, error) {
+	return effectivePlan(ctx, service.DB, projectID, id)
+}
+
+// EffectivePlanTx reads the operative revision within a caller-owned transaction.
+func (service Service) EffectivePlanTx(ctx context.Context, tx *sql.Tx, projectID, id string) (*Plan, error) {
+	return effectivePlan(ctx, tx, projectID, id)
+}
+
+func effectivePlan(ctx context.Context, db planQueryer, projectID, id string) (*Plan, error) {
 	var revision int
-	if err := service.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(CASE WHEN status!='proposed' THEN revision END),MAX(revision),0) FROM track_plan_revisions WHERE project_id=? AND id=?`, projectID, id).Scan(&revision); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(CASE WHEN status!='proposed' THEN revision END),MAX(revision),0) FROM track_plan_revisions WHERE project_id=? AND id=?`, projectID, id).Scan(&revision); err != nil {
 		return nil, err
 	}
-	return service.Plan(ctx, projectID, id, revision)
+	return getPlan(ctx, db, projectID, id, revision)
 }
 
 func getPlan(ctx context.Context, db planQueryer, projectID, id string, revision int) (*Plan, error) {

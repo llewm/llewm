@@ -27,6 +27,23 @@ const (
 // for the same node/task pair supersedes only that pair; it never silently
 // resolves another active pair for the node.
 func (service Service) AppendTaskBinding(ctx context.Context, value TaskBinding) (TaskBinding, error) {
+	tx, err := service.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return TaskBinding{}, err
+	}
+	defer tx.Rollback()
+	value, err = service.AppendTaskBindingTx(ctx, tx, value)
+	if err != nil {
+		return TaskBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return TaskBinding{}, err
+	}
+	return value, nil
+}
+
+// AppendTaskBindingTx validates and appends a binding in the caller's transaction.
+func (service Service) AppendTaskBindingTx(ctx context.Context, tx *sql.Tx, value TaskBinding) (TaskBinding, error) {
 	var err error
 	for name, field := range map[string]*string{
 		"project ID": &value.ProjectID, "roadmap node ID": &value.RoadmapNodeID,
@@ -41,18 +58,18 @@ func (service Service) AppendTaskBinding(ctx context.Context, value TaskBinding)
 		return TaskBinding{}, fmt.Errorf("task binding status must be active or superseded")
 	}
 	if value.RoadmapNodeRevision == 0 {
-		if err := service.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM roadmap_nodes WHERE project_id=? AND node_id=?`, value.ProjectID, value.RoadmapNodeID).Scan(&value.RoadmapNodeRevision); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM roadmap_nodes WHERE project_id=? AND node_id=?`, value.ProjectID, value.RoadmapNodeID).Scan(&value.RoadmapNodeRevision); err != nil {
 			return TaskBinding{}, err
 		}
 	}
 	var nodeCount, taskCount int
-	if err := service.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM roadmap_nodes WHERE project_id=? AND node_id=? AND revision=?`, value.ProjectID, value.RoadmapNodeID, value.RoadmapNodeRevision).Scan(&nodeCount); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM roadmap_nodes WHERE project_id=? AND node_id=? AND revision=?`, value.ProjectID, value.RoadmapNodeID, value.RoadmapNodeRevision).Scan(&nodeCount); err != nil {
 		return TaskBinding{}, err
 	}
 	if nodeCount == 0 {
 		return TaskBinding{}, fmt.Errorf("roadmap node %q revision %d is not recorded", value.RoadmapNodeID, value.RoadmapNodeRevision)
 	}
-	if err := service.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
 		SELECT task_id FROM checkpoints WHERE project_id=? AND task_id=?
 		UNION SELECT task_id FROM task_lineage_events WHERE project_id=? AND task_id=?
 		UNION SELECT target_task_id FROM task_lineage_events WHERE project_id=? AND target_task_id=?
@@ -64,7 +81,7 @@ func (service Service) AppendTaskBinding(ctx context.Context, value TaskBinding)
 	}
 	requestedRevision := value.Revision
 	if value.Revision == 0 {
-		if err := service.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0)+1 FROM roadmap_task_bindings WHERE project_id=? AND roadmap_node_id=? AND task_id=?`, value.ProjectID, value.RoadmapNodeID, value.TaskID).Scan(&value.Revision); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0)+1 FROM roadmap_task_bindings WHERE project_id=? AND roadmap_node_id=? AND task_id=?`, value.ProjectID, value.RoadmapNodeID, value.TaskID).Scan(&value.Revision); err != nil {
 			return TaskBinding{}, err
 		}
 	}
@@ -77,7 +94,7 @@ func (service Service) AppendTaskBinding(ctx context.Context, value TaskBinding)
 	}
 	var existing TaskBinding
 	var existingHash, recorded string
-	err = service.DB.QueryRowContext(ctx, `SELECT roadmap_node_id,task_id,revision,roadmap_node_revision,status,reason,request_key,request_sha256,authority,recorded_at,schema_version FROM roadmap_task_bindings WHERE project_id=? AND request_key=?`, value.ProjectID, value.RequestKey).Scan(
+	err = tx.QueryRowContext(ctx, `SELECT roadmap_node_id,task_id,revision,roadmap_node_revision,status,reason,request_key,request_sha256,authority,recorded_at,schema_version FROM roadmap_task_bindings WHERE project_id=? AND request_key=?`, value.ProjectID, value.RequestKey).Scan(
 		&existing.RoadmapNodeID, &existing.TaskID, &existing.Revision, &existing.RoadmapNodeRevision, &existing.Status, &existing.Reason, &existing.RequestKey, &existingHash, &existing.Authority, &recorded, &existing.SchemaVersion)
 	if err == nil {
 		comparison := value
@@ -99,7 +116,7 @@ func (service Service) AppendTaskBinding(ctx context.Context, value TaskBinding)
 		return TaskBinding{}, err
 	}
 	value.Authority, value.RecordedAt, value.SchemaVersion = "caller_asserted", service.now(), SchemaVersion
-	_, err = service.DB.ExecContext(ctx, `INSERT INTO roadmap_task_bindings(project_id,roadmap_node_id,task_id,revision,roadmap_node_revision,status,reason,request_key,request_sha256,authority,recorded_at,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err = tx.ExecContext(ctx, `INSERT INTO roadmap_task_bindings(project_id,roadmap_node_id,task_id,revision,roadmap_node_revision,status,reason,request_key,request_sha256,authority,recorded_at,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 		value.ProjectID, value.RoadmapNodeID, value.TaskID, value.Revision, value.RoadmapNodeRevision, value.Status, value.Reason, value.RequestKey, requestHash, value.Authority, value.RecordedAt.Format(time.RFC3339Nano), value.SchemaVersion)
 	return value, err
 }
@@ -341,29 +358,92 @@ func inventoryHasTask(item TrackInventoryItem, taskID string) bool {
 	return false
 }
 
-// EnsureTaskBinding binds a task to a roadmap node unless an active binding
-// already does, and reports whether it appended one. A task with no recorded
-// checkpoint or lifecycle event yet is left unbound.
+// EnsureTaskBinding binds a recorded task unless an active binding already does.
+// A declaration for an unrecorded task can be completed after its first checkpoint.
 func (service Service) EnsureTaskBinding(ctx context.Context, projectID, nodeID, taskID, reason, requestKey string) (bool, error) {
-	current, err := service.currentTaskBindings(ctx, projectID)
+	tx, err := service.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	for _, binding := range current[nodeID] {
-		if binding.TaskID == taskID {
-			return false, nil
-		}
-	}
-	var recorded int
-	if err := service.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
-		SELECT task_id FROM checkpoints WHERE project_id=? AND task_id=?
-		UNION SELECT task_id FROM task_lineage_events WHERE project_id=? AND task_id=?)`, projectID, taskID, projectID, taskID).Scan(&recorded); err != nil || recorded == 0 {
+	defer tx.Rollback()
+	bound, err := service.EnsureTaskBindingTx(ctx, tx, projectID, nodeID, taskID, reason, requestKey)
+	if err != nil {
 		return false, err
 	}
-	if _, err := service.AppendTaskBinding(ctx, TaskBinding{ProjectID: projectID, RoadmapNodeID: nodeID, TaskID: taskID, Status: "active", Reason: reason, RequestKey: requestKey}); err != nil {
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return bound, nil
+}
+
+// EnsureTaskBindingTx couples a plan or checkpoint write to its explicit binding.
+// The caller owns commit or rollback. Unknown nodes are errors even when the task
+// does not exist yet; an unrecorded task alone defers binding to its checkpoint.
+func (service Service) EnsureTaskBindingTx(ctx context.Context, tx *sql.Tx, projectID, nodeID, taskID, reason, requestKey string) (bool, error) {
+	var status string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM roadmap_task_bindings WHERE project_id=? AND roadmap_node_id=? AND task_id=? ORDER BY revision DESC LIMIT 1`, projectID, nodeID, taskID).Scan(&status)
+	if err == nil && status == "active" {
+		return false, nil
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return false, err
+	}
+	var nodeRevision int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM roadmap_nodes WHERE project_id=? AND node_id=?`, projectID, nodeID).Scan(&nodeRevision); err != nil {
+		return false, err
+	}
+	if nodeRevision == 0 {
+		return false, fmt.Errorf("roadmap node %q is not recorded", nodeID)
+	}
+	var recorded int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
+		SELECT task_id FROM checkpoints WHERE project_id=? AND task_id=?
+		UNION SELECT task_id FROM task_lineage_events WHERE project_id=? AND task_id=?
+		UNION SELECT target_task_id FROM task_lineage_events WHERE project_id=? AND target_task_id=?)`, projectID, taskID, projectID, taskID, projectID, taskID).Scan(&recorded); err != nil || recorded == 0 {
+		return false, err
+	}
+	if _, err := service.AppendTaskBindingTx(ctx, tx, TaskBinding{ProjectID: projectID, RoadmapNodeID: nodeID, RoadmapNodeRevision: nodeRevision, TaskID: taskID, Status: "active", Reason: reason, RequestKey: requestKey}); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// BindPlannedTaskTx completes pending explicit plan declarations when a task
+// receives a checkpoint. Only each plan's operative revision is considered.
+// Existing binding assertions (including superseded ones) are never rewritten.
+func (service Service) BindPlannedTaskTx(ctx context.Context, tx *sql.Tx, projectID, taskID string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT p.id,p.revision,p.roadmap_node_id FROM track_plan_revisions p
+		WHERE p.project_id=? AND p.task_id=? AND p.status!='superseded'
+		AND p.revision=(SELECT COALESCE(MAX(CASE WHEN status!='proposed' THEN revision END),MAX(revision)) FROM track_plan_revisions WHERE project_id=p.project_id AND id=p.id)
+		AND NOT EXISTS (SELECT 1 FROM roadmap_task_bindings b WHERE b.project_id=p.project_id AND b.roadmap_node_id=p.roadmap_node_id AND b.task_id=p.task_id)
+		ORDER BY p.id`, projectID, taskID)
+	if err != nil {
+		return err
+	}
+	type declaration struct {
+		id, node string
+		revision int
+	}
+	var declarations []declaration
+	for rows.Next() {
+		var value declaration
+		if err := rows.Scan(&value.id, &value.revision, &value.node); err != nil {
+			rows.Close()
+			return err
+		}
+		declarations = append(declarations, value)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, value := range declarations {
+		if _, err := service.EnsureTaskBindingTx(ctx, tx, projectID, value.node, taskID, "bound by plan:"+value.id, fmt.Sprintf("plan-%s-%d-binds-%s", value.id, value.revision, taskID)); err != nil {
+			return fmt.Errorf("bind task %q from plan %q: %w", taskID, value.id, err)
+		}
+	}
+	return nil
 }
 
 func (service Service) currentTaskBindings(ctx context.Context, projectID string) (map[string][]TaskBinding, error) {

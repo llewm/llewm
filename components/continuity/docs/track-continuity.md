@@ -34,7 +34,17 @@ Completion requires all items to be completed or superseded.
 
 `llewm track-plan show` reads outlines, one item, full detail, history or
 dependency-satisfied ready items. These reads neither select work nor execute it.
-A plan naming an existing task and node can establish their explicit binding.
+A plan naming a task and a recorded node establishes their explicit binding when
+both records exist. If the plan comes first, its task declaration remains pending;
+saving the task's checkpoint completes the binding. Plan saves and reviews commit
+their bindings atomically; checkpoint saves commit pending bindings with the
+checkpoint and its actions. A binding error fails the whole operation instead of
+silently leaving an unbound task.
+
+Only operative plan revisions supply pending bindings: a replacement proposal
+cannot displace a reviewed baseline, and superseded plans supply none. Checkpoint
+saves preserve existing binding assertions, including explicitly superseded links.
+Bindings do not accept plans, start managed tasks or authorize execution.
 Joined views report missing, unreviewed and inconsistent plan/binding state.
 
 ## Optional current-plan view
