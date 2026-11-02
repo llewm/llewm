@@ -990,6 +990,17 @@ maintained counts; bodies absent from the observation are decoded independently.
 input, and `archive_audit_decodes/op` counts independent audit decodes. Neither
 reuse survives the call or trusts exported parsed envelope fields.
 
+Archive replay compares existing rows in batches of 32 before preparing any
+per-record writes. The entire input must match exact bytes, identity, initial
+provenance and the requested origin before this read-only shortcut succeeds.
+Any mismatch, duplicate input, uncertainty, unreviewed view or TEMP shadow uses
+the original sequential path from its beginning. In particular, a batch needing
+even one write cannot use prefetched matches for its other records; unknown
+triggers must retain their effects on later comparisons. This is not an archive
+audit or a persistent receipt. `archive_match_queries/op` and
+`archive_match_records/op` count attempted comparisons;
+`archive_match_shortcuts/op` counts completely matching inputs.
+
 Index insertion compares stored envelope bodies, identities, membership and
 reference sets in batches of 32 within the caller's transaction. Completely
 matching blocks need no writes. When only memberships are missing, inserts can

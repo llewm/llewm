@@ -137,6 +137,11 @@ func (s archiveStore) putValidatedWithin(ctx context.Context, tx *sql.Tx, status
 	if _, err := s.stampWithin(ctx, tx, status); err != nil {
 		return 0, err
 	}
+	if s.archiveObjectsMatchWithin(ctx, tx, originHash, verified) {
+		syncwork.RecordWork(ctx, "archive_match_shortcuts", 1)
+		syncwork.RecordWork(ctx, "archive_verified_bytes_reused", int64(len(verified)))
+		return 0, nil
+	}
 	added, total := 0, 0
 	for _, object := range verified {
 		if err := ctx.Err(); err != nil {
