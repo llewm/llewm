@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"runtime"
 	"sort"
+	"sync"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
@@ -115,18 +117,63 @@ func DecodeBlock(lineage, expectedHash string, body []byte) (Block, error) {
 		return Block{}, fmt.Errorf("invalid block record count")
 	}
 	result := Block{Hash: hash, Bytes: append([]byte(nil), body...)}
-	for i, line := range lines {
-		if i > 0 && bytes.Compare(lines[i-1], line) >= 0 {
-			return Block{}, fmt.Errorf("block envelopes are not strictly ordered")
-		}
-		object, err := portable.DecodeTransportEnvelope(line)
-		if err != nil {
-			return Block{}, fmt.Errorf("invalid block envelope: %w", err)
-		}
-		if object.Envelope.LineageID != lineage {
-			return Block{}, fmt.Errorf("block lineage mismatch")
-		}
-		result.Objects = append(result.Objects, object)
+	var err error
+	result.Objects, err = decodeBlockEnvelopes(lineage, lines, min(4, runtime.GOMAXPROCS(0)))
+	if err != nil {
+		return Block{}, err
 	}
 	return result, nil
+}
+
+// Lines are independent immutable inputs. Keep output and errors in wire order
+// even when validation runs concurrently. Small blocks stay sequential; a block
+// remains bounded by one MiB and 512 records, with no persistent worker or cache.
+func decodeBlockEnvelopes(lineage string, lines [][]byte, workers int) ([]portable.EncodedEnvelope, error) {
+	objects := make([]portable.EncodedEnvelope, len(lines))
+	decode := func(i int) error {
+		if i > 0 && bytes.Compare(lines[i-1], lines[i]) >= 0 {
+			return fmt.Errorf("block envelopes are not strictly ordered")
+		}
+		object, err := portable.DecodeTransportEnvelope(lines[i])
+		if err != nil {
+			return fmt.Errorf("invalid block envelope: %w", err)
+		}
+		if object.Envelope.LineageID != lineage {
+			return fmt.Errorf("block lineage mismatch")
+		}
+		objects[i] = object
+		return nil
+	}
+	workers = min(workers, 4)
+	if len(lines) < 32 || workers < 2 {
+		for i := range lines {
+			if err := decode(i); err != nil {
+				return nil, err
+			}
+		}
+		return objects, nil
+	}
+	jobs := make(chan int, len(lines))
+	for i := range lines {
+		jobs <- i
+	}
+	close(jobs)
+	errors := make([]error, len(lines))
+	var group sync.WaitGroup
+	group.Add(workers)
+	for range workers {
+		go func() {
+			defer group.Done()
+			for i := range jobs {
+				errors[i] = decode(i)
+			}
+		}()
+	}
+	group.Wait()
+	for _, err := range errors {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return objects, nil
 }

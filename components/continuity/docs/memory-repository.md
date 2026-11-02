@@ -971,6 +971,12 @@ loading, archive validation and transport; it persists no measurements.
 `publication_envelopes_reused/op` counts staged publication entries whose exact
 bytes match the permitted, validated archive snapshot. Those entries reuse its
 parsed envelopes while retaining complete block reconstruction and hash checks.
+Transport decoding validates blocks with at least 32 envelopes using up to four
+workers, capped by the available Go scheduler parallelism. Smaller blocks remain
+sequential. Results and the first validation error retain wire order, and every
+worker finishes before decoding returns. This changes neither the validation
+checks nor the distinction between transport validation and semantic validation;
+it creates no persistent workers, cache, or verification proof.
 `publication_envelope_decodes/op` counts identity decode attempts for entries
 outside that exact snapshot, including entries no longer permitted for relay.
 Neither counter implies that publication membership or archive scans are bounded
