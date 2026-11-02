@@ -266,6 +266,20 @@ func LocalEnvelopes(ctx context.Context, db *sql.DB, projectID string) (map[stri
 	if err != nil {
 		return nil, err
 	}
+	return encodeLocalEnvelopes(loaded)
+}
+
+// LocalEnvelopesTx retains the ordinary export reader's actor scope while
+// participating in an atomic semantic import's caller-owned transaction.
+func LocalEnvelopesTx(ctx context.Context, tx *sql.Tx, projectID string) (map[string]EncodedEnvelope, error) {
+	loaded, err := LoadOperationalRecordsTx(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return encodeLocalEnvelopes(loaded)
+}
+
+func encodeLocalEnvelopes(loaded OperationalRecordSet) (map[string]EncodedEnvelope, error) {
 	result := make(map[string]EncodedEnvelope, len(loaded.Records))
 	for _, spec := range loaded.Records {
 		encoded, err := EncodeEnvelope(spec)

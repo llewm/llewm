@@ -145,7 +145,7 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 		t.Fatal(err)
 	}
 	collision := a.sync(t, OutcomeCollision)
-	if collision.Collisions != 2 || collision.Forks != 1 {
+	if collision.Collisions != 2 || collision.Forks != 0 || collision.ImportedRecords != 0 {
 		t.Fatalf("fixture: %#v", collision)
 	}
 	b.sync(t, OutcomeCollision)

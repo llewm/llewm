@@ -64,6 +64,10 @@ func localEnvelopesForImport(ctx context.Context, source queryer, projectID stri
 		return nil, err
 	}
 	rows.Close()
+	cache := atomicSnapshotFor(ctx, source, projectID)
+	if local, ok := cache.load(ctx, roots); ok {
+		return local, nil
+	}
 	selected := &importInvocationSource{queryer: source, project: projectID, roots: roots}
 	for {
 		if len(roots) > MaxRecordCount {
@@ -105,6 +109,7 @@ func localEnvelopesForImport(ctx context.Context, source queryer, projectID stri
 			}
 			result[recordKey(encoded.Envelope)] = encoded
 		}
+		cache.store(ctx, roots, result)
 		return result, nil
 	}
 }

@@ -271,7 +271,7 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 	}
 	if result.Collisions > 0 {
 		result.Outcome = OutcomeCollision
-		result.Detail = fmt.Sprintf("%d records have conflicting versions; other records were imported. %s", result.Collisions, result.Detail)
+		result.Detail = fmt.Sprintf("%d records have conflicting versions; the semantic import batch was rolled back. %s", result.Collisions, result.Detail)
 	}
 	if result.SemanticPending != "" {
 		result.Outcome = OutcomeError

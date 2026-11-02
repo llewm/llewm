@@ -79,36 +79,7 @@ func validateBlockBytes(block Block) error {
 // ImportBlocks uses a prior semantic proof only when its strict replay guards
 // hold. All other sets use the complete reference semantic importer.
 func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, error) {
-	if len(blocks) > portable.MaxRecordCount {
-		return ImportResult{}, fmt.Errorf("history block count exceeds bounds")
-	}
-	seen := make(map[string]bool, len(blocks))
-	total := 0
-	for _, block := range blocks {
-		if err := validateBlockBytes(block); err != nil {
-			return ImportResult{}, err
-		}
-		if seen[block.Hash] {
-			return ImportResult{}, fmt.Errorf("duplicate block")
-		}
-		total += len(block.Bytes) - len(blockHeader)
-		if total > portable.MaxRecordsBytes {
-			return ImportResult{}, fmt.Errorf("history block records exceed bounds")
-		}
-		seen[block.Hash] = true
-	}
-	// Clearing the index here would also discard publication membership for
-	// every endpoint. The transport coordinator must first obtain complete
-	// inventories for those endpoints and rebuild them together.
-	objects, err := s.importBlockObjects(ctx, blocks)
-	if errors.Is(err, ErrIndexRebuild) {
-		for _, block := range blocks {
-			if repairErr := s.RepairBlock(ctx, block); repairErr != nil {
-				return ImportResult{}, repairErr
-			}
-		}
-		objects, err = s.importBlockObjects(ctx, blocks)
-	}
+	objects, err := s.prepareImportBlocks(ctx, blocks)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -184,6 +155,45 @@ func (s Index) ImportBlocks(ctx context.Context, blocks []Block) (ImportResult, 
 		}
 	}
 	return result, err
+}
+
+// prepareImportBlocks validates source bytes and derived inventory before
+// entering the independent atomic semantic transaction.
+func (s Index) prepareImportBlocks(ctx context.Context, blocks []Block) ([]portable.EncodedEnvelope, error) {
+	if len(blocks) > portable.MaxRecordCount {
+		return nil, fmt.Errorf("history block count exceeds bounds")
+	}
+	seen := make(map[string]bool, len(blocks))
+	total := 0
+	for _, block := range blocks {
+		if err := validateBlockBytes(block); err != nil {
+			return nil, err
+		}
+		if seen[block.Hash] {
+			return nil, fmt.Errorf("duplicate block")
+		}
+		total += len(block.Bytes) - len(blockHeader)
+		if total > portable.MaxRecordsBytes {
+			return nil, fmt.Errorf("history block records exceed bounds")
+		}
+		seen[block.Hash] = true
+	}
+	// Clearing the index here would also discard publication membership for
+	// every endpoint. The transport coordinator must first obtain complete
+	// inventories for those endpoints and rebuild them together.
+	objects, err := s.importBlockObjects(ctx, blocks)
+	if errors.Is(err, ErrIndexRebuild) {
+		for _, block := range blocks {
+			if repairErr := s.RepairBlock(ctx, block); repairErr != nil {
+				return nil, repairErr
+			}
+		}
+		objects, err = s.importBlockObjects(ctx, blocks)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return objects, nil
 }
 
 func mixedReplaySet(objects []portable.EncodedEnvelope) (string, bool) {

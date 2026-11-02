@@ -368,6 +368,21 @@ archive position, canonical position, schema and dependency selector generation.
 The baseline is saved only if the verified raw projection and complete archive
 snapshot still match under the writer lock. A concurrent arrival remains pending.
 
+Full reference replay validates incoming bytes before reserving the writer, then
+commits recovery records, fork observations, main canonical records and import
+receipts as one semantic unit. A semantic error, identity collision, cancellation
+or failed commit rolls back every new semantic write from that attempt; reported
+import/fork counts are cleared. Previously committed facts and received transport
+history remain intact. Deferred unknown schemas still remain transport-only.
+The writer stays reserved through semantic validation, so other writers can wait
+longer; readers retain their own WAL snapshots.
+
+Optional journal-baseline seeding uses a savepoint inside this transaction.
+An ineligible baseline discards its provisional derived writes without undoing a
+successful semantic import. A real SQL/commit failure rolls back the semantic
+unit. Seeding verifies canonical, archive and projection positions again after
+its writes, including receipt-trigger side effects, before committing a cursor.
+
 Subsequent eligible imports traverse indexed forward and reverse typed dependency
 ranges and read only reached archive bodies. Canonical journal selections must
 match exact archived bytes before and after application. Canonical rows, retained
@@ -912,10 +927,33 @@ canonical/hash decode of an exact retained envelope. It is limited to 8,192
 entries and a conservative 64 MiB decoded-storage charge; a full cache uses the
 ordinary decoder. `snapshot_decode_cache_misses/op` counts successful fresh
 validations and `snapshot_decode_cache_hits/op` counts exact byte reuse. Every
-snapshot still rereads its operational and retained rows, checks identity and
+fresh snapshot still rereads its operational and retained rows, checks identity and
 lineage, resolves recovery, and runs its normal semantic/transaction guards.
 Cached results own private buffers; callers receive independent copies. The
 cache is discarded after this replay call and provides no local-state proof.
+Atomic reference replay can additionally reuse one complete validated curated
+snapshot within that exact transaction and project. This separate cache charges
+at most 64 MiB and owns its buffers; misses or an unavailable guard require a
+fresh ordinary load. Missing canonical tracking, unreviewed or modified main views,
+or TEMP table/view shadows disable reuse. Reuse requires unchanged SQLite `total_changes()`, main and
+TEMP schema versions, and the evaluation time fixed for this operation. Any
+write, including an unrelated or trigger-induced write, invalidates it. Incoming
+invocation roots must be covered by the validated dependency closure; new roots
+require another full load. Incoming envelopes, dependencies and comparison plans
+still pass their normal validators. The frozen evaluation time applies only to
+this transaction's derived usage summaries. The cache cannot cross transactions,
+change the curated actor scope, establish a persistent proof or relax exact-commit
+binding. The two caches have independent 64 MiB limits.
+
+`atomic_import_snapshot_loads/op` counts snapshots retained after full validation;
+`atomic_import_snapshot_reuses/op` counts same-transaction snapshot copies;
+`atomic_import_snapshot_invalidations/op` counts changed/unavailable guards;
+`atomic_import_snapshot_bounds/op` counts capacity refusals;
+`atomic_import_snapshot_guard_refusals/op` counts unavailable/uncertified guards.
+These describe work, not new records or proof of a successful commit.
+`atomic_semantic_seed_sideeffects`
+counts unexpected canonical changes detected after optional baseline writes.
+
 The context-scoped collector lives in `internal/syncwork`, shared by portable
 loading, archive validation and transport; it persists no measurements.
 `publication_envelopes_reused/op` counts staged publication entries whose exact

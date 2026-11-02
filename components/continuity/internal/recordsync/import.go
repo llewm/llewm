@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/llewm/llewm/components/continuity/internal/fork"
-	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"sort"
 	"time"
+
+	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/fork"
+	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
 
 var ErrSemanticPending = errors.New("semantic history import pending")
@@ -33,15 +35,56 @@ func (s Importer) now() time.Time {
 	}
 	return time.Now().UTC()
 }
+
+var errAtomicImportCollision = errors.New("atomic semantic import collision")
+
+func rolledBackImport(result ImportResult) ImportResult {
+	result.ImportedRecords, result.Forks, result.SupersessionForks = 0, 0, 0
+	return result
+}
+
 func (s Importer) Import(ctx context.Context, objects []portable.EncodedEnvelope) (ImportResult, error) {
 	var result ImportResult
-	err := s.importRecords(ctx, objects, &result)
+	prepared, err := prepareSemanticImport(objects)
 	if err != nil {
+		return result, fmt.Errorf("%w: %v", ErrSemanticPending, err)
+	}
+	conn, err := s.DB.Conn(ctx)
+	if err != nil {
+		return result, fmt.Errorf("%w: %v", ErrSemanticPending, err)
+	}
+	defer conn.Close()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return result, fmt.Errorf("%w: %v", ErrSemanticPending, err)
+	}
+	defer tx.Rollback()
+	if ctx, err = portable.WithAtomicImportSnapshot(ctx, tx, s.ProjectID); err == nil {
+		err = s.importRecordsWithin(ctx, tx, prepared, &result)
+	}
+	if err == nil {
+		err = database.CommitPinned(ctx, conn, tx)
+	}
+	if err != nil {
+		result = rolledBackImport(result)
+		if errors.Is(err, errAtomicImportCollision) {
+			return result, nil
+		}
 		return result, fmt.Errorf("%w: %v", ErrSemanticPending, err)
 	}
 	return result, nil
 }
-func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedEnvelope, result *ImportResult) error {
+
+type preparedSemanticImport struct {
+	versions   map[string][]portable.EnvelopeSpec
+	stored     map[string][]portable.EncodedEnvelope
+	order      []string
+	recoveries []portable.EnvelopeSpec
+	deferred   int
+}
+
+// Pure incoming byte validation happens before reserving SQLite's writer.
+func prepareSemanticImport(objects []portable.EncodedEnvelope) (prepared preparedSemanticImport, err error) {
 	versions := map[string][]portable.EnvelopeSpec{}
 	stored := map[string][]portable.EncodedEnvelope{}
 	var order []string
@@ -50,23 +93,21 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 			continue
 		}
 		if !portable.SupportedEnvelope(e.Envelope) {
-			result.DeferredRecords++
+			prepared.deferred++
 			continue
 		}
 		spec, err := portable.DecodeMemoryEnvelope(e.Bytes)
 		if err != nil {
-			return err
+			return prepared, err
 		}
 		identity := portable.RecordKey(spec.RecordType, spec.RecordID, spec.RecordRevision)
 		if _, seen := versions[identity]; !seen {
 			order = append(order, identity)
 		}
 		versions[identity] = append(versions[identity], spec)
-		stored[identity] = append(stored[identity], e)
+		stored[identity] = append(stored[identity], copyEnvelope(e))
 	}
 	sort.Strings(order)
-	var specs []portable.EnvelopeSpec
-	var forked [][]fork.ObservedHead
 	// Recoveries carry their own bounded proof and must be applied before
 	// interpreting the historical identities they correct, also on fresh peers.
 	var recoveries []portable.EnvelopeSpec
@@ -77,8 +118,18 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 			}
 		}
 	}
+	prepared.versions, prepared.stored, prepared.order, prepared.recoveries = versions, stored, order, recoveries
+	return prepared, nil
+}
+
+func (s Importer) importRecordsWithin(ctx context.Context, tx *sql.Tx, prepared preparedSemanticImport, result *ImportResult) error {
+	versions, stored, order, recoveries := prepared.versions, prepared.stored, prepared.order, prepared.recoveries
+	result.DeferredRecords = prepared.deferred
+	var specs []portable.EnvelopeSpec
+	var forked [][]fork.ObservedHead
+
 	if len(recoveries) > 0 {
-		plan, receipt, err := portable.ImportMemoryRecords(ctx, s.DB, s.ProjectID, recoveries, s.now())
+		plan, receipt, err := portable.ImportMemoryRecordsTx(ctx, tx, s.ProjectID, recoveries, s.now(), portable.RecoveryComparisonComplete)
 		if err != nil {
 			return err
 		}
@@ -89,7 +140,7 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 			result.ImportedRecords += receipt.AppendedRecords
 		}
 	}
-	recovered, err := portable.RecoveredEnvelopes(ctx, s.DB, s.ProjectID)
+	recovered, err := portable.RecoveredEnvelopes(ctx, tx, s.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -124,7 +175,7 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 	}
 	var keep, adopt []fork.ObservedHead
 	if len(forked) > 0 {
-		local, err := portable.LocalEnvelopes(ctx, s.DB, s.ProjectID)
+		local, err := portable.LocalEnvelopesTx(ctx, tx, s.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -132,7 +183,7 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 			newHead := false
 			for _, head := range heads {
 				var count int
-				if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM fork_heads WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=? AND content_sha256=?`, s.ProjectID, head.RecordType, head.RecordID, head.Revision, head.ContentSHA256).Scan(&count); err != nil {
+				if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fork_heads WHERE project_id=? AND record_type=? AND record_id=? AND record_revision=? AND content_sha256=?`, s.ProjectID, head.RecordType, head.RecordID, head.Revision, head.ContentSHA256).Scan(&count); err != nil {
 					return err
 				}
 				if count == 0 {
@@ -160,15 +211,15 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 			adopt = append(adopt, heads...)
 		}
 	}
-	if err := fork.RecordHeads(ctx, s.DB, s.ProjectID, keep, s.now()); err != nil {
+	if err := fork.RecordHeads(ctx, tx, s.ProjectID, keep, s.now()); err != nil {
 		return err
 	}
 	if len(specs) > 0 {
-		before, err := supersessionForkRefs(ctx, s.DB, s.ProjectID)
+		before, err := supersessionForkRefs(ctx, tx, s.ProjectID)
 		if err != nil {
 			return err
 		}
-		plan, receipt, err := portable.ImportMemoryRecords(ctx, s.DB, s.ProjectID, specs, s.now())
+		plan, receipt, err := portable.ImportMemoryRecordsTx(ctx, tx, s.ProjectID, specs, s.now(), portable.RecoveryComparisonComplete)
 		if err != nil {
 			return err
 		}
@@ -182,10 +233,10 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 				result.ImportedRecords += receipt.AppendedRecords
 			}
 			// Only now does the project hold the adopted versions.
-			if err := fork.RecordHeads(ctx, s.DB, s.ProjectID, adopt, s.now()); err != nil {
+			if err := fork.RecordHeads(ctx, tx, s.ProjectID, adopt, s.now()); err != nil {
 				return err
 			}
-			after, err := supersessionForkRefs(ctx, s.DB, s.ProjectID)
+			after, err := supersessionForkRefs(ctx, tx, s.ProjectID)
 			if err != nil {
 				return err
 			}
@@ -195,6 +246,9 @@ func (s Importer) importRecords(ctx context.Context, objects []portable.EncodedE
 				}
 			}
 		}
+	}
+	if result.Collisions != 0 {
+		return errAtomicImportCollision
 	}
 	return nil
 }

@@ -59,14 +59,7 @@ func (s Index) ImportArchiveJournal(ctx context.Context, a Archive, scope Journa
 	if !s.validSemanticSnapshot(scope, plan) {
 		return ImportResult{}, fmt.Errorf("%w: complete semantic snapshot receipt changed", ErrIndexRebuild)
 	}
-	result, err = s.ImportBlocks(ctx, plan.Snapshot)
-	if err != nil || result.Collisions+result.DeferredRecords != 0 {
-		return result, err
-	}
-	if err := s.seedReplayJournal(ctx, a, scope, plan); err != nil && !errors.Is(err, errReplayJournalFull) {
-		return result, fmt.Errorf("%w: %v", ErrSemanticPending, err)
-	}
-	return result, nil
+	return s.importArchiveAtomic(ctx, a, scope, plan)
 }
 
 func (s Index) dependencyGenerationWithin(ctx context.Context, tx *sql.Tx) (string, error) {
@@ -153,83 +146,131 @@ func (s Index) rememberReplayWithin(ctx context.Context, tx *sql.Tx, a Archive, 
 	return err
 }
 
-func (s Index) seedReplayJournal(ctx context.Context, a Archive, scope JournalPublicationScope, plan JournalPublicationPlan) error {
+func (s Index) seedReplayJournalWithin(ctx context.Context, tx *sql.Tx, a Archive, scope JournalPublicationScope, plan JournalPublicationPlan, verified []portable.EncodedEnvelope) error {
 	proof := plan.snapshot
 	if proof == nil || !validObservationStamp(proof.Observed) {
 		return errReplayJournalFull
 	}
-	return a.store().transact(ctx, func(tx *sql.Tx) error {
-		current, err := s.observationStampWithin(ctx, tx, a)
-		if errors.Is(err, ErrObservationTracking) || (err == nil && current != proof.Observed) {
-			return errReplayJournalFull
-		}
-		if err != nil {
-			return err
-		}
-		archive, err := a.store().stampWithin(ctx, tx, "ready")
-		if err != nil {
-			return err
-		}
-		if archive != proof.Archive {
-			return errReplayJournalFull
-		}
-		objects := map[string]portable.EncodedEnvelope{}
-		var size int64
-		for _, block := range plan.Snapshot {
-			for _, object := range block.Objects {
-				hash := object.Envelope.EnvelopeSHA256
-				if prior, ok := objects[hash]; ok {
-					if !bytes.Equal(prior.Bytes, object.Bytes) {
-						return errArchiveIntegrity
-					}
-					continue
-				}
-				objects[hash] = object
-				size += int64(len(object.Bytes) + 1)
+	current, err := s.observationStampWithin(ctx, tx, a)
+	if errors.Is(err, ErrObservationTracking) || (err == nil && current != proof.Observed) {
+		return errReplayJournalFull
+	}
+	if err != nil {
+		return err
+	}
+	archive, err := a.store().stampWithin(ctx, tx, "ready")
+	if err != nil {
+		return err
+	}
+	if archive != proof.Archive {
+		return errReplayJournalFull
+	}
+	objects := map[string]portable.EncodedEnvelope{}
+	var size int64
+	for _, object := range verified {
+		hash := object.Envelope.EnvelopeSHA256
+		if prior, ok := objects[hash]; ok {
+			if !bytes.Equal(prior.Bytes, object.Bytes) {
+				return errArchiveIntegrity
 			}
+			continue
 		}
-		if int64(len(objects)) != archive.Records || size != archive.Bytes {
-			return errReplayJournalFull
-		}
-		all := make([]portable.EncodedEnvelope, 0, len(objects))
-		for _, object := range objects {
-			all = append(all, object)
-		}
-		local, recovered, covered, complete, err := s.completeReferenceSnapshotWithin(ctx, tx, all)
-		if err != nil {
-			return err
-		}
-		if !complete {
-			return errReplayJournalFull
-		}
-		for _, object := range all {
-			if _, supported := portable.ImportDependencies(object.Envelope); !supported {
-				_, guarded := portable.ImportInvalidationGuards(object)
-				_, corrected := recovered[object.Envelope.EnvelopeSHA256]
-				if !guarded && !corrected {
-					return errReplayJournalFull
-				}
-			}
-		}
-		for _, object := range local {
-			e := object.Envelope
-			if !covered[portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)] && e.RecordType != "actor_invocation" {
+		objects[hash] = object
+		size += int64(len(object.Bytes) + 1)
+	}
+
+	if int64(len(objects)) != archive.Records || size != archive.Bytes {
+		return errReplayJournalFull
+	}
+	all := make([]portable.EncodedEnvelope, 0, len(objects))
+	for _, object := range objects {
+		all = append(all, object)
+	}
+	local, recovered, covered, complete, err := s.completeReferenceSnapshotWithin(ctx, tx, all)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return errReplayJournalFull
+	}
+	for _, object := range all {
+		if _, supported := portable.ImportDependencies(object.Envelope); !supported {
+			_, guarded := portable.ImportInvalidationGuards(object)
+			_, corrected := recovered[object.Envelope.EnvelopeSHA256]
+			if !guarded && !corrected {
 				return errReplayJournalFull
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_dependency_records WHERE project_id=? AND NOT EXISTS(SELECT 1 FROM history_archive_envelopes a WHERE a.project_id=history_index_dependency_records.project_id AND a.envelope_hash=history_index_dependency_records.envelope_hash)`, s.ProjectID); err != nil {
-			return err
+	}
+	for _, object := range local {
+		e := object.Envelope
+		if !covered[portable.RecordKey(e.RecordType, e.RecordID, e.RecordRevision)] && e.RecordType != "actor_invocation" {
+			return errReplayJournalFull
 		}
-		if _, err := s.dependencySelectorsWithin(ctx, tx, all, true, true); err != nil {
-			return err
-		}
-		// Complete validation may recreate a missing disposable generation row.
-		if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_dependency_generation(project_id,token) VALUES(?,lower(hex(randomblob(16)))) ON CONFLICT(project_id) DO UPDATE SET token=excluded.token`, s.ProjectID); err != nil {
-			return err
-		}
-		scope.Observed = current
-		return s.rememberReplayWithin(ctx, tx, a, scope, archive)
-	})
+	}
+	canonical, err := database.SyncSnapshot(ctx, tx, s.ProjectID, replayCanonicalConsumer(scope.Consumer))
+	if errors.Is(err, database.ErrCanonicalTracking) {
+		return errReplayJournalFull
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM history_index_dependency_records WHERE project_id=? AND NOT EXISTS(SELECT 1 FROM history_archive_envelopes a WHERE a.project_id=history_index_dependency_records.project_id AND a.envelope_hash=history_index_dependency_records.envelope_hash)`, s.ProjectID); err != nil {
+		return err
+	}
+	if _, err := s.dependencySelectorsWithin(ctx, tx, all, true, true); err != nil {
+		return err
+	}
+	// Complete validation may recreate a missing disposable generation row.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_dependency_generation(project_id,token) VALUES(?,lower(hex(randomblob(16)))) ON CONFLICT(project_id) DO UPDATE SET token=excluded.token`, s.ProjectID); err != nil {
+		return err
+	}
+	scope.Observed = current
+	if err := s.rememberReplayWithin(ctx, tx, a, scope, archive); err != nil {
+		return err
+	}
+	// Derived receipt writes must not silently bless canonical/archive changes
+	// caused by an unknown trigger after the validated snapshot was read.
+	after, err := database.SyncSnapshot(ctx, tx, s.ProjectID, replayCanonicalConsumer(scope.Consumer))
+	if errors.Is(err, database.ErrCanonicalTracking) {
+		return errReplayJournalFull
+	}
+	if err != nil {
+		return err
+	}
+	if after.Generation != canonical.Generation || after.Sequence != canonical.Sequence {
+		syncwork.RecordWork(ctx, "atomic_semantic_seed_sideeffects", 1)
+		return errReplayJournalFull
+	}
+	observed, err := s.observationStampWithin(ctx, tx, a)
+	if errors.Is(err, ErrObservationTracking) {
+		return errReplayJournalFull
+	}
+	if err != nil {
+		return err
+	}
+	if observed != current {
+		return errReplayJournalFull
+	}
+	stamp, err := a.store().stampWithin(ctx, tx, "ready")
+	if err != nil {
+		return err
+	}
+	if stamp != archive {
+		return errReplayJournalFull
+	}
+	state, _, err := s.loadReplayStateWithin(ctx, tx, scope.Consumer)
+	if err != nil {
+		return err
+	}
+	dependencies, err := s.dependencyGenerationWithin(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if dependencies != state.Dependencies || state.Archive != archive || state.Schema != current.Schema || state.CanonicalGeneration != canonical.Generation || state.CanonicalSequence != canonical.Sequence {
+		return errReplayJournalFull
+	}
+	return nil
 }
 
 func (s Index) tryReplayJournal(ctx context.Context, a Archive, scope JournalPublicationScope) (ImportResult, error) {

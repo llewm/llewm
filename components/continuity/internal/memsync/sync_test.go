@@ -280,13 +280,17 @@ func TestSyncRefusesCollidingRecords(t *testing.T) {
 	if line := status.Line(time.Now().UTC()); !strings.Contains(line, "1 records with conflicting versions") {
 		t.Fatalf("status line = %q", line)
 	}
-	// Machine A sees both versions too, other records still flow, and the
-	// collision is reported again on the next sync.
+	// Machine A receives both versions in its archive, but the colliding
+	// semantic batch also withholds otherwise valid records until resolved.
 	b.decide(t, "unrelated", "Unrelated")
 	b.sync(t, OutcomeCollision)
 	again := a.sync(t, OutcomeCollision)
-	if again.Collisions != 1 || !strings.Contains(a.decisions(t), "unrelated") {
+	if again.Collisions != 1 || again.ImportedRecords != 0 || strings.Contains(a.decisions(t), "unrelated") || !strings.Contains(again.Detail, "semantic import batch was rolled back") {
 		t.Fatalf("machine A after collision: %#v, decisions %q", again, a.decisions(t))
+	}
+	var received int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM history_archive_envelopes WHERE project_id=? AND record_id='unrelated'`, a.project).Scan(&received); err != nil || received != 1 {
+		t.Fatalf("received transport was lost: %d %v", received, err)
 	}
 	if repeat := a.sync(t, OutcomeCollision); repeat.Collisions != 1 {
 		t.Fatalf("collision was forgotten: %#v", repeat)

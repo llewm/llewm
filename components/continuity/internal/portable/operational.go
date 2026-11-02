@@ -67,6 +67,19 @@ func LoadOperationalRecords(ctx context.Context, db *sql.DB, projectID string) (
 		return OperationalRecordSet{}, err
 	}
 	defer tx.Rollback()
+	records, err := LoadOperationalRecordsTx(ctx, tx, projectID)
+	if err != nil {
+		return OperationalRecordSet{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return OperationalRecordSet{}, err
+	}
+	return records, nil
+}
+
+// LoadOperationalRecordsTx reads the same export view in the caller's snapshot.
+// The caller owns writer reservation, commit and rollback.
+func LoadOperationalRecordsTx(ctx context.Context, tx *sql.Tx, projectID string) (OperationalRecordSet, error) {
 	identity, err := identityFrom(ctx, tx, projectID)
 	if err != nil {
 		return OperationalRecordSet{}, err
@@ -81,9 +94,6 @@ func LoadOperationalRecords(ctx context.Context, db *sql.DB, projectID string) (
 	}
 	records, missing, err := loadOperationalSpecs(ctx, tx, projectID, projectRoot, identity.LineageID, false, nil, nil)
 	if err != nil {
-		return OperationalRecordSet{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return OperationalRecordSet{}, err
 	}
 	return OperationalRecordSet{Identity: identity, DatabaseSchema: databaseSchema, Records: records, MissingReferences: missing}, nil

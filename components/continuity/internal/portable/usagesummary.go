@@ -38,7 +38,7 @@ func usageSummaryIndex(payload usageSummaryPayload) envelopeIndex {
 }
 
 func loadUsageSummarySpecs(ctx context.Context, source queryer, projectID, lineageID string) ([]EnvelopeSpec, error) {
-	local, err := usage.LocalSummaries(ctx, source, projectID, time.Now().UTC())
+	local, err := usage.LocalSummaries(ctx, source, projectID, importSnapshotTime(ctx, source, projectID))
 	if err != nil {
 		return nil, err
 	}
