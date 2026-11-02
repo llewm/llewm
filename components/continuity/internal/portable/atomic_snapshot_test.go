@@ -12,9 +12,78 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
+	"github.com/llewm/llewm/components/continuity/internal/topic"
 	"github.com/llewm/llewm/components/continuity/internal/usage"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
+
+func TestAtomicRevisionSnapshotMatchesOrdinaryExport(t *testing.T) {
+	ctx, db, project := invocationScopeProject(t)
+	if _, err := (topic.Service{DB: db}).Record(ctx, topic.Topic{ProjectID: project, ID: "revisioned", Title: "Revisioned", Creator: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	actor := scopeActor(t, ctx, db, project, "incoming-only", "")
+	incoming, err := EncodeEnvelope(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	ctx, err = WithAtomicImportSnapshot(ctx, tx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := LocalRevisionEnvelopesTx(ctx, tx, project) // ordinary fallback
+	if err != nil || len(want) == 0 {
+		t.Fatalf("ordinary revision snapshot: %d %v", len(want), err)
+	}
+	ctx, metrics := syncwork.WithWorkMetrics(ctx)
+	curated, err := LocalEnvelopesForImport(ctx, tx, project, []EncodedEnvelope{incoming})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := curated[RecordKey("actor_invocation", "incoming-only", 0)]; !exists {
+		t.Fatal("fixture lacks the extra incoming actor")
+	}
+	got, err := LocalRevisionEnvelopesTx(ctx, tx, project)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("revision view changed with incoming actor: %v", err)
+	}
+	if metrics.Counts()["atomic_import_revision_snapshot_reuses"] != 1 || metrics.Counts()["operational_full_loads"] != 1 {
+		t.Fatal(metrics.Counts())
+	}
+	for key, object := range got {
+		object.Bytes[0] = '!'
+		delete(got, key)
+	}
+	got, err = LocalRevisionEnvelopesTx(ctx, tx, project)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("fork reader changed private cache: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET name='changed' WHERE id=?`, project); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LocalRevisionEnvelopesTx(ctx, tx, project)
+	if err != nil || !reflect.DeepEqual(got, want) || metrics.Counts()["operational_full_loads"] != 2 {
+		t.Fatalf("changed guard did not use ordinary reader: %v %+v", err, metrics.Counts())
+	}
+}
+
+func TestAtomicRevisionSnapshotDoesNotHideChangedBoundActor(t *testing.T) {
+	ctx, _, tx, project := atomicSnapshotFixture(t)
+	if _, err := LocalEnvelopesForImport(ctx, tx, project, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE actor_invocations SET received_at='malformed' WHERE id='bound'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LocalRevisionEnvelopesTx(ctx, tx, project); err == nil {
+		t.Fatal("revision lookup hid invalid ordinary export dependency after a write")
+	}
+}
 
 func atomicSnapshotFixture(t *testing.T) (context.Context, *sql.DB, *sql.Tx, string) {
 	t.Helper()

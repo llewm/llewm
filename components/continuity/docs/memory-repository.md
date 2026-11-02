@@ -945,11 +945,19 @@ this transaction's derived usage summaries. The cache cannot cross transactions,
 change the curated actor scope, establish a persistent proof or relax exact-commit
 binding. The two caches have independent 64 MiB limits.
 
+Revision-fork comparison can use the revisioned records from that same guarded
+curated snapshot. It validates the same revisioned records and a superset of the
+ordinary export's invocation dependencies; extra incoming actors are excluded
+from this view. A missing or invalidated snapshot uses the ordinary export reader,
+including its normal dependency checks. This view does not change export scope.
+
 `atomic_import_snapshot_loads/op` counts snapshots retained after full validation;
 `atomic_import_snapshot_reuses/op` counts same-transaction snapshot copies;
 `atomic_import_snapshot_invalidations/op` counts changed/unavailable guards;
 `atomic_import_snapshot_bounds/op` counts capacity refusals;
 `atomic_import_snapshot_guard_refusals/op` counts unavailable/uncertified guards.
+`atomic_import_revision_snapshot_reuses/op` counts revision-fork views obtained
+from the guarded snapshot without another ordinary export load.
 These describe work, not new records or proof of a successful commit.
 `atomic_semantic_seed_sideeffects`
 counts unexpected canonical changes detected after optional baseline writes.

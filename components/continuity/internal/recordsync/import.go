@@ -175,7 +175,7 @@ func (s Importer) importRecordsWithin(ctx context.Context, tx *sql.Tx, prepared 
 	}
 	var keep, adopt []fork.ObservedHead
 	if len(forked) > 0 {
-		local, err := portable.LocalEnvelopesTx(ctx, tx, s.ProjectID)
+		local, err := portable.LocalRevisionEnvelopesTx(ctx, tx, s.ProjectID)
 		if err != nil {
 			return err
 		}

@@ -279,6 +279,30 @@ func LocalEnvelopesTx(ctx context.Context, tx *sql.Tx, projectID string) (map[st
 	return encodeLocalEnvelopes(loaded)
 }
 
+// LocalRevisionEnvelopesTx returns only revisioned records for fork comparison.
+// A complete curated import snapshot validates the same revisioned records and
+// a superset of the ordinary export's invocation dependencies. Its extra actors
+// are irrelevant here: actor invocations and usage summaries are unrevisioned.
+// Reuse still requires the exact transaction/project and all snapshot guards.
+func LocalRevisionEnvelopesTx(ctx context.Context, tx *sql.Tx, projectID string) (map[string]EncodedEnvelope, error) {
+	local, cached := atomicSnapshotFor(ctx, tx, projectID).load(ctx, nil)
+	if !cached {
+		var err error
+		local, err = LocalEnvelopesTx(ctx, tx, projectID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		syncwork.RecordWork(ctx, "atomic_import_revision_snapshot_reuses", 1)
+	}
+	for key, object := range local {
+		if object.Envelope.RecordRevision == 0 {
+			delete(local, key)
+		}
+	}
+	return local, nil
+}
+
 func encodeLocalEnvelopes(loaded OperationalRecordSet) (map[string]EncodedEnvelope, error) {
 	result := make(map[string]EncodedEnvelope, len(loaded.Records))
 	for _, spec := range loaded.Records {
