@@ -59,6 +59,7 @@ func compareParallelBlock(t testing.TB, expected string, body []byte, workers bo
 	t.Helper()
 	want, wantErr := referenceDecodeBlock(lineage, expected, body)
 	got, err := DecodeBlock(lineage, expected, body)
+	got.decoded = nil // The independent reference compares the public wire view.
 	if (err == nil) != (wantErr == nil) {
 		t.Fatalf("acceptance differs: %v vs%v", err, wantErr)
 	}

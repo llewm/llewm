@@ -270,6 +270,14 @@ local history. A local failure cancels and joins the fetch before releasing the
 clone lock; already received Git objects remain. Conversion keeps its sequential
 workflow, and an earlier successful fetch is reused.
 
+A decoded block can retain a private copy of its validated wire contents.
+Observation may reuse that byte-validation result only after exact body,
+lineage, bounds and a fresh block hash match. Exported parsed fields remain
+untrusted, and returned buffers are independent. This receipt is separate from
+database snapshot proofs: inventory, provenance, archive audits, dependency and
+semantic checks still run. Wire receipts stay in process and are never stored
+as durable sync proofs.
+
 A known observation reads only changed selected blocks through the Git tree
 delta. Previously observed bytes remain covered by explicit full audits;
 out-of-band corruption of an old object is not promised detection on every

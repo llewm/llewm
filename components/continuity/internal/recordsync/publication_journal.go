@@ -468,7 +468,8 @@ func (s Index) catalogBlockWithin(ctx context.Context, tx *sql.Tx, hash string) 
 	// Callers hold a matching projection generation in this transaction. The
 	// exact block and envelope bytes were just independently decoded and checked;
 	// carry that verified source instead of rereading the same derived inventory.
-	block.validated = sealBlockContents(s.Lineage, block.Objects)
+	// This DB reader adds snapshot authority; DecodeBlock alone never does.
+	block.validated = block.decoded
 	return block, nil
 }
 

@@ -112,7 +112,7 @@ func (s Index) ObservePublicationBatch(ctx context.Context, a Archive, endpoint 
 		syncwork.RecordWork(ctx, "block_reads", 1)
 		syncwork.RecordWork(ctx, "block_read_bytes", int64(len(block.Bytes)))
 		var decoded Block
-		decoded, err = DecodeBlock(s.Lineage, block.Hash, block.Bytes)
+		decoded, err = decodeObservedBlock(ctx, s.Lineage, block)
 		if err != nil {
 			return
 		}
