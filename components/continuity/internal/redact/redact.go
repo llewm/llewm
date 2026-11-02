@@ -12,6 +12,9 @@ var patterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(https?://[^:/\s]+:)[^@\s]+@`),
 }
 
+// The rules are fixed; Replacer supports concurrent calls and retains no input.
+var metadataKeySeparators = strings.NewReplacer("_", "", "-", "")
+
 // Value sanitizes decoded JSON structurally so nested metadata cannot bypass
 // string redaction. Entire raw-input/environment fields are never retained.
 func Value(value any) any {
@@ -28,7 +31,7 @@ func Value(value any) any {
 		out := make(map[string]any, len(v))
 		for key, item := range v {
 			cleanKey := String(key)
-			normal := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
+			normal := strings.ToLower(metadataKeySeparators.Replace(key))
 			switch normal {
 			case "stdin", "env", "environment", "credentials", "authorization", "apikey", "token", "password", "secret", "accesstoken", "refreshtoken", "privatekey":
 				out[cleanKey] = "[REDACTED]"

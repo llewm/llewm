@@ -48,6 +48,9 @@ func CanonicalizeJSON(input []byte) ([]byte, error) {
 		return nil, fmt.Errorf("canonical JSON has trailing value %v", token)
 	}
 	var output bytes.Buffer
+	// Most canonical output is close to the input size. Bound the initial
+	// reservation so whitespace-heavy input cannot force a large unused buffer.
+	output.Grow(min(len(input), 64<<10))
 	if err := writeCanonicalValue(&output, value); err != nil {
 		return nil, err
 	}

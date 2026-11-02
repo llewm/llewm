@@ -902,6 +902,14 @@ prefix byte offset with the previous regexp and the final text with all original
 replacement rules. `BenchmarkCandidateSearch` compares these prefix searches;
 its synthetic results do not establish complete live sync latency.
 
+Structural metadata redaction shares its fixed underscore/hyphen key-normalization
+replacer across calls, including concurrent readers. It retains no input or
+redaction results. Nested field checks and text replacement rules still run on
+every value. `BenchmarkMetadataKeyNormalization` compares shared rule reuse with
+constructing the same rules for each key; it does not measure complete sync time.
+Canonical JSON output reserves at most 64 KiB initially, based on input length,
+to reduce buffer growth while retaining the complete parser and validation.
+
 The plan, mixed-history and remote mixed-history complete-cycle benchmarks also
 report opt-in work counters per measured cycle. `published_block_bytes/op` counts
 new block file writes to the local Git clone, including headers and repairs of
