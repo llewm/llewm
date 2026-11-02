@@ -10,7 +10,7 @@ import (
 )
 
 func (s Syncer) journalPublicationScope(ctx context.Context, repo git, lineage string, observed recordsync.ObservationStamp, tree string) (recordsync.JournalPublicationScope, error) {
-	_, route, err := s.observationRoute(lineage)
+	_, route, err := s.observationRoute(ctx, lineage)
 	if err != nil {
 		return recordsync.JournalPublicationScope{}, err
 	}

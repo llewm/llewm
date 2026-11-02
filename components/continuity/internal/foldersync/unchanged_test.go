@@ -11,6 +11,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 func warmFolder(t *testing.T, s Syncer) {
@@ -28,6 +29,33 @@ func warmFolder(t *testing.T, s Syncer) {
 		}
 	}
 	t.Fatal("stable folder did not establish completion proof")
+}
+
+func TestFreshValidationBypassesFolderCompletionProof(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	marker, err := Create(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := receiver(t, directory, marker.StoreID)
+	if err := s.Archive.CaptureLocal(exportCheckpoint(t, s)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Convert(ctx); err != nil {
+		t.Fatal(err)
+	}
+	warmFolder(t, s)
+	for range 2 {
+		fresh, err := syncwork.WithFreshValidation(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := s.Sync(fresh); err != nil || got.Unchanged || got.Outcome != "published_locally" || got.ImportedRecords+got.PublishedRecords+got.Collisions+got.Forks+got.SupersessionForks+got.DeferredRecords != 0 || got.PeerReceipt != "unknown" {
+			t.Fatalf("fresh folder validation: %+v %v", got, err)
+		}
+		warmFolder(t, s)
+	}
 }
 
 func TestFolderUnchangedProofInvalidatesAndPreservesIntegrity(t *testing.T) {

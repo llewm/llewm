@@ -41,6 +41,32 @@ func TestCPUProfileBoundsAndFileSafety(t *testing.T) {
 	}
 }
 
+func TestRevalidationContextEndsWhenCommandFails(t *testing.T) {
+	profile := filepath.Join(t.TempDir(), "existing.pprof")
+	if err := os.WriteFile(profile, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := syncCommand()
+	previous := context.Background()
+	cmd.SetContext(previous)
+	if err := cmd.Flags().Set("revalidate", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("cpu-profile", profile); err != nil {
+		t.Fatal(err)
+	}
+	// Existing-profile refusal occurs before opening a project or syncing.
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("existing profile was accepted")
+	}
+	if cmd.Context() != previous {
+		t.Fatal("failed command retained its private validation scope")
+	}
+	if body, err := os.ReadFile(profile); err != nil || string(body) != "keep" {
+		t.Fatal("existing profile changed")
+	}
+}
+
 func TestMemoryCredentialHelperSupportsAskpassDisabledSync(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
@@ -118,7 +144,7 @@ func TestSyncCommandsAcrossTwoCheckouts(t *testing.T) {
 	}
 	runCLI(t, "", "decision", "record", "--file", decisionFile)
 	profile := filepath.Join(t.TempDir(), "sync.pprof")
-	if out := runCLI(t, "", "sync", "--cpu-profile", profile); !strings.Contains(out, "Sync synced: exported") {
+	if out := runCLI(t, "", "sync", "--revalidate", "--cpu-profile", profile); !strings.Contains(out, "Sync synced: exported") {
 		t.Fatalf("machine A sync: %s", out)
 	}
 	if info, err := os.Stat(profile); err != nil || info.Size() == 0 {

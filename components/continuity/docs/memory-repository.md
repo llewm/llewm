@@ -821,6 +821,19 @@ llewm sync --cpu-profile ./sync.cpu.pprof --profile-duration 30s
 go tool pprof -top ./sync.cpu.pprof
 ```
 
+To measure full revalidation after normal sync has already warmed its receipts,
+add `--revalidate`. Each invocation uses independent verification receipts while
+retaining the real source-commit binding. Canonical capture, Git observation,
+publication planning and semantic import therefore take their complete paths;
+work completed within that run can still be reused by its later phases.
+Git and shared-folder completion proofs use the same isolated scope. Existing
+proofs and history remain intact, and the run does not warm ordinary sync's
+receipts. Full validation may refresh shared dependency indexes, so a following
+normal sync can need to re-establish its own receipts. This is a normal sync
+with the same authorized history exchange, not a
+read-only audit; it can write disposable scoped receipts. Omit the flag for
+normal cached operation.
+
 Profiling is off by default. The profile covers the Llewm process, not child
 Git processes, and stops when sync finishes or the duration expires, whichever
 comes first. The default limit is 30 seconds; the maximum is five minutes.

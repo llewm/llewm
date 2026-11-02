@@ -18,13 +18,13 @@ type gitObservationReceipt struct {
 	Stamp   recordsync.ObservationStamp `json:"stamp"`
 }
 
-func (s Syncer) observationRoute(lineage string) (key, route string, err error) {
+func (s Syncer) observationRoute(ctx context.Context, lineage string) (key, route string, err error) {
 	paths, err := StoragePaths(s.Clone)
 	if err != nil {
 		return "", "", err
 	}
 	body, _ := json.Marshal([]any{"git-observation-v1", recordsync.IndexVersion, buildinfo.Current().GitCommit, s.ProjectID, lineage, paths.Clone, s.Endpoint()})
-	route = recordsync.Hash(string(body))
+	route = syncwork.ScopedValidationKey(ctx, recordsync.Hash(string(body)))
 	return "git-observation:" + route, route, nil
 }
 
@@ -36,7 +36,7 @@ func (s Syncer) observeGitPublications(ctx context.Context, repo git, lineage st
 	if s.Archive == nil || s.Archive.Lineage != lineage {
 		return nil, nil, fmt.Errorf("matching archive required for Git observation")
 	}
-	key, route, err := s.observationRoute(lineage)
+	key, route, err := s.observationRoute(ctx, lineage)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -103,11 +103,11 @@ func (s Syncer) observeGitPublications(ctx context.Context, repo git, lineage st
 	return nil, nil, fmt.Errorf("Git observation changed repeatedly")
 }
 
-func (s Syncer) advanceObservedInventory(lineage string, receipt *gitObservationReceipt, stamp recordsync.ObservationStamp) error {
+func (s Syncer) advanceObservedInventory(ctx context.Context, lineage string, receipt *gitObservationReceipt, stamp recordsync.ObservationStamp) error {
 	if receipt == nil || stamp == (recordsync.ObservationStamp{}) {
 		return nil
 	}
-	key, route, err := s.observationRoute(lineage)
+	key, route, err := s.observationRoute(ctx, lineage)
 	if err != nil {
 		return err
 	}

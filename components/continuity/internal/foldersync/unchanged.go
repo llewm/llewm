@@ -8,6 +8,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 type completionGuard struct{ route, generation, endpoint, archive string }
@@ -19,7 +20,7 @@ func (s Syncer) completionGuard(ctx context.Context) (completionGuard, error) {
 		return g, fmt.Errorf("uncommitted build cannot reuse completion proofs")
 	}
 	body, _ := json.Marshal([]any{"folder-sqlite-v1", build.GitCommit, recordsync.IndexVersion, s.Endpoint.ID(), s.Endpoint.Directory, s.Endpoint.LineageID, s.Endpoint.StoreID, s.Endpoint.Relay, s.Archive.ProjectID})
-	g.route = recordsync.Hash(string(body))
+	g.route = syncwork.ScopedValidationKey(ctx, recordsync.Hash(string(body)))
 	var generationErr error
 	g.generation, generationErr = database.SyncGeneration(ctx, s.DB, s.ProjectID)
 	if generationErr != nil {

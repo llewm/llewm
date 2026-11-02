@@ -22,6 +22,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // withCPUProfile records only this process, ending at the earlier of the
@@ -65,6 +66,7 @@ func syncCommand() *cobra.Command {
 	var output string
 	var allowPrompt bool
 	var cpuProfile string
+	var revalidate bool
 	var profileDuration time.Duration
 	parent := &cobra.Command{
 		Use: "sync",
@@ -89,6 +91,15 @@ func syncCommand() *cobra.Command {
 			format, err := outputFormat(output)
 			if err != nil {
 				return err
+			}
+			if revalidate {
+				previous := cmd.Context()
+				ctx, err := syncwork.WithFreshValidation(previous)
+				if err != nil {
+					return err
+				}
+				cmd.SetContext(ctx)
+				defer cmd.SetContext(previous)
 			}
 			return withCPUProfile(cpuProfile, profileDuration, func() error {
 				return withApp(cmd, func(application *app.App) error {
@@ -118,6 +129,7 @@ func syncCommand() *cobra.Command {
 	}
 	parent.Flags().BoolVar(&allowPrompt, "prompt", false, "allow configured askpass for this explicit sync; default retains pending records without prompting")
 	parent.Flags().StringVar(&output, "output", "text", "text or json")
+	parent.Flags().BoolVar(&revalidate, "revalidate", false, "fully revalidate history during this sync instead of reusing prior receipts")
 	parent.Flags().StringVar(&cpuProfile, "cpu-profile", "", "write an opt-in CPU profile to a new private local file")
 	parent.Flags().DurationVar(&profileDuration, "profile-duration", 30*time.Second, "maximum CPU profile duration (up to 5m)")
 

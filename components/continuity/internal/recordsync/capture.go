@@ -13,13 +13,13 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
-func (a Archive) captureRoute() (string, error) {
+func (a Archive) captureRoute(ctx context.Context) (string, error) {
 	build := buildinfo.Current()
 	if build.BuildDirty {
 		return "", fmt.Errorf("uncommitted build cannot reuse capture proofs")
 	}
 	body, _ := json.Marshal([]any{"capture-sqlite-v1", build.GitCommit, a.ProjectID, a.Lineage})
-	return Hash(string(body)), nil
+	return syncwork.ScopedValidationKey(ctx, Hash(string(body))), nil
 }
 
 // CaptureProject binds canonical export progress to the immutable archive epoch.
@@ -29,7 +29,7 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, project string)
 	if db != a.DB || project != a.ProjectID {
 		return false, fmt.Errorf("matching project/archive database required")
 	}
-	route, routeErr := a.captureRoute()
+	route, routeErr := a.captureRoute(ctx)
 	var epoch string
 	var cursor database.SyncCursor
 	var changes []database.SyncChange

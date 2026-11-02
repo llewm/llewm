@@ -149,7 +149,7 @@ func (s Syncer) publishBlocks(ctx context.Context, repo git, lineage string, obs
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := s.advanceObservedInventory(lineage, observation[0], plan.Observed); err != nil {
+	if err := s.advanceObservedInventory(ctx, lineage, observation[0], plan.Observed); err != nil {
 		return nil, nil, err
 	}
 	return plan.Blocks, plan.Snapshot, nil
@@ -218,7 +218,7 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 		if err != nil {
 			return recordsync.ImportResult{}, err
 		}
-		if err := s.advanceObservedInventory(lineage, observed, plan.Observed); err != nil {
+		if err := s.advanceObservedInventory(ctx, lineage, observed, plan.Observed); err != nil {
 			return recordsync.ImportResult{}, err
 		}
 		scope.Observed = observed.Stamp
@@ -227,7 +227,7 @@ func (s Syncer) importTrackedBlocks(ctx context.Context, repo git, lineage strin
 			if err != nil {
 				return recordsync.JournalPublicationPlan{}, err
 			}
-			if err := s.advanceObservedInventory(lineage, observed, complete.Observed); err != nil {
+			if err := s.advanceObservedInventory(ctx, lineage, observed, complete.Observed); err != nil {
 				return recordsync.JournalPublicationPlan{}, err
 			}
 			return complete, nil

@@ -82,7 +82,7 @@ func (s Syncer) guard(ctx context.Context, repo git) (syncGuard, error) {
 		return g, fmt.Errorf("uncommitted build cannot reuse sync proofs")
 	}
 	body, _ := json.Marshal([]any{syncProofVersion, recordsync.IndexVersion, build.GitCommit, s.Remote, s.Clone, identity.LineageID, identity.InstanceID, directory, s.Relay})
-	g.route = recordsync.Hash(string(body))
+	g.route = syncwork.ScopedValidationKey(ctx, recordsync.Hash(string(body)))
 	return g, nil
 }
 
