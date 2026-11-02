@@ -94,6 +94,20 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 			}
 		}
 	}
+	// The local namespace layout is validated. Fetch fills only remote
+	// refs while observation/capture/publication keep their commit boundaries.
+	// Git maintenance is disabled by the runner; all local writes still finish
+	// before any remote history is merged or imported, even if fetching fails.
+	var fetching *fetchTask
+	if !p.convert && !prefetched {
+		fetching = startFetchTask(ctx, func(worker context.Context) fetchResult {
+			if err := probe(worker, repo, s.Remote, p.deadline); err != nil {
+				return fetchResult{err: err, probe: true}
+			}
+			return fetchResult{err: s.fetch(worker, repo, p)}
+		})
+		defer fetching.close()
+	}
 	var observation *gitObservationReceipt
 	if p.convert {
 		if _, err := s.trackedPublications(local, repo, identity.LineageID); err != nil {
@@ -155,8 +169,21 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		if err := stopped(ctx, "fetching"); err != nil {
 			return result, err
 		}
+		var probeErr, fetchErr error
+		if attempt == 0 && fetching != nil {
+			fetched := fetching.wait()
+			if fetched.probe {
+				probeErr = fetched.err
+			} else {
+				fetchErr = fetched.err
+			}
+			prefetched = fetched.err == nil
+		}
 		if attempt == 0 && !prefetched {
-			if err := probe(ctx, repo, s.Remote, p.deadline); errors.Is(err, errBudget) {
+			if fetching == nil {
+				probeErr = probe(ctx, repo, s.Remote, p.deadline)
+			}
+			if err := probeErr; errors.Is(err, errBudget) {
 				deferred, result.Detail = true, fmt.Sprintf("no time left to fetch within %s; a background sync continues", p.budget)
 				break
 			} else if err != nil {
@@ -168,7 +195,10 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 			}
 		}
 		if attempt != 0 || !prefetched {
-			if err := s.fetch(ctx, repo, p); errors.Is(err, errBudget) {
+			if attempt != 0 || fetching == nil {
+				fetchErr = s.fetch(ctx, repo, p)
+			}
+			if err := fetchErr; errors.Is(err, errBudget) {
 				deferred, result.Detail = true, fmt.Sprintf("fetch did not finish within %s; a background sync continues", p.budget)
 				break
 			} else if err != nil {

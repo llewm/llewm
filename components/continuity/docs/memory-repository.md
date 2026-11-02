@@ -262,6 +262,14 @@ literal NUL. A valid JSON prefix cannot hide trailing stored bytes from exact
 matching, repair or catalog reconstruction. Valid Unicode bodies keep their
 complete canonical bytes.
 
+After validating the local namespace layout, a normal full Git cycle can fetch
+remote refs and objects while local observation, capture and publication keep
+their existing transaction boundaries. Merge and semantic import wait for local
+publication and the fetch result. A failed fetch still preserves committed
+local history. A local failure cancels and joins the fetch before releasing the
+clone lock; already received Git objects remain. Conversion keeps its sequential
+workflow, and an earlier successful fetch is reused.
+
 A known observation reads only changed selected blocks through the Git tree
 delta. Previously observed bytes remain covered by explicit full audits;
 out-of-band corruption of an old object is not promised detection on every
