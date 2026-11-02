@@ -136,6 +136,14 @@ checked in its transaction, including after writes. This shares no database
 receipt across transaction boundaries and changes no capture cursor or build
 binding.
 
+Envelope readers may accelerate the initial JSON decode, but still reconstruct
+the complete canonical envelope and verify its nested objects, hashes, schema
+and references. Failed attempts rerun the standard reader to retain its errors.
+Inputs above the canonical size bound or containing more than 128 opening JSON
+delimiters (including those inside strings) use the standard reader directly,
+preserving its nesting limits. Returned values own their buffers; this adds no
+cross-operation cache, changes no wire format and keeps builds CGO-free.
+
 The legacy migration reader opens an existing archive without creating it. It
 requires the exact lineage marker, canonical file framing, and at least one
 valid origin marker per envelope. It rejects orphan provenance, abandoned staging

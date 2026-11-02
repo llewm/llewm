@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	fastjson "github.com/segmentio/encoding/json"
+
 	"github.com/llewm/llewm/components/continuity/internal/activity"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
@@ -213,11 +215,37 @@ func DecodeMemoryFile(relativePath string, body []byte) (EnvelopeSpec, error) {
 
 // decodeMemoryEnvelope retains the encoding produced by full canonical and hash
 // validation, so snapshot consumers do not need to encode the same record again.
+// Accelerated parsing still requires complete canonical reconstruction. Any
+// failure reruns the standard reader to preserve its validation errors.
 func decodeMemoryEnvelope(line []byte) (EnvelopeSpec, EncodedEnvelope, error) {
-	var envelope Envelope
+	if spec, encoded, err := decodeMemoryEnvelopeWithDecoder(line, true); err == nil {
+		return spec, encoded, nil
+	}
+	return decodeMemoryEnvelopeWithDecoder(line, false)
+}
+
+func decodeEnvelopeJSON(line []byte, e *Envelope, fast bool) error {
+	// The accelerated reader recursively skips raw JSON without a depth limit.
+	// Counting every opener (even inside strings) conservatively bounds its
+	// stack. Larger or more complex inputs keep the standard reader's limits.
+	if fast && len(line) <= MaxCanonicalBytes && bytes.Count(line, []byte{'{'})+bytes.Count(line, []byte{'['}) <= 128 {
+		rest, err := fastjson.Parse(line, e, fastjson.DisallowUnknownFields)
+		if err != nil {
+			return err
+		}
+		if len(rest) != 0 {
+			return fmt.Errorf("trailing envelope JSON")
+		}
+		return nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&envelope); err != nil {
+	return decoder.Decode(e)
+}
+
+func decodeMemoryEnvelopeWithDecoder(line []byte, fast bool) (EnvelopeSpec, EncodedEnvelope, error) {
+	var envelope Envelope
+	if err := decodeEnvelopeJSON(line, &envelope, fast); err != nil {
 		return EnvelopeSpec{}, EncodedEnvelope{}, err
 	}
 	recorded, err := parsePortableTime(envelope.RecordedAt)
@@ -483,15 +511,22 @@ var transportRecordTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 // DecodeTransportEnvelope verifies current wire-format integrity without claiming
 // to understand an unknown record schema. Such objects may be retained/relayed
 // under explicit endpoint authorization, but ordinary semantic readers remain strict.
+// Both JSON readers pass through the same complete integrity checks; failed
+// accelerated attempts fall back to the standard reader, including its errors.
 func DecodeTransportEnvelope(body []byte) (EncodedEnvelope, error) {
+	if encoded, err := decodeTransportEnvelopeWithDecoder(body, true); err == nil {
+		return encoded, nil
+	}
+	return decodeTransportEnvelopeWithDecoder(body, false)
+}
+
+func decodeTransportEnvelopeWithDecoder(body []byte, fast bool) (EncodedEnvelope, error) {
 	if len(body) > MaxPayloadBytes+MaxIndexBytes+(64<<10) {
 		return EncodedEnvelope{}, fmt.Errorf("transport envelope exceeds bounds")
 	}
 	line := bytes.TrimSuffix(body, []byte("\n"))
 	var e Envelope
-	decoder := json.NewDecoder(bytes.NewReader(line))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&e); err != nil {
+	if err := decodeEnvelopeJSON(line, &e, fast); err != nil {
 		return EncodedEnvelope{}, err
 	}
 	if !transportRecordTypePattern.MatchString(e.RecordType) || e.RecordSchemaVersion < 1 {
