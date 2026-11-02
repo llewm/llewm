@@ -127,6 +127,15 @@ Counter changes unrelated to the exact appended journal event invalidate that
 epoch, so damaged tracking cannot reuse canonical capture proofs. Old CLI writers
 own a different storage path; drain them before the writer137 cutover.
 
+Within one capture call, the fresh canonical exporter may share its validated
+bytes with the archive audit and insertion path. At most 8192 entries reference
+already-owned export buffers. Entries beyond that bound, oversized envelopes and
+metadata needing UTF-8 normalization use the ordinary transport decoder. Public capture inputs remain untrusted. Every
+archive body, identity, origin, journal reference and count is still read and
+checked in its transaction, including after writes. This shares no database
+receipt across transaction boundaries and changes no capture cursor or build
+binding.
+
 The legacy migration reader opens an existing archive without creating it. It
 requires the exact lineage marker, canonical file framing, and at least one
 valid origin marker per envelope. It rejects orphan provenance, abandoned staging

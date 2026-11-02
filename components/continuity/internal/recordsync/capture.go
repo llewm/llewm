@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/database"
@@ -89,6 +90,7 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, project string)
 	if exported.Identity.LineageID != a.Lineage {
 		return false, fmt.Errorf("project lineage changed during export")
 	}
+	verified := a.freshCaptureExportObservations(exported)
 	acknowledged := false
 	err = a.store().transact(ctx, func(tx *sql.Tx) error {
 		stamp, err := a.store().stampWithin(ctx, tx, "ready")
@@ -96,11 +98,11 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, project string)
 			return err
 		}
 		if !delta || stamp.Epoch != epoch {
-			if _, err := a.store().auditWithin(ctx, tx); err != nil {
+			if _, err := a.store().auditVerifiedWithin(ctx, tx, verified); err != nil {
 				return err
 			}
 		}
-		if err := a.captureLocalWithin(ctx, tx, exported.Envelopes); err != nil {
+		if err := a.captureLocalVerifiedWithin(ctx, tx, exported.Envelopes, verified); err != nil {
 			return err
 		}
 		if routeErr == nil && cursorErr == nil && stamp.Epoch == epoch && captureDependenciesClosed(exported.Envelopes) {
@@ -121,16 +123,44 @@ func (a Archive) CaptureProject(ctx context.Context, db *sql.DB, project string)
 		if complete.Identity.LineageID != a.Lineage {
 			return false, fmt.Errorf("project lineage changed during export")
 		}
+		verified := a.freshCaptureExportObservations(complete)
 		if err := a.store().transact(ctx, func(tx *sql.Tx) error {
-			if _, err := a.store().auditWithin(ctx, tx); err != nil {
+			if _, err := a.store().auditVerifiedWithin(ctx, tx, verified); err != nil {
 				return err
 			}
-			return a.captureLocalWithin(ctx, tx, complete.Envelopes)
+			return a.captureLocalVerifiedWithin(ctx, tx, complete.Envelopes, verified)
 		}); err != nil {
 			return false, err
 		}
 	}
 	return false, nil
+}
+
+const maxCaptureExportObservations = 8192
+
+// Call only with the immediately preceding package-owned EncodeMemoryExport or
+// EncodeMemoryDelta result. Those readers fully validate/reconstruct canonical
+// bytes. Public CaptureLocal inputs never enter this map. The map adds bounded
+// metadata references to already-owned export bytes, without copying bodies or
+// retaining any database receipt across the export/capture transaction boundary.
+func (a Archive) freshCaptureExportObservations(exported portable.MemoryExport) map[string]portable.EncodedEnvelope {
+	verified := make(map[string]portable.EncodedEnvelope, min(maxCaptureExportObservations, len(exported.Envelopes)))
+	for _, object := range exported.Envelopes {
+		if len(verified) == maxCaptureExportObservations {
+			break
+		}
+		e := object.Envelope
+		// Encoding can normalize invalid UTF-8, and permits metadata larger
+		// than transport's outer bound. Use the decoder for those inputs.
+		metadataExact := utf8.ValidString(e.RecordID) && utf8.ValidString(e.Authority)
+		for _, ref := range e.Refs {
+			metadataExact = metadataExact && utf8.ValidString(ref.Kind) && utf8.ValidString(ref.ID)
+		}
+		if metadataExact && len(object.Bytes) <= MaxObjectBytes && e.LineageID == a.Lineage && e.Format == "llewm-portable-record" && e.FormatVersion == portable.PortableFormatVersion && portable.SupportedEnvelope(e) {
+			verified[e.EnvelopeSHA256] = object
+		}
+	}
+	return verified
 }
 
 // Derived block membership is not a canonical export input. Canonical changes

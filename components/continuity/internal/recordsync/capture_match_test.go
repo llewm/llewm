@@ -52,6 +52,7 @@ func TestCaptureMatchStopsBeforeWritesAndPreservesErrorOrder(t *testing.T) {
 			ctx, s, _, objects := archiveMatchFixture(t, 65)
 			a := Archive{DB: s.DB, ProjectID: s.ProjectID, Lineage: s.Lineage}
 			arrival := archiveObject(t, "arrival", `{}`)
+			owned := a.freshCaptureExportObservations(portable.MemoryExport{Envelopes: append(append([]portable.EncodedEnvelope(nil), objects...), arrival)})
 			tx, err := s.DB.BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -87,6 +88,17 @@ func TestCaptureMatchStopsBeforeWritesAndPreservesErrorOrder(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := a.referenceCaptureLocalWithin(ctx, tx, objects)
+			if _, err := tx.Exec(`ROLLBACK TO reference_capture`); err != nil {
+				t.Fatal(err)
+			}
+			verifiedCtx, verifiedWork := syncwork.WithWorkMetrics(ctx)
+			gotVerified := a.captureLocalVerifiedWithin(verifiedCtx, tx, objects, owned)
+			if (gotVerified == nil) != (want == nil) || gotVerified != nil && gotVerified.Error() != want.Error() {
+				t.Fatalf("owned export changed error order: %v vs %v", gotVerified, want)
+			}
+			if verifiedWork.Counts()["capture_decode_reuses"] == 0 {
+				t.Fatal("fixture did not exercise owned byte reuse")
+			}
 			if _, err := tx.Exec(`ROLLBACK TO reference_capture`); err != nil {
 				t.Fatal(err)
 			}
@@ -200,6 +212,16 @@ func TestCaptureMatchMatchesSequentialStateAcrossBatchBoundaries(t *testing.T) {
 				got := state()
 				if got != want {
 					t.Fatal("batching changed exact archive/provenance/stamp state")
+				}
+				if _, err := tx.Exec(`ROLLBACK TO compare_capture`); err != nil {
+					t.Fatal(err)
+				}
+				owned := a.freshCaptureExportObservations(portable.MemoryExport{Envelopes: objects})
+				if err := a.captureLocalVerifiedWithin(ctx, tx, objects, owned); err != nil {
+					t.Fatal(err)
+				}
+				if state() != want {
+					t.Fatal("owned export changed archive/provenance/stamp state")
 				}
 				if _, err := tx.Exec(`ROLLBACK TO compare_capture`); err != nil {
 					t.Fatal(err)

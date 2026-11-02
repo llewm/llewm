@@ -128,8 +128,9 @@ func (s archiveStore) putWithin(ctx context.Context, tx *sql.Tx, status, originH
 	return s.putValidatedWithin(ctx, tx, status, originHash, verified)
 }
 
-// putValidatedWithin is private to the ingestion paths which have just decoded
-// these exact bytes. Exported parsed fields must never reach it without decode.
+// putValidatedWithin is private to ingestion paths which have just validated
+// or canonically reconstructed these exact bytes. Caller-owned parsed fields
+// must never reach it without decoding.
 func (s archiveStore) putValidatedWithin(ctx context.Context, tx *sql.Tx, status, originHash string, verified []portable.EncodedEnvelope) (int, error) {
 	if (status != "staging" && status != "ready") || !hex64.MatchString(originHash) || len(verified) > portable.MaxRecordCount {
 		return 0, fmt.Errorf("invalid archive batch")

@@ -172,6 +172,10 @@ func EncodeEnvelope(spec EnvelopeSpec) (EncodedEnvelope, error) {
 	if spec.RecordedAt.IsZero() {
 		return EncodedEnvelope{}, fmt.Errorf("recorded time is required")
 	}
+	recordedAt := spec.RecordedAt.UTC().Format(time.RFC3339Nano)
+	if err := validateCanonicalTime(recordedAt); err != nil {
+		return EncodedEnvelope{}, fmt.Errorf("recorded time: %w", err)
+	}
 	if len(spec.Payload) > MaxPayloadBytes {
 		return EncodedEnvelope{}, fmt.Errorf("payload exceeds %d bytes", MaxPayloadBytes)
 	}
@@ -213,7 +217,7 @@ func EncodeEnvelope(spec EnvelopeSpec) (EncodedEnvelope, error) {
 		Format: "llewm-portable-record", FormatVersion: PortableFormatVersion,
 		LineageID: spec.LineageID, RecordType: spec.RecordType,
 		RecordSchemaVersion: spec.RecordSchemaVersion, RecordID: spec.RecordID,
-		RecordRevision: spec.RecordRevision, RecordedAt: spec.RecordedAt.UTC().Format(time.RFC3339Nano),
+		RecordRevision: spec.RecordRevision, RecordedAt: recordedAt,
 		Authority: spec.Authority, ContentSHA256: hashHex(payload), Index: index,
 		Refs: refs, Payload: payload,
 	}

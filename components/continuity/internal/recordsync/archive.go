@@ -51,6 +51,12 @@ func (a Archive) CaptureLocal(objects []portable.EncodedEnvelope) error {
 }
 
 func (a Archive) captureLocalWithin(ctx context.Context, tx *sql.Tx, objects []portable.EncodedEnvelope) error {
+	return a.captureLocalVerifiedWithin(ctx, tx, objects, nil)
+}
+
+// verified is private to the fresh exporter in CaptureProject. It reuses only
+// byte validation, never an archive comparison or a database snapshot receipt.
+func (a Archive) captureLocalVerifiedWithin(ctx context.Context, tx *sql.Tx, objects []portable.EncodedEnvelope, verified map[string]portable.EncodedEnvelope) error {
 	if _, err := a.store().stampWithin(ctx, tx, "ready"); err != nil {
 		return err
 	}
@@ -59,25 +65,25 @@ func (a Archive) captureLocalWithin(ctx context.Context, tx *sql.Tx, objects []p
 	// change subsequent observations, so the remainder keeps original ordering.
 	for len(objects) >= 2 {
 		batch := objects[:min(32, len(objects))]
-		verified := make([]portable.EncodedEnvelope, 0, len(batch))
+		decodedBatch := make([]portable.EncodedEnvelope, 0, len(batch))
 		for _, object := range batch {
 			if ctx.Err() != nil {
 				break
 			}
-			decoded, err := portable.DecodeTransportEnvelope(object.Bytes)
+			decoded, err := captureObservation(ctx, object, verified)
 			if err != nil || decoded.Envelope.LineageID != a.Lineage || !bytes.Equal(decoded.Bytes, object.Bytes) {
 				break
 			}
-			verified = append(verified, decoded)
+			decodedBatch = append(decodedBatch, decoded)
 		}
-		if len(verified) != len(batch) || !a.store().archiveObjectsMatchWithin(ctx, tx, "", verified) {
+		if len(decodedBatch) != len(batch) || !a.store().archiveObjectsMatchWithin(ctx, tx, "", decodedBatch) {
 			break
 		}
 		syncwork.RecordWork(ctx, "capture_match_records", int64(len(batch)))
 		objects = objects[len(batch):]
 	}
 	for _, object := range objects {
-		decoded, err := portable.DecodeTransportEnvelope(object.Bytes)
+		decoded, err := captureObservation(ctx, object, verified)
 		if err != nil || decoded.Envelope.LineageID != a.Lineage || !bytes.Equal(decoded.Bytes, object.Bytes) {
 			return fmt.Errorf("invalid local archive observation")
 		}
@@ -90,11 +96,20 @@ func (a Archive) captureLocalWithin(ctx context.Context, tx *sql.Tx, objects []p
 		} else if err != nil {
 			return err
 		}
-		if _, err := a.store().putWithin(ctx, tx, "ready", origin, []portable.EncodedEnvelope{decoded}); err != nil {
+		if _, err := a.store().putValidatedWithin(ctx, tx, "ready", origin, []portable.EncodedEnvelope{decoded}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func captureObservation(ctx context.Context, object portable.EncodedEnvelope, verified map[string]portable.EncodedEnvelope) (portable.EncodedEnvelope, error) {
+	if saved, ok := verified[object.Envelope.EnvelopeSHA256]; ok && bytes.Equal(saved.Bytes, object.Bytes) {
+		syncwork.RecordWork(ctx, "capture_decode_reuses", 1)
+		return saved, nil
+	}
+	syncwork.RecordWork(ctx, "capture_envelope_decodes", 1)
+	return portable.DecodeTransportEnvelope(object.Bytes)
 }
 
 func (a Archive) Objects(ctx context.Context, endpoint string, relay bool) ([]portable.EncodedEnvelope, error) {
