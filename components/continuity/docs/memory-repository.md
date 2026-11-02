@@ -940,6 +940,22 @@ maintained counts; bodies absent from the observation are decoded independently.
 input, and `archive_audit_decodes/op` counts independent audit decodes. Neither
 reuse survives the call or trusts exported parsed envelope fields.
 
+Index insertion compares stored envelope bodies, identities, membership and
+reference sets in batches of 32 within the caller's transaction. Completely
+matching blocks need no writes. When only memberships are missing, inserts can
+also use 32-row batches if the entire membership-trigger effect chain matches
+the reviewed definitions from migrations 086, 089 and 092. Unknown main or TEMP
+triggers, changed/missing definitions, or any body/reference mismatch use the
+original sequential repair path from its beginning, preserving trigger effects
+on later rows. This gate grants no reusable verification receipt; exact-commit
+proof binding and full audits remain.
+
+`inventory_match_queries/op` counts attempted body/reference batch reads;
+`inventory_match_records/op` counts their scanned body rows, including repeated
+checks. `inventory_match_shortcuts/op` counts fully matching write-free blocks.
+`inventory_membership_batches/op` counts attempted batched insert statements,
+including failed attempts. They do not count unique records or certify a commit.
+
 Cold archive snapshots collect canonical envelopes during that same complete
 audit, then select permitted provenance in one query within its read transaction.
 This removes repeated envelope reads, decodes and per-envelope route checks;

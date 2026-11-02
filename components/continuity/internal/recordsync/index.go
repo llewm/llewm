@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
@@ -84,6 +86,40 @@ func (s Index) addBlockWithin(ctx context.Context, tx *sql.Tx, verified Block) e
 }
 
 func (s Index) insertBlockObjects(ctx context.Context, tx *sql.Tx, verified Block) error {
+	missing, matched, err := s.blockObjectsMatchWithin(ctx, tx, verified)
+	if err != nil {
+		return err
+	}
+	if matched && len(missing) == 0 {
+		syncwork.RecordWork(ctx, "inventory_match_shortcuts", 1)
+		return nil
+	}
+	// Only reviewed membership effects may follow prefetched comparisons.
+	// Unknown triggers require the original per-record read/write ordering.
+	if matched {
+		allowed, err := database.HistoryIndexMembershipBatching(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if allowed {
+			for start := 0; start < len(missing); start += 32 {
+				batch := missing[start:min(start+32, len(missing))]
+				args := make([]any, 0, 3*len(batch))
+				for _, hash := range batch {
+					args = append(args, s.ProjectID, verified.Hash, hash)
+				}
+				syncwork.RecordWork(ctx, "inventory_membership_batches", 1)
+				if _, err := tx.ExecContext(ctx, `INSERT INTO history_index_block_members(project_id,block_hash,envelope_hash) VALUES `+strings.TrimSuffix(strings.Repeat("(?,?,?),", len(batch)), ",")+` ON CONFLICT DO NOTHING`, args...); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+	return s.insertBlockObjectsSequential(ctx, tx, verified)
+}
+
+func (s Index) insertBlockObjectsSequential(ctx context.Context, tx *sql.Tx, verified Block) error {
 	for _, object := range verified.Objects {
 		e := object.Envelope
 		var kind, id string
