@@ -185,7 +185,10 @@ func (s *importInvocationSource) QueryContext(ctx context.Context, query string,
 	if err != nil {
 		return nil, err
 	}
-	return s.queryer.QueryContext(ctx, invocationRecordsQuery+" AND id IN (SELECT value FROM json_each(?)) ORDER BY occurred_at,id", s.project, string(body))
+	// Drive the lookup from selected identities. Without statistics, the IN
+	// subquery can instead scan every raw invocation in this project through
+	// its time index. The single-column subquery also keeps id unambiguous.
+	return s.queryer.QueryContext(ctx, `SELECT `+invocationRecordsColumns+` FROM (SELECT value AS selected_invocation_id FROM json_each(?)) CROSS JOIN actor_invocations WHERE actor_invocations.id=selected_invocation_id AND project_id=? ORDER BY occurred_at,id`, string(body), s.project)
 }
 
 func (s *importInvocationSource) closeParents(ctx context.Context) error {

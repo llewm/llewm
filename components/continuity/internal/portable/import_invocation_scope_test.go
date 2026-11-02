@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/activity"
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
@@ -19,6 +21,101 @@ import (
 )
 
 const scopeLineage = "lineage:abababababababababababababababab"
+
+func invocationRowsForJoinTest(t *testing.T, ctx context.Context, source queryer, query string, args ...any) [][]any {
+	t.Helper()
+	rows, err := source.QueryContext(ctx, query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result [][]any
+	for rows.Next() {
+		values, targets := make([]any, len(columns)), make([]any, len(columns))
+		for i := range values {
+			targets[i] = &values[i]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			t.Fatal(err)
+		}
+		for i, value := range values {
+			if body, ok := value.([]byte); ok {
+				values[i] = bytes.Clone(body)
+			}
+		}
+		result = append(result, values)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestInvocationIdentityJoinMatchesMembershipReader(t *testing.T) {
+	ctx, db, project := invocationScopeProject(t)
+	scopeActor(t, ctx, db, project, "parent", "")
+	scopeActor(t, ctx, db, project, "selected", "parent")
+	ids := []string{"123", `quote"slash\é`}
+	for i := 0; i < 513; i++ {
+		ids = append(ids, fmt.Sprintf("selected-%03d", i))
+	}
+	for _, id := range ids {
+		scopeActor(t, ctx, db, project, id, "")
+	}
+	scopeActor(t, ctx, db, project, "unrelated", "")
+	if _, err := db.ExecContext(ctx, `UPDATE actor_invocations SET received_at='malformed' WHERE id='unrelated'`); err != nil {
+		t.Fatal(err)
+	}
+	other, err := (activity.Store{DB: db}).EnsureProject(ctx, t.TempDir(), "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopeActor(t, ctx, db, other, "foreign", "")
+	for _, analyzed := range []bool{false, true} {
+		if analyzed {
+			if _, err := db.ExecContext(ctx, `ANALYZE actor_invocations`); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, input := range [][]string{nil, {"selected", "foreign", "missing"}, append([]string{"selected", "foreign", "missing"}, ids...)} {
+			tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			roots := map[string]struct{}{}
+			for _, id := range input {
+				roots[id] = struct{}{}
+			}
+			selected := &importInvocationSource{queryer: tx, project: project, roots: roots}
+			got := invocationRowsForJoinTest(t, ctx, selected, invocationRecordsQuery+" ORDER BY occurred_at,id", project)
+			// The reference uses the former membership predicate after the same
+			// parent closure, independently of the new join and its chosen index.
+			var closed []string
+			for id := range roots {
+				closed = append(closed, id)
+			}
+			sort.Strings(closed)
+			body, err := json.Marshal(closed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := invocationRowsForJoinTest(t, ctx, tx, invocationRecordsQuery+" AND id IN (SELECT value FROM json_each(?)) ORDER BY occurred_at,id", project, string(body))
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("analyzed=%t roots=%d: joined rows differ", analyzed, len(input))
+			}
+			if len(input) == 3 && len(got) != 2 {
+				t.Fatalf("wrong parent/project/missing selection: %d", len(got))
+			}
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
 
 func invocationScopeProject(t *testing.T) (context.Context, *sql.DB, string) {
 	t.Helper()

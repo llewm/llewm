@@ -437,7 +437,8 @@ func loadInvocations(ctx context.Context, source queryer, projectID string, ids 
 	return result, nil
 }
 
-const invocationRecordsQuery = `SELECT id,session_id,parent_invocation_id,actor_type,client,client_version,provider,model,identity_source,occurred_at,received_at,schema_version,effort_requested_raw,effort_requested_normalized,effort_requested_source,effort_requested_authority,effort_effective_raw,effort_effective_normalized,effort_effective_source,effort_effective_authority FROM actor_invocations WHERE project_id=?`
+const invocationRecordsColumns = `id,session_id,parent_invocation_id,actor_type,client,client_version,provider,model,identity_source,occurred_at,received_at,schema_version,effort_requested_raw,effort_requested_normalized,effort_requested_source,effort_requested_authority,effort_effective_raw,effort_effective_normalized,effort_effective_source,effort_effective_authority`
+const invocationRecordsQuery = `SELECT ` + invocationRecordsColumns + ` FROM actor_invocations WHERE project_id=?`
 
 func loadInvocationBatch(ctx context.Context, source queryer, projectID string, ids map[string]struct{}, all bool) ([]attribution.Invocation, error) {
 	args := []any{projectID}

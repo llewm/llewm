@@ -653,6 +653,10 @@ the caller's transaction until the closure is complete. A required malformed
 invocation still blocks validation. Unrelated raw invocation activity remains
 stored and does not block curated sync, regardless of bundle size. Export
 selection and transaction/generation guards are unchanged.
+The invocation body query is driven from the selected identity set through an
+identity/project lookup. It does not rely on planner statistics to choose that
+loop order; the project filter, complete parent closure, returned metadata and
+ordering remain the same.
 
 Writer API 124 retains each canonical envelope in an append-only local table
 at its first memory export or successful import (migration 076). Later exports
