@@ -12,12 +12,6 @@ var patterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(https?://[^:/\s]+:)[^@\s]+@`),
 }
 
-// Every match above requires one of these prefixes. Checking them together
-// avoids four complete replacement scans for ordinary historical prose. Keep
-// this case-folded regexp aligned with patterns, including Unicode folding;
-// a positive result always runs the original replacements in their order.
-var candidate = regexp.MustCompile(`(?i)(?:(?:api[_-]?key|token|password|secret)["']?\s*[=:]|authorization:\s*bearer\s+|https?://[^:/\s]+:)`)
-
 // Value sanitizes decoded JSON structurally so nested metadata cannot bypass
 // string redaction. Entire raw-input/environment fields are never retained.
 func Value(value any) any {
@@ -52,11 +46,10 @@ func String(value string) string {
 	if !strings.ContainsAny(value, ":=") {
 		return value
 	}
-	match := candidate.FindStringIndex(value)
-	if match == nil {
+	start := candidateStart(value)
+	if start < 0 {
 		return value
 	}
-	start := match[0]
 	// The first replacement can include the quote immediately before its
 	// keyword. No rule can begin earlier than this first necessary prefix.
 	if start > 0 && (value[start-1] == '"' || value[start-1] == '\'') {

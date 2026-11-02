@@ -2,8 +2,10 @@ package redact
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func TestStringRemovesCommonSecrets(t *testing.T) {
@@ -23,6 +25,61 @@ func referenceString(value string) string {
 	return value
 }
 
+var candidateReference = regexp.MustCompile(`(?i)(?:(?:api[_-]?key|token|password|secret)["']?\s*[=:]|authorization:\s*bearer\s+|https?://[^:/\s]+:)`)
+
+func checkCandidate(t *testing.T, value string) {
+	t.Helper()
+	want := -1
+	if match := candidateReference.FindStringIndex(value); match != nil {
+		want = match[0]
+	}
+	if got := candidateStart(value); got != want {
+		t.Fatalf("candidate %q: got%d want%d", value, got, want)
+	}
+}
+
+func TestCandidateMatchesRegexp(t *testing.T) {
+	for _, value := range []string{
+		"", "history: remains unchanged", "token rotation: planned", "\"token\" \t= 'value'",
+		"https://token=value:credential@example.test", "https://host/path token=value", "https://host/path:token=value",
+		"authorization:Bearer value", "authorization :Bearer value", "authorization:\vBearer value", "authorization:\fBearer\tvalue",
+		"secret\u00a0=value", "api_Key='value'", "ſecret=value", "httpſ://user:pass@example.test", "password\n\r\f\t =x",
+	} {
+		checkCandidate(t, value)
+	}
+	for _, key := range []string{"apikey", "api_key", "api-key", "token", "password", "secret", "authorization", "http", "https"} {
+		variants := []string{""}
+		for _, r := range key {
+			var next []string
+			fold := r
+			for {
+				for _, prefix := range variants {
+					next = append(next, prefix+string(fold))
+				}
+				fold = unicode.SimpleFold(fold)
+				if fold == r {
+					break
+				}
+			}
+			variants = next
+		}
+		for _, variant := range variants {
+			for _, suffix := range []string{"=x", "\" : 'x'", ":\tBeArEr value", "://user:pass@host", "token=before"} {
+				value := "prose: [" + variant + suffix + " token=after"
+				checkCandidate(t, value)
+				if got, want := String(value), referenceString(value); got != want {
+					t.Fatalf("redaction %q: got%q want%q", value, got, want)
+				}
+			}
+		}
+	}
+	for c := 0; c < 256; c++ {
+		for _, value := range []string{"secret" + string(byte(c)) + "=value", "https://u" + string(byte(c)) + ":pass@host", "authorization:" + string(byte(c)) + "bearer" + string(byte(c)) + "value"} {
+			checkCandidate(t, value)
+		}
+	}
+}
+
 func FuzzStringMatchesReplacementRules(f *testing.F) {
 	for _, value := range []string{
 		"ordinary project history; token rotation remains planned",
@@ -36,6 +93,7 @@ func FuzzStringMatchesReplacementRules(f *testing.F) {
 		f.Add(value)
 	}
 	f.Fuzz(func(t *testing.T, value string) {
+		checkCandidate(t, value)
 		if got, want := String(value), referenceString(value); got != want {
 			t.Fatalf("redaction differs for %q: got %q want %q", value, got, want)
 		}
@@ -57,6 +115,25 @@ func BenchmarkHistoricalText(b *testing.B) {
 						_ = referenceString(text)
 					} else {
 						_ = String(text)
+					}
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkCandidateSearch(b *testing.B) {
+	for _, suffix := range []string{"", " secret='synthetic benchmark credential'"} {
+		value := strings.Repeat("Status: completed canonical history validation; token rotation remains planned. Preserve attribution, repair and fallback.\n", 100) + suffix
+		for _, reference := range []bool{false, true} {
+			b.Run(fmt.Sprintf("secret_%t/regexp_%t", suffix != "", reference), func(b *testing.B) {
+				b.SetBytes(int64(len(value)))
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					if reference {
+						_ = candidateReference.FindStringIndex(value)
+					} else {
+						_ = candidateStart(value)
 					}
 				}
 			})

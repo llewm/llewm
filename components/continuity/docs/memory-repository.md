@@ -823,10 +823,14 @@ establish live sync speedups. Delete the scratch profile and binary afterward.
 `BenchmarkHistorySyncPlanHistory` adds twenty synthetic, text-heavy plan
 revisions to each 500/5,669-record Git fixture, then measures complete cycles
 with one new decision. It covers repeated historical text processing that the
-decision-only fixtures miss. Redaction uses a combined necessary-prefix check
-to skip replacement scans only when no existing rule can match; possible
-matches still run every original replacement in order. Differential fuzzing
-compares this path with the replacement rules, including Unicode case folding.
+decision-only fixtures miss. Redaction searches assignment and URL delimiters
+for the first necessary rule prefix, rather than running a regexp search across
+every prose position. It preserves ASCII regexp whitespace and Unicode simple
+case folding, including long s and Kelvin sign. Possible matches still run every
+original replacement in order. Differential tests and fuzzing compare both the
+prefix byte offset with the previous regexp and the final text with all original
+replacement rules. `BenchmarkCandidateSearch` compares these prefix searches;
+its synthetic results do not establish complete live sync latency.
 
 The plan, mixed-history and remote mixed-history complete-cycle benchmarks also
 report opt-in work counters per measured cycle. `published_block_bytes/op` counts
