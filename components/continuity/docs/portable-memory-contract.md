@@ -83,6 +83,13 @@ required versions/schemas, duplicate identities, count/hash mismatches, invalid
 references and oversized fields. The current export is complete; timestamps are
 not incremental export cursors.
 
+Bundle validation checks independent records in groups of up to 128. Groups
+with at least 32 records use up to four workers, capped by Go scheduler
+parallelism; smaller groups remain sequential. Manifest guards run first, and
+record results, ordering checks and the first reported error retain wire order.
+All workers finish before return. This preserves every validation rule and
+creates no persistent workers, cache or verification proof.
+
 ## Shared-folder and hybrid History sync
 
 [Shared-folder History sync](shared-folder-history.md) uses the same immutable

@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -362,38 +364,30 @@ func ValidateBundle(manifestBytes, recordsBytes []byte) (Bundle, error) {
 	identities := make(map[string]struct{})
 	var setInput bytes.Buffer
 	var previous *Envelope
-	for position, line := range lines {
-		if len(line) == 0 {
-			return Bundle{}, fmt.Errorf("empty record line %d", position+1)
+	for first := 0; first < len(lines); first += 128 {
+		batch := lines[first:min(first+128, len(lines))]
+		values, errs := validateBundleRecords(manifest.LineageID, batch, first, min(4, runtime.GOMAXPROCS(0)))
+		for j, line := range batch {
+			position := first + j
+			if errs[j] != nil {
+				return Bundle{}, errs[j]
+			}
+			envelope := values[j]
+			if previous != nil && !envelopeLess(*previous, envelope) {
+				return Bundle{}, fmt.Errorf("record line %d is duplicate or out of order", position+1)
+			}
+			identity := fmt.Sprintf("%s\x00%s\x00%d", envelope.RecordType, envelope.RecordID, envelope.RecordRevision)
+			if _, exists := identities[identity]; exists {
+				return Bundle{}, fmt.Errorf("duplicate record identity at line %d", position+1)
+			}
+			identities[identity] = struct{}{}
+			counts[envelope.RecordType]++
+			setInput.WriteString(envelope.EnvelopeSHA256)
+			setInput.WriteByte('\n')
+			records = append(records, EncodedEnvelope{Envelope: envelope, Bytes: append([]byte(nil), line...)})
+			copy := envelope
+			previous = &copy
 		}
-		canonical, err := CanonicalizeJSON(line)
-		if err != nil {
-			return Bundle{}, fmt.Errorf("record line %d is not canonical: %w", position+1, err)
-		}
-		if !bytes.Equal(canonical, line) {
-			return Bundle{}, fmt.Errorf("record line %d is not canonical", position+1)
-		}
-		var envelope Envelope
-		if err := strictDecode(line, &envelope); err != nil {
-			return Bundle{}, fmt.Errorf("decode record line %d: %w", position+1, err)
-		}
-		if err := validateEnvelope(envelope, manifest.LineageID); err != nil {
-			return Bundle{}, fmt.Errorf("validate record line %d: %w", position+1, err)
-		}
-		if previous != nil && !envelopeLess(*previous, envelope) {
-			return Bundle{}, fmt.Errorf("record line %d is duplicate or out of order", position+1)
-		}
-		identity := fmt.Sprintf("%s\x00%s\x00%d", envelope.RecordType, envelope.RecordID, envelope.RecordRevision)
-		if _, exists := identities[identity]; exists {
-			return Bundle{}, fmt.Errorf("duplicate record identity at line %d", position+1)
-		}
-		identities[identity] = struct{}{}
-		counts[envelope.RecordType]++
-		setInput.WriteString(envelope.EnvelopeSHA256)
-		setInput.WriteByte('\n')
-		records = append(records, EncodedEnvelope{Envelope: envelope, Bytes: append([]byte(nil), line...)})
-		copy := envelope
-		previous = &copy
 	}
 	if !equalCounts(counts, manifest.RecordCounts) {
 		return Bundle{}, fmt.Errorf("record counts do not match manifest")
@@ -402,6 +396,64 @@ func ValidateBundle(manifestBytes, recordsBytes []byte) (Bundle, error) {
 		return Bundle{}, fmt.Errorf("record set hash mismatch")
 	}
 	return Bundle{Manifest: manifest, ManifestBytes: append([]byte(nil), manifestBytes...), RecordsBytes: append([]byte(nil), recordsBytes...), Records: records}, nil
+}
+
+// Only independent line checks run concurrently. Callers consume these slots in
+// wire order before checking cross-record ordering, identities and manifest sums.
+// The caller limits each group to 128 lines; every worker finishes before return.
+func validateBundleRecords(lineage string, lines [][]byte, first, workers int) ([]Envelope, []error) {
+	values := make([]Envelope, len(lines))
+	errs := make([]error, len(lines))
+	decode := func(i int) error {
+		line := lines[i]
+		position := first + i
+		if len(line) == 0 {
+			return fmt.Errorf("empty record line %d", position+1)
+		}
+		canonical, err := CanonicalizeJSON(line)
+		if err != nil {
+			return fmt.Errorf("record line %d is not canonical: %w", position+1, err)
+		}
+		if !bytes.Equal(canonical, line) {
+			return fmt.Errorf("record line %d is not canonical", position+1)
+		}
+		var e Envelope
+		if err := strictDecode(line, &e); err != nil {
+			return fmt.Errorf("decode record line %d: %w", position+1, err)
+		}
+		if err := validateEnvelope(e, lineage); err != nil {
+			return fmt.Errorf("validate record line %d: %w", position+1, err)
+		}
+		values[i] = e
+		return nil
+	}
+	workers = min(workers, 4)
+	if len(lines) < 32 || workers < 2 {
+		for i := range lines {
+			errs[i] = decode(i)
+			if errs[i] != nil {
+				break
+			}
+		}
+		return values, errs
+	}
+	jobs := make(chan int, len(lines))
+	for i := range lines {
+		jobs <- i
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				errs[i] = decode(i)
+			}
+		}()
+	}
+	wg.Wait()
+	return values, errs
 }
 
 func validateEnvelope(envelope Envelope, lineageID string) error {
