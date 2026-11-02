@@ -13,11 +13,13 @@ import (
 
 // archiveObjectsMatchWithin can avoid per-record SQL preparation only when the
 // entire input already has exact durable bytes, identities and both provenance
-// edges. It performs no writes or repairs. Any uncertainty uses the original
+// edges. An empty origin selects the first retained origin, as local capture
+// does, instead of requesting a new provenance edge. It performs no writes or
+// repairs. Any uncertainty uses the original
 // sequential reader/writer from the beginning, preserving trigger ordering when
 // an input actually needs a write. The caller owns the reserved SQLite writer.
 func (s archiveStore) archiveObjectsMatchWithin(ctx context.Context, tx *sql.Tx, origin string, objects []portable.EncodedEnvelope) bool {
-	if len(objects) == 0 {
+	if len(objects) < 2 {
 		return false
 	}
 	seen := make(map[string]bool, len(objects))
@@ -39,14 +41,20 @@ func (s archiveStore) archiveObjectsMatchWithin(ctx context.Context, tx *sql.Tx,
 	for start := 0; start < len(objects); start += 32 {
 		batch := objects[start:min(start+32, len(objects))]
 		expected := make(map[string]portable.EncodedEnvelope, len(batch))
-		args := []any{MaxObjectBytes + 1, origin, s.ProjectID}
+		selectedOrigin := `(SELECT p.origin_hash FROM history_archive_origins p WHERE p.project_id=e.project_id AND p.envelope_hash=e.envelope_hash ORDER BY p.origin_hash LIMIT 1)`
+		args := []any{MaxObjectBytes + 1}
+		if origin != "" {
+			selectedOrigin = `(SELECT p.origin_hash FROM history_archive_origins p WHERE p.project_id=e.project_id AND p.envelope_hash=e.envelope_hash AND p.origin_hash=?)`
+			args = append(args, origin)
+		}
+		args = append(args, s.ProjectID)
 		for _, object := range batch {
 			hash := object.Envelope.EnvelopeSHA256
 			expected[hash] = object
 			args = append(args, hash)
 		}
 		syncwork.RecordWork(ctx, "archive_match_queries", 1)
-		rows, err := tx.QueryContext(ctx, `SELECT e.envelope_hash,e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),o.origin_hash,EXISTS(SELECT 1 FROM history_archive_origins p WHERE p.project_id=e.project_id AND p.envelope_hash=e.envelope_hash AND p.origin_hash=?) FROM history_archive_envelopes e LEFT JOIN history_archive_origins o ON o.project_id=e.project_id AND o.envelope_hash=e.envelope_hash AND o.origin_hash=e.initial_origin_hash WHERE e.project_id=? AND e.envelope_hash IN (`+strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")+`)`, args...)
+		rows, err := tx.QueryContext(ctx, `SELECT e.envelope_hash,e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),o.origin_hash,`+selectedOrigin+` FROM history_archive_envelopes e LEFT JOIN history_archive_origins o ON o.project_id=e.project_id AND o.envelope_hash=e.envelope_hash AND o.origin_hash=e.initial_origin_hash WHERE e.project_id=? AND e.envelope_hash IN (`+strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")+`)`, args...)
 		if err != nil {
 			return false
 		}
@@ -57,15 +65,14 @@ func (s archiveStore) archiveObjectsMatchWithin(ctx context.Context, tx *sql.Tx,
 				var hash, kind, id string
 				var revision int
 				var body []byte
-				var initial sql.NullString
-				var held bool
-				if err := rows.Scan(&hash, &kind, &id, &revision, &body, &initial, &held); err != nil {
+				var initial, selected sql.NullString
+				if err := rows.Scan(&hash, &kind, &id, &revision, &body, &initial, &selected); err != nil {
 					return false
 				}
 				syncwork.RecordWork(ctx, "archive_match_records", 1)
 				object, ok := expected[hash]
 				e := object.Envelope
-				if !ok || kind != e.RecordType || id != e.RecordID || revision != e.RecordRevision || !bytes.Equal(body, object.Bytes) || !initial.Valid || !hex64.MatchString(initial.String) || !held {
+				if !ok || kind != e.RecordType || id != e.RecordID || revision != e.RecordRevision || !bytes.Equal(body, object.Bytes) || !initial.Valid || !hex64.MatchString(initial.String) || !selected.Valid || !hex64.MatchString(selected.String) {
 					return false
 				}
 				count++

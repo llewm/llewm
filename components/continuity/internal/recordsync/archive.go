@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
 
 // Archive owns durable, project-bound transport observations. Its exact bytes
@@ -52,6 +53,28 @@ func (a Archive) CaptureLocal(objects []portable.EncodedEnvelope) error {
 func (a Archive) captureLocalWithin(ctx context.Context, tx *sql.Tx, objects []portable.EncodedEnvelope) error {
 	if _, err := a.store().stampWithin(ctx, tx, "ready"); err != nil {
 		return err
+	}
+	// Before the first possible write, exact unchanged prefixes are no-ops.
+	// Stop optimizing at the first uncertain batch: a later write or trigger can
+	// change subsequent observations, so the remainder keeps original ordering.
+	for len(objects) >= 2 {
+		batch := objects[:min(32, len(objects))]
+		verified := make([]portable.EncodedEnvelope, 0, len(batch))
+		for _, object := range batch {
+			if ctx.Err() != nil {
+				break
+			}
+			decoded, err := portable.DecodeTransportEnvelope(object.Bytes)
+			if err != nil || decoded.Envelope.LineageID != a.Lineage || !bytes.Equal(decoded.Bytes, object.Bytes) {
+				break
+			}
+			verified = append(verified, decoded)
+		}
+		if len(verified) != len(batch) || !a.store().archiveObjectsMatchWithin(ctx, tx, "", verified) {
+			break
+		}
+		syncwork.RecordWork(ctx, "capture_match_records", int64(len(batch)))
+		objects = objects[len(batch):]
 	}
 	for _, object := range objects {
 		decoded, err := portable.DecodeTransportEnvelope(object.Bytes)

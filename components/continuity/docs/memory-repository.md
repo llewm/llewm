@@ -1011,6 +1011,15 @@ audit or a persistent receipt. `archive_match_queries/op` and
 `archive_match_records/op` count attempted comparisons;
 `archive_match_shortcuts/op` counts completely matching inputs.
 
+Local capture can similarly skip unchanged prefixes in groups of up to 32. It
+decodes every incoming wire envelope, compares the exact stored bytes and
+identity, and checks both initial provenance and the first retained origin that
+the sequential capture would select. This preserves foreign attribution without
+adding local provenance. The first uncertain group resumes the original
+sequential path for that group and every remaining record; no prefetched matches
+survive a possible write. `capture_match_records/op` counts the skipped no-op
+prefix. Single-record insertion uses the ordinary point comparison directly.
+
 Index insertion compares stored envelope bodies, identities, membership and
 reference sets in batches of 32 within the caller's transaction. Completely
 matching blocks need no writes. When only memberships are missing, inserts can
