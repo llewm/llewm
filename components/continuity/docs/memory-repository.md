@@ -257,6 +257,11 @@ own verified inventory writes only if the prior stamp still matches under that
 writer lock. It never advances the observed Git tree before a Git commit exists.
 Interrupted staged intent remains publishable on the next cycle.
 
+Bounded derived-index envelope reads slice bytes, including suffixes after a
+literal NUL. A valid JSON prefix cannot hide trailing stored bytes from exact
+matching, repair or catalog reconstruction. Valid Unicode bodies keep their
+complete canonical bytes.
+
 A known observation reads only changed selected blocks through the Git tree
 delta. Previously observed bytes remain covered by explicit full audits;
 out-of-band corruption of an old object is not promised detection on every

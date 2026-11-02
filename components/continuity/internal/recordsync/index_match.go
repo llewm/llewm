@@ -14,6 +14,7 @@ import (
 // bounded reads in the caller's transaction, and reports missing memberships in
 // input order. It never writes. A mismatch discards every prefetched result so
 // sequential repairs can observe their own trigger effects on subsequent rows.
+// Read TEXT bodies as BLOBs so byte bounds cannot hide NUL-terminated suffixes.
 func (s Index) blockObjectsMatchWithin(ctx context.Context, tx *sql.Tx, block Block) ([]string, bool, error) {
 	missing := make(map[string]bool)
 	seen := make(map[string]bool, len(block.Objects))
@@ -37,7 +38,7 @@ func (s Index) blockObjectsMatchWithin(ctx context.Context, tx *sql.Tx, block Bl
 		}
 		in := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
 		syncwork.RecordWork(ctx, "inventory_match_queries", 1)
-		rows, err := tx.QueryContext(ctx, `SELECT e.envelope_hash,e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),EXISTS(SELECT 1 FROM history_index_block_members m WHERE m.project_id=e.project_id AND m.envelope_hash=e.envelope_hash AND m.block_hash=?) FROM history_index_envelopes e WHERE e.project_id=? AND e.envelope_hash IN (`+in+`)`, args...)
+		rows, err := tx.QueryContext(ctx, `SELECT e.envelope_hash,e.record_type,e.record_id,e.record_revision,substr(CAST(e.envelope_json AS BLOB),1,?),EXISTS(SELECT 1 FROM history_index_block_members m WHERE m.project_id=e.project_id AND m.envelope_hash=e.envelope_hash AND m.block_hash=?) FROM history_index_envelopes e WHERE e.project_id=? AND e.envelope_hash IN (`+in+`)`, args...)
 		if err != nil {
 			return nil, false, err
 		}

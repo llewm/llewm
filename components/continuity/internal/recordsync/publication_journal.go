@@ -435,7 +435,7 @@ func (s Index) catalogBlockWithin(ctx context.Context, tx *sql.Tx, hash string) 
 	if err := tx.QueryRowContext(ctx, `SELECT index_version FROM history_index_blocks WHERE project_id=? AND block_hash=?`, s.ProjectID, hash).Scan(&version); err != nil || version != IndexVersion {
 		return Block{}, ErrIndexRebuild
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT substr(e.envelope_json,1,?) FROM history_index_block_members m LEFT JOIN history_index_envelopes e USING(project_id,envelope_hash) WHERE m.project_id=? AND m.block_hash=? ORDER BY e.envelope_json`, MaxObjectBytes+1, s.ProjectID, hash)
+	rows, err := tx.QueryContext(ctx, `SELECT substr(CAST(e.envelope_json AS BLOB),1,?) FROM history_index_block_members m LEFT JOIN history_index_envelopes e USING(project_id,envelope_hash) WHERE m.project_id=? AND m.block_hash=? ORDER BY e.envelope_json`, MaxObjectBytes+1, s.ProjectID, hash)
 	if err != nil {
 		return Block{}, err
 	}

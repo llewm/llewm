@@ -120,13 +120,14 @@ func (s Index) insertBlockObjects(ctx context.Context, tx *sql.Tx, verified Bloc
 }
 
 func (s Index) insertBlockObjectsSequential(ctx context.Context, tx *sql.Tx, verified Block) error {
+	// BLOB slicing keeps the exact byte bound, including suffixes after NUL.
 	for _, object := range verified.Objects {
 		e := object.Envelope
 		var kind, id string
 		var revision int
 		var body []byte
 		var member bool
-		err := tx.QueryRowContext(ctx, `SELECT e.record_type,e.record_id,e.record_revision,substr(e.envelope_json,1,?),EXISTS(SELECT 1 FROM history_index_block_members m WHERE m.project_id=e.project_id AND m.envelope_hash=e.envelope_hash AND m.block_hash=?) FROM history_index_envelopes e WHERE e.project_id=? AND e.envelope_hash=?`, MaxObjectBytes+1, verified.Hash, s.ProjectID, e.EnvelopeSHA256).Scan(&kind, &id, &revision, &body, &member)
+		err := tx.QueryRowContext(ctx, `SELECT e.record_type,e.record_id,e.record_revision,substr(CAST(e.envelope_json AS BLOB),1,?),EXISTS(SELECT 1 FROM history_index_block_members m WHERE m.project_id=e.project_id AND m.envelope_hash=e.envelope_hash AND m.block_hash=?) FROM history_index_envelopes e WHERE e.project_id=? AND e.envelope_hash=?`, MaxObjectBytes+1, verified.Hash, s.ProjectID, e.EnvelopeSHA256).Scan(&kind, &id, &revision, &body, &member)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
