@@ -430,6 +430,14 @@ For a verified migration-bearing release:
    `narrative:<id>`), and optionally request the separately labeled integrity check.
    Treat `operationally_verified` as applying only to the supplied probe set.
 
+Backups flush the completed SQLite file before validation. On Unix, they also
+flush every parent directory through the filesystem root. On Windows, the file
+flush uses `FlushFileBuffers` on a read/write file handle; Unix-style directory
+flushing is not attempted. Windows receipts still require a successful file
+flush, integrity/schema checks and a SHA256 digest, but do not separately certify
+parent-directory crash durability. See Microsoft's
+[file-flush contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers).
+
 After this initial restart, `continuity_info` detects later on-disk binary
 replacement itself: `health.status: stale` and `restart_required: true` mean the
 client must restart its MCP process. `unknown` means comparison could not be

@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
-// Persist both the completed SQLite file and its directory entry before a
-// recovery receipt or schema transition can depend on this backup.
+// Flush the completed SQLite file before a recovery receipt or schema transition
+// can depend on it, then perform the platform's parent-directory synchronization.
 func syncBackup(path string) error {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -26,27 +25,8 @@ func syncBackup(path string) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	// Backup may have created several parent directories. Persist their
-	// entries too, rather than only the file's immediate directory.
-	for name := filepath.Dir(path); ; name = filepath.Dir(name) {
-		parent, err := os.Open(name)
-		if err != nil {
-			return err
-		}
-		err = parent.Sync()
-		closeErr := parent.Close()
-		if err != nil {
-			return err
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if filepath.Dir(name) == name {
-			return nil
-		}
-	}
+	return syncBackupParents(path)
 }
-
 func backupDigest(ctx context.Context, path string) (string, error) {
 	before, err := os.Lstat(path)
 	if err != nil || !before.Mode().IsRegular() {

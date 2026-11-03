@@ -2,9 +2,35 @@ package database
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestSyncBackupFileAndInvalidPaths(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "nested", "backups")
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(parent, "snapshot.db")
+	const contents = "completed backup bytes"
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncBackup(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != contents {
+		t.Fatalf("flush changed backup: %q %v", got, err)
+	}
+	for _, invalid := range []string{parent, filepath.Join(parent, "missing.db")} {
+		if err := syncBackup(invalid); err == nil {
+			t.Fatalf("accepted invalid backup path %s", invalid)
+		}
+	}
+}
 
 func TestPreparedBackupDigestRejectsValidDataChangesBeforeMigration(t *testing.T) {
 	ctx := context.Background()
