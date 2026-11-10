@@ -7,6 +7,81 @@ import (
 	"time"
 )
 
+func TestRecoveryProjectRootSyntax(t *testing.T) {
+	for _, root := range []string{`/home/peer/project`, `/home/😀/project`, `/home/peer\name/project`, `C:\Users\peer\project`, `d:\development\project`, `\\server\share\project`} {
+		if !validRecoveryProjectRoot(root) {
+			t.Errorf("rejected project root %q", root)
+		}
+	}
+	for _, root := range []string{
+		"", "/", ".", "../project", "project", "/home//project", "/home/./project", "/home/../project", "/home/project/", "//server/share/project",
+		`C:project`, `\project`, `C:\`, `1:\project`, `C:/project`, `C:\project\..`, `C:\project\\child`, `C:\project\`, `C:\project:stream`,
+		`\\server\share`, `\\server\share\`, `\\server\\project`, `\\?\C:\project`, `\\.\pipe\project`,
+	} {
+		if validRecoveryProjectRoot(root) {
+			t.Errorf("accepted noncanonical/nonproject root %q", root)
+		}
+	}
+}
+
+func TestRedactionRecoveryForeignProjectRoots(t *testing.T) {
+	bundle, _, at := operationalRecoveryBundle(t)
+	var spec EnvelopeSpec
+	for _, record := range bundle.Records {
+		if record.Envelope.RecordType == "work_narrative" {
+			var err error
+			spec, err = DecodeMemoryEnvelope(record.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	for _, root := range []string{`/home/peer/LLMem`, `C:\Users\peer\LLMem`, `\\server\share\LLMem`} {
+		t.Run(root, func(t *testing.T) {
+			var payload workNarrativePayload
+			if err := json.Unmarshal(spec.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			payload.Claims[0].Text = "Read " + root
+			originalSpec := spec
+			originalSpec.Payload, _ = json.Marshal(payload)
+			original, err := EncodeEnvelope(originalSpec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload.Claims[0].Text = "Read [PROJECT_ROOT]"
+			derivedSpec := spec
+			derivedSpec.Payload, _ = json.Marshal(payload)
+			derived, err := EncodeEnvelope(derivedSpec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof, err := RedactionRecoverySpec(RedactionRecovery{Original: original.Bytes, Derived: derived.Bytes, ProjectRoot: root, Creator: "test", Reason: "Foreign host redaction"}, at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := EncodeEnvelope(proof)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := decodeRedactionRecovery(encoded)
+			if err != nil || decoded.ProjectRoot != root {
+				t.Fatalf("proof root changed: %q %v", decoded.ProjectRoot, err)
+			}
+			// The path is historical proof data; no local directory is required.
+			ctx, db, project := operationalProject(t, "foreign-recovery")
+			if _, err := (Service{DB: db}).Initialize(ctx, project, proof.LineageID); err != nil {
+				t.Fatal(err)
+			}
+			plan, receipt, err := ImportMemoryRecords(ctx, db, project, []EnvelopeSpec{proof}, at)
+			if err != nil || !plan.ApplyAllowed || receipt == nil || receipt.AppendedRecords != 1 {
+				t.Fatalf("foreign recovery import: %+v %+v %v", plan, receipt, err)
+			}
+		})
+	}
+}
+
 func TestRedactionRecoveryRefusesUnrelatedOrReversedChanges(t *testing.T) {
 	bundle, _, at := operationalRecoveryBundle(t)
 	var original EncodedEnvelope

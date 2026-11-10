@@ -729,6 +729,17 @@ proofs before interpreting the affected historical identities. Require repeated
 zero-collision/fork/unpushed receipts on every peer and fresh recovery before
 restoring the previous automatic-sync setting.
 
+The recorded root describes the originating host. Recovery validation accepts
+canonical POSIX absolute paths, Windows drive paths and UNC project paths below
+the server/share root on every importing OS. Filesystem roots, relative paths,
+device namespaces and unclean spellings are refused. These paths are proof data:
+they are never opened, resolved on the receiving host or rewritten. The exact
+declared substitution and complete canonical envelope/hash checks still apply.
+Reviewed procedure working directories likewise use clean, slash-separated
+project-relative paths such as `components/continuity` on every host. Native
+backslash spellings, drive-qualified paths and parent traversal are refused;
+import does not translate or execute a procedure's directory or commands.
+
 - Memory commits are automated and self-describing (`continuity: <instance> +N
   records`). They run with repository hooks and signing disabled and a fallback
   committer identity when the user has none. They are exempt from the engineer's

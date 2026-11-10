@@ -18,8 +18,8 @@ func TestProceduresRoundTrip(t *testing.T) {
 	}
 	recorded := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	service := procedures.Service{DB: db, Now: func() time.Time { recorded = recorded.Add(time.Minute); return recorded }}
-	runbook := procedures.Procedure{ProjectID: projectID, ID: "box-install", Kind: "runbook", Title: "Install on the box", Purpose: "Copy a build to " + projectID,
-		Status: "proposed", Platforms: []string{"linux/amd64"}, Parameters: []procedures.Parameter{{Name: "host", Description: "SSH destination", Required: true}},
+	runbook := procedures.Procedure{ProjectID: projectID, ID: "box-install", Kind: "runbook", Title: "Install on the box", Purpose: "Copy a build to " + projectID + " from /home/peer/LLMem",
+		Status: "proposed", Platforms: []string{"linux/amd64"}, WorkingDirectory: "components/continuity", Parameters: []procedures.Parameter{{Name: "host", Description: "SSH destination", Required: true}},
 		DeclaredEffects: []string{"replaces the remote binary"}, Validations: []string{"remote version matches"},
 		Steps:  []procedures.Step{{ID: "copy", Description: "Copy it", ArgvTemplate: []string{"scp", "{{out}}", "{{host}}:bin"}}},
 		Source: "docs/resources-and-runbooks.md"}
@@ -48,6 +48,39 @@ func TestProceduresRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(string(bundle.RecordsBytes), projectID) {
 		t.Fatal("procedure export leaked the source project ID")
+	}
+	// Historical recovery observations must decode procedures with portable
+	// working directories before the main records arrive on a foreign host.
+	for _, original := range bundle.Records {
+		if original.Envelope.RecordType != "procedure" {
+			continue
+		}
+		spec, err := DecodeMemoryEnvelope(original.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload procedurePayload
+		if err := json.Unmarshal(spec.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		payload.Purpose = strings.ReplaceAll(payload.Purpose, "/home/peer/LLMem", "[PROJECT_ROOT]")
+		spec.Payload, _ = json.Marshal(payload)
+		derived, err := EncodeEnvelope(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := RedactionRecoverySpec(RedactionRecovery{Original: original.Bytes, Derived: derived.Bytes, ProjectRoot: "/home/peer/LLMem", Creator: "test", Reason: "Historical procedure re-export"}, recorded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := EncodeEnvelope(proof)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := decodeOperationalBundle(Bundle{Records: []EncodedEnvelope{encoded}}); err != nil {
+			t.Fatal(err)
+		}
+		break
 	}
 
 	targetCtx, targetDB, targetProject := operationalProject(t, "procedures-target")

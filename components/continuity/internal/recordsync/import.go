@@ -134,7 +134,7 @@ func (s Importer) importRecordsWithin(ctx context.Context, tx *sql.Tx, prepared 
 			return err
 		}
 		if !plan.ApplyAllowed {
-			return fmt.Errorf("redaction recovery observations collide")
+			return fmt.Errorf("redaction recovery import refused: %d invalid, %d unsupported, %d collisions", plan.Counts[portable.PlanInvalid], plan.Counts[portable.PlanUnsupported], plan.Counts[portable.PlanCollision])
 		}
 		if receipt != nil {
 			result.ImportedRecords += receipt.AppendedRecords

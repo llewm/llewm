@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
@@ -113,8 +113,10 @@ func normalizeProcedure(value Procedure) (Procedure, error) {
 	if value.WorkingDirectory, err = clean("working directory", value.WorkingDirectory, true); err != nil {
 		return Procedure{}, err
 	}
-	if filepath.IsAbs(value.WorkingDirectory) || value.WorkingDirectory != filepath.Clean(value.WorkingDirectory) || value.WorkingDirectory == ".." || strings.HasPrefix(value.WorkingDirectory, ".."+string(filepath.Separator)) {
-		return Procedure{}, fmt.Errorf("working directory must be a clean project-relative path")
+	// Reviewed procedures are exchanged between hosts. Their directory is a
+	// portable slash-separated project path, not an importing OS's native path.
+	if strings.ContainsAny(value.WorkingDirectory, `\:`) || path.IsAbs(value.WorkingDirectory) || value.WorkingDirectory != path.Clean(value.WorkingDirectory) || value.WorkingDirectory == ".." || strings.HasPrefix(value.WorkingDirectory, "../") {
+		return Procedure{}, fmt.Errorf("working directory must be a clean project-relative path using '/' separators")
 	}
 	if value.DeclaredEffects, err = normalizeStrings("declared effects", value.DeclaredEffects, value.Kind == KindRunbook); err != nil {
 		return Procedure{}, err

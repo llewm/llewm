@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
@@ -64,7 +64,7 @@ func RedactionRecoverySpec(value RedactionRecovery, at time.Time) (EnvelopeSpec,
 	if value.ProjectRoot == "" && value.ProjectID == "" {
 		return EnvelopeSpec{}, fmt.Errorf("a redacted project root or ID is required")
 	}
-	if value.ProjectRoot != "" && (!filepath.IsAbs(value.ProjectRoot) || filepath.Clean(value.ProjectRoot) != value.ProjectRoot || value.ProjectRoot == "/") {
+	if value.ProjectRoot != "" && !validRecoveryProjectRoot(value.ProjectRoot) {
 		return EnvelopeSpec{}, fmt.Errorf("redacted project root must be an exact absolute project path")
 	}
 	if value.ProjectID != "" && (!strings.HasPrefix(value.ProjectID, "project-") || len(value.ProjectID) < 16) {
@@ -120,6 +120,38 @@ func RedactionRecoverySpec(value RedactionRecovery, at time.Time) (EnvelopeSpec,
 		return EnvelopeSpec{}, err
 	}
 	return EnvelopeSpec{LineageID: original.Envelope.LineageID, RecordType: "redaction_recovery", RecordSchemaVersion: 1, RecordID: "redaction-" + hashHex(canonical), RecordedAt: at, Authority: "caller_asserted", Refs: []Reference{}, Payload: canonical}, nil
+}
+
+// A recovery describes the originating host's path, not a path to open on this
+// machine. Validate canonical POSIX, Windows drive and UNC spellings without
+// applying the importing OS's filepath rules or rewriting the proof's bytes.
+func validRecoveryProjectRoot(root string) bool {
+	if strings.HasPrefix(root, "/") {
+		return root != "/" && path.Clean(root) == root
+	}
+	if strings.Contains(root, "/") {
+		return false
+	}
+	var components []string
+	switch {
+	case len(root) >= 3 && ((root[0] >= 'A' && root[0] <= 'Z') || (root[0] >= 'a' && root[0] <= 'z')) && root[1:3] == `:\`:
+		components = strings.Split(root[3:], `\`)
+	case strings.HasPrefix(root, `\\`):
+		components = strings.Split(root[2:], `\`)
+		// A project lies below the server/share root. Device namespaces are
+		// not portable filesystem project roots.
+		if len(components) < 3 || components[0] == "?" || components[0] == "." {
+			return false
+		}
+	default:
+		return false
+	}
+	for _, component := range components {
+		if component == "" || component == "." || component == ".." || strings.Contains(component, ":") {
+			return false
+		}
+	}
+	return true
 }
 
 func recoveryJSON(body []byte, transform func(string) string) ([]byte, error) {

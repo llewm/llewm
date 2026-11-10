@@ -22,6 +22,24 @@ func procedureFixture(projectID string) Procedure {
 	}
 }
 
+func TestWorkingDirectoryPortableSyntax(t *testing.T) {
+	for _, directory := range []string{".", "components/continuity", "folder with spaces/subdir"} {
+		value := procedureFixture("p")
+		value.WorkingDirectory = directory
+		got, err := Validate(value)
+		if err != nil || got.WorkingDirectory != directory {
+			t.Errorf("directory %q changed/refused: %q %v", directory, got.WorkingDirectory, err)
+		}
+	}
+	for _, directory := range []string{"/absolute", "../outside", "a/../b", "a//b", "a/", `..\outside`, `components\continuity`, `C:\outside`, `C:/outside`, `C:outside`, `\\server\share\project`} {
+		value := procedureFixture("p")
+		value.WorkingDirectory = directory
+		if _, err := Validate(value); err == nil {
+			t.Errorf("accepted nonportable directory %q", directory)
+		}
+	}
+}
+
 func TestAppendGetValidationAndIsolation(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Initialize(ctx, filepath.Join(t.TempDir(), "continuity.db"))
