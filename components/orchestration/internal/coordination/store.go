@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -50,21 +52,20 @@ func Open(path string, create bool) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(filepath.VolumeName(path), `\\`) {
+		return nil, errors.New("orchestration database requires a local drive path, not UNC or device storage")
+	}
 	dir := filepath.Dir(path)
 	if create {
-		if err = os.MkdirAll(dir, 0700); err != nil {
+		if err = privatestorage.MkdirAll(dir); err != nil {
 			return nil, err
 		}
 	}
-	info, err := os.Stat(dir)
-	if err != nil {
+	if err := privatestorage.CheckDir(dir); err != nil {
 		return nil, err
 	}
-	if info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("database directory must be private (mode 0700)")
-	}
 	if create {
-		f, e := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		f, e := privatestorage.Create(path)
 		if e != nil {
 			return nil, e
 		}
@@ -72,14 +73,27 @@ func Open(path string, create bool) (*Store, error) {
 			return nil, e
 		}
 	}
-	info, err = os.Lstat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("database must be a private regular file (mode 0600)")
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("database must be a private regular file")
 	}
-	u := url.URL{Scheme: "file", Path: path}
+	file, err := privatestorage.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	err = privatestorage.CheckFile(file)
+	file.Close()
+	if err != nil {
+		return nil, err
+	}
+	uriPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" {
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	if !create {
 		probe, e := sql.Open("sqlite", u.String()+"?mode=ro")
 		if e != nil {

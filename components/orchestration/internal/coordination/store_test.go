@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
 )
 
 type fixture struct {
@@ -363,9 +365,7 @@ func TestInvalidDefinitionsAndDependencyReadiness(t *testing.T) {
 
 func TestPrivateStorageAndNoAccidentalInitialization(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	makeStoragePublic(t, dir)
 	if _, err := Open(filepath.Join(dir, "team.db"), true); err == nil {
 		t.Fatal("public storage accepted")
 	}
@@ -378,12 +378,59 @@ func TestPrivateStorageAndNoAccidentalInitialization(t *testing.T) {
 	}
 }
 
+func TestDatabasePathWithURICharacters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project #1 %", "team #1 %.db")
+	s, err := Open(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = Open(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDatabaseRefusesPublicFileWithoutMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "team.db")
+	s, err := Open(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeStoragePublic(t, path)
+	if s, err := Open(path, false); err == nil {
+		s.Close()
+		t.Fatal("public database accepted")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("refused database was changed")
+	}
+}
+
 func TestForeignDatabaseIsNotMutated(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
-	if err := os.Mkdir(dir, 0700); err != nil {
+	if err := privatestorage.MkdirAll(dir); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "foreign.db")
+	f, err := privatestorage.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -392,9 +439,6 @@ func TestForeignDatabaseIsNotMutated(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	if err := os.Chmod(path, 0600); err != nil {
-		t.Fatal(err)
-	}
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

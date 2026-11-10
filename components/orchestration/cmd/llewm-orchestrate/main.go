@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
+	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
 )
 
@@ -110,7 +111,7 @@ func run(args []string, out, stderr io.Writer) error {
 			if *tokenFile == "" {
 				return errors.New("--token-file is required (must not already exist)")
 			}
-			f, err := os.OpenFile(*tokenFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+			f, err := privatestorage.Create(*tokenFile)
 			if err != nil {
 				return err
 			}
@@ -221,17 +222,13 @@ func run(args []string, out, stderr io.Writer) error {
 }
 
 func readPrivateToken(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := privatestorage.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
+	if err := privatestorage.CheckFile(f); err != nil {
 		return "", err
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return "", errors.New("credential file must be private (mode 0600)")
 	}
 	b, err := io.ReadAll(io.LimitReader(f, 256))
 	if err != nil {

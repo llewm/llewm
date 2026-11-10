@@ -43,8 +43,20 @@ dist/llewm-orchestrate member --db .llewm/orchestration/team.db \
 dist/llewm-orchestrate serve --db .llewm/orchestration/team.db
 ```
 
-Initialization refuses to overwrite an existing database. The database directory
-must be private (0700), and database and credential files private (0600). Member
+Initialization refuses to overwrite an existing database. On Unix, the database
+directory must be private (0700), and database and credential files private
+(0600). On Windows, new storage is created with a protected DACL granting full
+control only to the current Windows user and LocalSystem. Directory permissions
+inherit to SQLite journals. Existing storage must have that owner and protected
+allow-only DACL, with current-user full control and directory inheritance;
+broader access, unsupported ACEs and reparse points are refused. Existing ACLs
+are never silently repaired. Use a local filesystem that supports Windows ACLs;
+FAT/exFAT storage cannot satisfy this check. UNC and device database paths are
+refused. Windows SQLite paths follow [SQLite's file URI rules](https://www.sqlite.org/uri.html),
+with forward slashes and an absolute drive prefix. The protected ACL prevents
+[inheritance from broadening access](https://learn.microsoft.com/en-us/windows/win32/secauthz/ace-inheritance).
+
+Member
 credentials are written to new files and never printed; only their hashes are
 stored in the coordinator. Distribute each credential through your team's secure
 channel, separately from source and project memory. An engineer may use that

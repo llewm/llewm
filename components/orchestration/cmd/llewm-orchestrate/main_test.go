@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
+	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
 )
 
@@ -31,13 +32,14 @@ func TestCLIManualWorkflowAndPrivateCredentials(t *testing.T) {
 	if strings.Contains(output, "lworch_") {
 		t.Fatal("credential printed")
 	}
-	info, err := os.Stat(tokenPath)
+	f, err := privatestorage.Open(tokenPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0600 {
-		t.Fatal("credential not private")
+	if err := privatestorage.CheckFile(f); err != nil {
+		t.Fatal(err)
 	}
+	f.Close()
 	s, err := coordination.Open(db, false)
 	if err != nil {
 		t.Fatal(err)
@@ -80,15 +82,11 @@ func TestCLIManualWorkflowAndPrivateCredentials(t *testing.T) {
 	if len(events.Events) != 4 || events.Events[0].Sequence != 2 {
 		t.Fatal("CLI history cursor failed")
 	}
-	if err := os.Chmod(tokenPath, 0644); err != nil {
-		t.Fatal(err)
-	}
+	setTokenPrivate(t, tokenPath, false)
 	if _, err := readPrivateToken(tokenPath); err == nil {
 		t.Fatal("world-readable token accepted")
 	}
-	if err := os.Chmod(tokenPath, 0600); err != nil {
-		t.Fatal(err)
-	}
+	setTokenPrivate(t, tokenPath, true)
 	invoke("revoke", "--db", db, "--id", "dave")
 	token, err := readPrivateToken(tokenPath)
 	if err != nil {
