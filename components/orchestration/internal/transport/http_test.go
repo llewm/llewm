@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,26 @@ import (
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 )
+
+func TestCoordinatorSpecificCATrust(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"ok":true}`)) }))
+	defer server.Close()
+	if _, err := Request(context.Background(), server.URL, "fixture", "GET", "/v1/plans", nil, nil); err == nil {
+		t.Fatal("untrusted TLS certificate accepted")
+	}
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if _, err := Request(context.Background(), server.URL, "fixture", "GET", "/v1/plans", nil, ca); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range [][]byte{[]byte("not a certificate"), []byte("-----BEGIN PRIVATE KEY-----")} {
+		if _, err := Request(context.Background(), server.URL, "fixture", "GET", "/v1/plans", nil, invalid); err == nil {
+			t.Fatal("invalid trust bundle accepted")
+		}
+	}
+	if _, err := Request(context.Background(), server.URL, "fixture", "GET", "/v1/plans", nil, nil); err == nil {
+		t.Fatal("client-specific CA leaked into global trust")
+	}
+}
 
 func server(t *testing.T) (string, string) {
 	t.Helper()
@@ -34,21 +55,21 @@ func TestHTTPProtocolAuthenticationAndRetry(t *testing.T) {
 	endpoint, token := server(t)
 	c := coordination.Command{SchemaVersion: 1, RequestID: "proposal", PlanID: "plan", Action: "propose", Definition: &coordination.Definition{Title: "Team plan", Items: []coordination.Item{{ID: "task", Title: "Implement", AcceptanceCriteria: "Tests pass"}}}}
 	body, _ := json.Marshal(c)
-	if _, err := Request(context.Background(), endpoint, "invalid", "POST", "/v1/commands", body); err == nil {
+	if _, err := Request(context.Background(), endpoint, "invalid", "POST", "/v1/commands", body, nil); err == nil {
 		t.Fatal("unauthenticated mutation succeeded")
 	}
-	first, err := Request(context.Background(), endpoint, token, "POST", "/v1/commands", body)
+	first, err := Request(context.Background(), endpoint, token, "POST", "/v1/commands", body, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Request(context.Background(), endpoint, token, "POST", "/v1/commands", body)
+	second, err := Request(context.Background(), endpoint, token, "POST", "/v1/commands", body, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(first, second) {
 		t.Fatal("retry receipt changed")
 	}
-	read, err := Request(context.Background(), endpoint, token, "GET", "/v1/plans/plan", nil)
+	read, err := Request(context.Background(), endpoint, token, "GET", "/v1/plans/plan", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +80,7 @@ func TestHTTPProtocolAuthenticationAndRetry(t *testing.T) {
 	if v.Plan.Revisions[0].Author != "dave" || v.Plan.Version != 1 {
 		t.Fatal("authenticated attribution missing")
 	}
-	list, err := Request(context.Background(), endpoint, token, "GET", "/v1/plans", nil)
+	list, err := Request(context.Background(), endpoint, token, "GET", "/v1/plans", nil, nil)
 	if err != nil || !strings.Contains(string(list), "Team plan") {
 		t.Fatalf("list: %s %v", list, err)
 	}
@@ -80,7 +101,7 @@ func TestHTTPProtocolAuthenticationAndRetry(t *testing.T) {
 
 func TestClientRejectsUnsafeOriginsAndRedirects(t *testing.T) {
 	for _, endpoint := range []string{"http://example.com", "file:///tmp/test", "https://user:pass@example.com", "https://example.com/path", "https://example.com?token=secret"} {
-		if _, err := Request(context.Background(), endpoint, "unused", "GET", "/v1/plans", nil); err == nil {
+		if _, err := Request(context.Background(), endpoint, "unused", "GET", "/v1/plans", nil, nil); err == nil {
 			t.Fatalf("unsafe origin accepted: %s", endpoint)
 		}
 	}
@@ -89,7 +110,7 @@ func TestClientRejectsUnsafeOriginsAndRedirects(t *testing.T) {
 	defer destination.Close()
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, destination.URL, 302) }))
 	defer source.Close()
-	if _, err := Request(context.Background(), source.URL, "unused", "GET", "/v1/plans", nil); err == nil {
+	if _, err := Request(context.Background(), source.URL, "unused", "GET", "/v1/plans", nil, nil); err == nil {
 		t.Fatal("redirect accepted")
 	}
 	if called {

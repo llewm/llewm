@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +19,8 @@ import (
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
+	"github.com/llewm/llewm/components/orchestration/internal/worker"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const help = `llewm-orchestrate: manually coordinate shared agent work
@@ -31,13 +35,16 @@ Engineer commands (authenticate with a private token file):
   list    --endpoint URL --token-file PATH
   show    --endpoint URL --token-file PATH --plan ID [--history --after SEQUENCE]
   request --endpoint URL --token-file PATH --file COMMAND.json
+  credential-import --file RECEIVED_TOKEN --token-file NEW_PRIVATE_TOKEN
+  mcp     --endpoint URL --token-file PATH --allow-plan ID [--allow-plan ID ...]
+          --machine LABEL --agent LABEL [--capability LABEL ...]
 
 Prepare an initial proposal from a public Continuity plan export (no network):
-  prepare --file SOURCE.json --plan ID --request-id ID
+  prepare --file SOURCE.json --plan ID --request-id ID [--job-file ROUTING.json]
 
 request sends the versioned JSON command exactly once. Reuse its request_id and
 unchanged body after a network failure. Actions: propose, accept-plan, assign,
-claim, resume, release, submit, review. See components/orchestration/README.md.
+claim, resume, release, pause, unblock, submit, review. See components/orchestration/README.md.
 Tokens are issued to files, never printed. Provider accounts remain local.
 `
 
@@ -64,11 +71,18 @@ func run(args []string, out, stderr io.Writer) error {
 	cert := flags.String("tls-cert", "", "TLS certificate")
 	key := flags.String("tls-key", "", "TLS private key")
 	endpoint := flags.String("endpoint", "", "coordinator origin URL")
+	caFile := flags.String("ca-file", "", "optional public coordinator CA bundle; trust applies to this client only")
 	plan := flags.String("plan", "", "plan identifier")
 	history := flags.Bool("history", false, "show a page of the plan's mutation ledger")
 	after := flags.Int64("after", 0, "history cursor from next_after")
 	file := flags.String("file", "", "JSON command file")
+	jobFile := flags.String("job-file", "", "optional reviewed routing JSON pinned to the exported plan revision")
 	requestID := flags.String("request-id", "", "unique idempotency key for a prepared proposal")
+	machine := flags.String("machine", "", "caller-asserted machine label for MCP claims")
+	agent := flags.String("agent", "", "caller-asserted agent label for MCP claims")
+	var allowedPlans, capabilities []string
+	flags.Func("allow-plan", "explicit plan permitted for this MCP client (repeatable)", func(s string) error { allowedPlans = append(allowedPlans, s); return nil })
+	flags.Func("capability", "explicit local worker capability (repeatable)", func(s string) error { capabilities = append(capabilities, s); return nil })
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -76,7 +90,34 @@ func run(args []string, out, stderr io.Writer) error {
 		return errors.New("unexpected positional arguments")
 	}
 	ctx := context.Background()
+	var caPEM []byte
+	if *caFile != "" {
+		f, err := os.Open(*caFile)
+		if err != nil {
+			return err
+		}
+		caPEM, err = io.ReadAll(io.LimitReader(f, 1<<20+1))
+		f.Close()
+		if err != nil {
+			return err
+		}
+		if len(caPEM) > 1<<20 {
+			return errors.New("CA file exceeds 1 MiB")
+		}
+	}
 	switch cmd {
+	case "credential-import":
+		return importCredential(*file, *tokenFile, out)
+	case "mcp":
+		token, err := readPrivateToken(*tokenFile)
+		if err != nil {
+			return err
+		}
+		server, err := worker.NewServer(worker.Config{Endpoint: *endpoint, Token: token, PlanIDs: allowedPlans, Capabilities: capabilities, Machine: *machine, Agent: *agent, CAPEM: caPEM})
+		if err != nil {
+			return err
+		}
+		return server.Run(ctx, &mcp.StdioTransport{})
 	case "prepare":
 		f, err := os.Open(*file)
 		if err != nil {
@@ -90,6 +131,21 @@ func run(args []string, out, stderr io.Writer) error {
 		command, err := coordination.PrepareContinuity(body, *plan, *requestID)
 		if err != nil {
 			return err
+		}
+		if *jobFile != "" {
+			f, err := os.Open(*jobFile)
+			if err != nil {
+				return err
+			}
+			routing, err := io.ReadAll(io.LimitReader(f, coordination.MaxCommandBytes+1))
+			f.Close()
+			if err != nil {
+				return err
+			}
+			command, err = coordination.ApplyRouting(command, routing)
+			if err != nil {
+				return err
+			}
 		}
 		encoder := json.NewEncoder(out)
 		encoder.SetIndent("", "  ")
@@ -211,7 +267,7 @@ func run(args []string, out, stderr io.Writer) error {
 			}
 			method, path = "POST", "/v1/commands"
 		}
-		data, err := transport.Request(ctx, *endpoint, token, method, path, body)
+		data, err := transport.Request(ctx, *endpoint, token, method, path, body, caPEM)
 		if err != nil {
 			return err
 		}
@@ -230,13 +286,95 @@ func readPrivateToken(path string) (string, error) {
 	if err := privatestorage.CheckFile(f); err != nil {
 		return "", err
 	}
-	b, err := io.ReadAll(io.LimitReader(f, 256))
+	b, err := io.ReadAll(io.LimitReader(f, 257))
 	if err != nil {
 		return "", err
 	}
+	return parseToken(b)
+}
+
+func parseToken(b []byte) (string, error) {
 	token := strings.TrimSpace(string(b))
-	if len(token) != 71 || !strings.HasPrefix(token, "lworch_") {
+	if len(b) > 256 || len(token) != 71 || !strings.HasPrefix(token, "lworch_") {
+		return "", errors.New("invalid coordinator credential file")
+	}
+	if _, err := hex.DecodeString(token[7:]); err != nil {
 		return "", errors.New("invalid coordinator credential file")
 	}
 	return token, nil
+}
+
+// A received file may inherit ordinary Downloads permissions on Windows. Copy
+// it into a newly created private object before using it; never relax normal
+// credential reads or overwrite an existing credential.
+func importCredential(source, target string, out io.Writer) error {
+	if source == "" || target == "" {
+		return errors.New("--file and --token-file are required")
+	}
+	info, err := os.Lstat(source)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("received credential must be a regular file")
+	}
+	f, err := privatestorage.Open(source)
+	if err != nil {
+		return err
+	}
+	info, err = f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		f.Close()
+		return errors.New("received credential must be a regular file")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 257))
+	f.Close()
+	if err != nil {
+		return err
+	}
+	token, err := parseToken(b)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(target)
+	if err := privatestorage.MkdirAll(parent); err != nil {
+		return err
+	}
+	if err := privatestorage.CheckDir(parent); err != nil {
+		return err
+	}
+	dest, err := privatestorage.Create(target)
+	if err != nil {
+		return err
+	}
+	ok := false
+	defer func() {
+		dest.Close()
+		if !ok {
+			os.Remove(target)
+		}
+	}()
+	if _, err := dest.WriteString(token + "\n"); err != nil {
+		return errors.New("private credential import write failed")
+	}
+	if err := dest.Sync(); err != nil {
+		return err
+	}
+	if err := dest.Close(); err != nil {
+		return err
+	}
+	verified, err := readPrivateToken(target)
+	if err != nil {
+		return err
+	}
+	if verified != token {
+		return errors.New("private credential import verification failed")
+	}
+	ok = true
+	fmt.Fprintln(out, "Imported credential into a new verified private file. Securely remove the transfer copy after authentication succeeds.")
+	return nil
 }

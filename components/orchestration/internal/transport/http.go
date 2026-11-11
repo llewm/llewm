@@ -5,6 +5,8 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,6 +64,17 @@ func Handler(store *coordination.Store) http.Handler {
 		result, err := store.List(r.Context(), token(r))
 		write(w, result, err)
 	})
+	mux.HandleFunc("POST /v1/queue", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, coordination.MaxCommandBytes)
+		defer r.Body.Close()
+		var query coordination.QueueRequest
+		if err := Decode(r.Body, &query); err != nil {
+			write(w, nil, errors.New("invalid queue JSON"))
+			return
+		}
+		result, err := store.Queue(r.Context(), token(r), query)
+		write(w, result, err)
+	})
 	mux.HandleFunc("GET /v1/plans/{id}", func(w http.ResponseWriter, r *http.Request) {
 		result, err := store.Read(r.Context(), token(r), r.PathValue("id"))
 		write(w, result, err)
@@ -104,9 +117,7 @@ func Loopback(address string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// Request refuses redirects and cleartext non-loopback connections. Server
-// authentication uses the platform's TLS roots, with no insecure bypass flag.
-func Request(ctx context.Context, endpoint, token, method, path string, body []byte) ([]byte, error) {
+func coordinatorURL(endpoint string) (*url.URL, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, errors.New("endpoint must be an HTTP(S) origin without credentials or path")
@@ -115,6 +126,18 @@ func Request(ctx context.Context, endpoint, token, method, path string, body []b
 	local := loopback != nil && loopback.IsLoopback()
 	if u.Scheme != "https" && !(u.Scheme == "http" && local) {
 		return nil, errors.New("remote coordinators require HTTPS; HTTP is restricted to loopback IPs")
+	}
+	return u, nil
+}
+
+func ValidateEndpoint(endpoint string) error { _, err := coordinatorURL(endpoint); return err }
+
+// Request refuses redirects and cleartext non-loopback connections. Server
+// authentication uses the platform's TLS roots, with no insecure bypass flag.
+func Request(ctx context.Context, endpoint, token, method, path string, body, caPEM []byte) ([]byte, error) {
+	u, err := coordinatorURL(endpoint)
+	if err != nil {
+		return nil, err
 	}
 	relative, err := url.Parse(path)
 	if err != nil || relative.IsAbs() || relative.Host != "" || !strings.HasPrefix(relative.Path, "/v1/") {
@@ -129,6 +152,26 @@ func Request(ctx context.Context, endpoint, token, method, path string, body []b
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("coordinator redirects are refused") }}
+	if len(caPEM) > 0 {
+		if len(caPEM) > 1<<20 || bytes.Contains(caPEM, []byte("PRIVATE KEY")) {
+			return nil, errors.New("CA file must contain only bounded public certificates")
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			return nil, errors.New("cannot load platform TLS trust")
+		}
+		if !roots.AppendCertsFromPEM(caPEM) {
+			return nil, errors.New("CA file contains no usable public certificates")
+		}
+		base, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			return nil, errors.New("unsupported default HTTP transport")
+		}
+		tr := base.Clone()
+		tr.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		client.Transport = tr
+		defer tr.CloseIdleConnections()
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, errors.New("coordinator request failed (check endpoint, reachability and TLS trust)")

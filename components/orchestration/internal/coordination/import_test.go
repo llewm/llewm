@@ -72,3 +72,42 @@ func TestPrepareRejectsLossyOrUnreviewedSources(t *testing.T) {
 		}
 	}
 }
+
+func TestRoutingPinsExactSourceWithoutRewritingBaseline(t *testing.T) {
+	c, err := PrepareContinuity([]byte(sourceFixture), "plan", "routing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := JobSpec{OS: "windows", Arch: "amd64", Priority: 10, Capabilities: []string{"native-tests"}, Repository: "repo", BaseRevision: "commit:abc", AllowedChanges: []string{"test fixtures only"}, ApprovalRequired: []string{"source publication"}}
+	routing := Routing{SchemaVersion: 1, SourceRef: c.Definition.SourceRef, Jobs: map[string]JobSpec{"next": job}}
+	body, _ := json.Marshal(routing)
+	routed, err := ApplyRouting(c, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Definition.Items[1].Job != nil || routed.Definition.Items[1].Job == nil || routed.Definition.Items[1].ContextRefs[0] != c.Definition.Items[1].ContextRefs[0] {
+		t.Fatal("routing mutated baseline or lost source identity")
+	}
+	f := newFixture(t)
+	if _, err := f.s.Execute(context.Background(), f.tokens["dave"], routed); err != nil {
+		t.Fatal(err)
+	}
+	q, err := f.s.Queue(context.Background(), f.tokens["alice"], QueueRequest{Worker: *windowsProfile(), PlanIDs: []string{"plan"}, Limit: 10})
+	if err != nil || len(q.Jobs) != 0 {
+		t.Fatal("proposal released routed work")
+	}
+	f.must("dave", Command{Action: "accept-plan", Revision: 1})
+	q = queryQueue(t, f, "alice")
+	if len(q.Jobs) != 1 || q.Jobs[0].Item.ID != "next" || q.Jobs[0].Item.Job.BaseRevision != "commit:abc" {
+		t.Fatalf("routing lost on import: %+v", q)
+	}
+	for _, bad := range []Routing{{SchemaVersion: 1, SourceRef: "another-revision", Jobs: routing.Jobs}, {SchemaVersion: 1, SourceRef: routing.SourceRef, Jobs: map[string]JobSpec{"unknown": job}}, {SchemaVersion: 1, SourceRef: routing.SourceRef, Jobs: map[string]JobSpec{"done": job}}} {
+		body, _ := json.Marshal(bad)
+		if _, err := ApplyRouting(c, body); err == nil {
+			t.Fatal("invalid routing accepted")
+		}
+	}
+	if _, err := ApplyRouting(c, append(body, []byte(` {}`)...)); err == nil {
+		t.Fatal("trailing routing accepted")
+	}
+}

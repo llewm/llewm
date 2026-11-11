@@ -304,6 +304,10 @@ func TestLeaseExpiryAndLateReview(t *testing.T) {
 	if _, err := f.command("alice", Command{Action: "resume", AttemptID: a}); !errors.Is(err, ErrConflict) {
 		t.Fatal("expired attempt revived")
 	}
+	if _, err := f.command("jerry", Command{Action: "claim", ItemID: "item-1", Machine: "jerry-pc", Agent: "agent"}); err == nil {
+		t.Fatal("pending review was silently requeued after expiry")
+	}
+	f.must("dave", Command{Action: "assign", Engineer: "jerry", Reason: "Explicitly transfer work while reconciling the pending result"})
 	f.claim("jerry", "item-1")
 	if _, err := f.command("dave", Command{Action: "review", SubmissionID: r.SubmissionID, Decision: "accept", Reason: "review late", VerificationRefs: []string{"tests"}}); err == nil {
 		t.Fatal("review trusted old receipt after takeover")

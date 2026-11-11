@@ -1,10 +1,74 @@
 package coordination
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 )
+
+// Routing is a reviewed execution projection pinned to an exact public plan
+// revision. It does not alter Continuity's plan schema or infer permissions.
+type Routing struct {
+	SchemaVersion int                `json:"schema_version"`
+	SourceRef     string             `json:"source_ref"`
+	Jobs          map[string]JobSpec `json:"jobs"`
+}
+
+func ApplyRouting(c Command, body []byte) (Command, error) {
+	if c.Action != "propose" || c.Definition == nil || len(body) > MaxCommandBytes {
+		return c, errors.New("routing requires a bounded prepared proposal")
+	}
+	var routing Routing
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&routing); err != nil {
+		return c, errors.New("invalid routing JSON")
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		return c, errors.New("routing has trailing data")
+	}
+	if routing.SchemaVersion != 1 || routing.SourceRef == "" || routing.SourceRef != c.Definition.SourceRef || len(routing.Jobs) == 0 {
+		return c, errors.New("routing must name the exact source plan revision and at least one job")
+	}
+	// Copy before enriching so a refused projection cannot partially mutate a
+	// caller's prepared baseline.
+	d := *c.Definition
+	d.Items = append([]Item(nil), d.Items...)
+	byID := map[string]int{}
+	for i, item := range d.Items {
+		byID[item.ID] = i
+	}
+	for id, job := range routing.Jobs {
+		i, ok := byID[id]
+		if !ok {
+			return c, errors.New("routing names an unknown source item")
+		}
+		if len(d.Items[i].PriorCompletionRefs) > 0 {
+			return c, errors.New("completed source scope cannot be routed for execution")
+		}
+		if err := validateJob(job); err != nil {
+			return c, err
+		}
+		j := job
+		d.Items[i].Job = &j
+	}
+	c.Definition = &d
+	clean, err := cleanCommand(c)
+	if err != nil {
+		return c, err
+	}
+	if err := validateDefinition(*clean.Definition); err != nil {
+		return c, err
+	}
+	encoded, _ := json.Marshal(clean)
+	if len(encoded) > MaxCommandBytes {
+		return c, errors.New("routed proposal exceeds 128 KiB")
+	}
+	return clean, nil
+}
 
 // PrepareContinuity consumes the public schema-v1 track-plan show --detail JSON,
 // never a database or internal Continuity type. It only prepares a proposal;

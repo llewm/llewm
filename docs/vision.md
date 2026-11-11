@@ -29,8 +29,9 @@ plans, decisions and evidence only when needed. Persistent state should survive
 agent replacement without requiring the entire history in the model context.
 Task bindings, presence and optional scoped lease fencing support coordination.
 The separate [manual orchestration milestone](../components/orchestration/README.md)
-adds shared reviewed plans, engineer work pools, and context-preserving reassignment.
-Automatic scheduling and agent execution remain explicitly scoped future capabilities.
+adds shared reviewed plans, engineer work pools, context-preserving reassignment,
+and bounded job discovery for already-running clients. Automatic agent launch
+and unattended execution remain explicitly scoped future capabilities.
 
 The larger project will extend this manual coordination into human-reviewed
 automation, automatic agent/task orchestration, and local LLM interoperability. Storage, model routing, execution,

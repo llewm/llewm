@@ -36,6 +36,7 @@ type Item struct {
 	ContextRefs         []string `json:"context_refs,omitempty"`
 	PriorCompletionRefs []string `json:"prior_completion_refs,omitempty"`
 	BlockedReason       string   `json:"blocked_reason,omitempty"`
+	Job                 *JobSpec `json:"job,omitempty"`
 }
 
 type Revision struct {
@@ -64,6 +65,8 @@ type Work struct {
 	Generation    int         `json:"generation"`
 	ActiveAttempt string      `json:"active_attempt,omitempty"`
 	CompletedBy   string      `json:"completed_by,omitempty"` // submission ID or source:item-ID (see item's prior_completion_refs)
+	PausedReason  string      `json:"paused_reason,omitempty"`
+	PausedBy      string      `json:"paused_by,omitempty"`
 }
 
 type Attempt struct {
@@ -127,26 +130,27 @@ type Plan struct {
 // Command is the versioned manual coordination interface. Actor identity comes
 // only from authentication. An idempotency key must never name different input.
 type Command struct {
-	SchemaVersion    int         `json:"schema_version"`
-	RequestID        string      `json:"request_id"`
-	Action           string      `json:"action"`
-	PlanID           string      `json:"plan_id"`
-	BaseVersion      int         `json:"base_version,omitempty"`
-	Definition       *Definition `json:"definition,omitempty"`
-	Revision         int         `json:"revision,omitempty"`
-	ItemID           string      `json:"item_id,omitempty"`
-	Engineer         string      `json:"engineer,omitempty"`
-	Reason           string      `json:"reason,omitempty"`
-	Machine          string      `json:"machine,omitempty"`
-	Agent            string      `json:"agent,omitempty"`
-	AttemptID        string      `json:"attempt_id,omitempty"`
-	Kind             string      `json:"kind,omitempty"`
-	Context          string      `json:"context,omitempty"`
-	ArtifactRefs     []string    `json:"artifact_refs,omitempty"`
-	VerificationRefs []string    `json:"verification_refs,omitempty"`
-	Usage            *Usage      `json:"usage,omitempty"`
-	SubmissionID     string      `json:"submission_id,omitempty"`
-	Decision         string      `json:"decision,omitempty"`
+	SchemaVersion    int            `json:"schema_version"`
+	RequestID        string         `json:"request_id"`
+	Action           string         `json:"action"`
+	PlanID           string         `json:"plan_id"`
+	BaseVersion      int            `json:"base_version,omitempty"`
+	Definition       *Definition    `json:"definition,omitempty"`
+	Revision         int            `json:"revision,omitempty"`
+	ItemID           string         `json:"item_id,omitempty"`
+	Engineer         string         `json:"engineer,omitempty"`
+	Reason           string         `json:"reason,omitempty"`
+	Machine          string         `json:"machine,omitempty"`
+	Agent            string         `json:"agent,omitempty"`
+	AttemptID        string         `json:"attempt_id,omitempty"`
+	Kind             string         `json:"kind,omitempty"`
+	Context          string         `json:"context,omitempty"`
+	ArtifactRefs     []string       `json:"artifact_refs,omitempty"`
+	VerificationRefs []string       `json:"verification_refs,omitempty"`
+	Usage            *Usage         `json:"usage,omitempty"`
+	SubmissionID     string         `json:"submission_id,omitempty"`
+	Decision         string         `json:"decision,omitempty"`
+	Worker           *WorkerProfile `json:"worker,omitempty"`
 }
 
 type Receipt struct {

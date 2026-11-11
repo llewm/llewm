@@ -50,6 +50,9 @@ func (p *Plan) dependenciesReady(item *Item) bool {
 	if item.BlockedReason != "" {
 		return false
 	}
+	if w := p.Work[item.ID]; w != nil && w.PausedReason != "" {
+		return false
+	}
 	for _, id := range item.DependsOn {
 		if p.Work[id] == nil || p.Work[id].CompletedBy == "" {
 			return false
@@ -94,7 +97,7 @@ func (p *Plan) view(member Member, now time.Time) View {
 		for _, item := range d.Items {
 			w := p.Work[item.ID]
 			assignment, _ := p.assignment(item.ID)
-			if w.CompletedBy != "" || (assignment.Engineer != "" && assignment.Engineer != member.ID) || !p.dependenciesReady(&item) {
+			if w.CompletedBy != "" || p.pendingResult(item.ID) || (assignment.Engineer != "" && assignment.Engineer != member.ID) || !p.dependenciesReady(&item) {
 				continue
 			}
 			if a := p.Attempts[w.ActiveAttempt]; a == nil || p.stale(a, now) != "" {
@@ -137,7 +140,7 @@ func (p *Plan) view(member Member, now time.Time) View {
 
 func apply(p *Plan, member Member, c Command, now time.Time, newID string) (Receipt, error) {
 	r := Receipt{SchemaVersion: SchemaVersion, RequestID: c.RequestID, Actor: member.ID, PlanID: c.PlanID, Status: "recorded"}
-	permission := map[string]string{"propose": "plan", "accept-plan": "accept", "assign": "assign", "claim": "work", "resume": "work", "release": "work", "submit": "work", "review": "review"}[c.Action]
+	permission := map[string]string{"propose": "plan", "accept-plan": "accept", "assign": "assign", "claim": "work", "resume": "work", "release": "work", "pause": "work", "unblock": "assign", "submit": "work", "review": "review"}[c.Action]
 	if permission == "" {
 		return r, errors.New("unknown action")
 	}
@@ -146,7 +149,7 @@ func apply(p *Plan, member Member, c Command, now time.Time, newID string) (Rece
 	}
 	// Offline contributions and resume/release checks name an immutable attempt.
 	// All other changes compare the exact shared plan version read by the caller.
-	if c.Action != "submit" && c.Action != "resume" && c.Action != "release" && c.BaseVersion != p.Version {
+	if c.Action != "submit" && c.Action != "resume" && c.Action != "release" && c.Action != "pause" && c.BaseVersion != p.Version {
 		return r, ErrConflict
 	}
 	switch c.Action {
@@ -225,12 +228,23 @@ func apply(p *Plan, member Member, c Command, now time.Time, newID string) (Rece
 		if !validID(c.Machine) || !validID(c.Agent) {
 			return r, errors.New("machine and agent labels required (identifier syntax)")
 		}
+		if item.Job != nil {
+			if c.Worker == nil {
+				return r, errors.New("routed job claim requires a worker profile")
+			}
+			if err := ValidateWorkerProfile(*c.Worker); err != nil {
+				return r, err
+			}
+			if !item.Job.matches(*c.Worker) {
+				return r, errors.New("worker does not match the reviewed job requirements")
+			}
+		}
 		w := p.Work[c.ItemID]
 		assignment, inherited := p.assignment(c.ItemID)
 		if assignment.Engineer != "" && assignment.Engineer != member.ID {
 			return r, ErrForbidden
 		}
-		if w.CompletedBy != "" || !p.dependenciesReady(item) {
+		if w.CompletedBy != "" || p.pendingResult(item.ID) || !p.dependenciesReady(item) {
 			return r, errors.New("item is completed or dependencies are unfinished")
 		}
 		if a := p.Attempts[w.ActiveAttempt]; a != nil && p.stale(a, now) == "" {
@@ -241,7 +255,7 @@ func apply(p *Plan, member Member, c Command, now time.Time, newID string) (Rece
 		p.Attempts[a.ID] = a
 		w.ActiveAttempt = a.ID
 		r.AttemptID = a.ID
-	case "resume", "release":
+	case "resume", "release", "pause":
 		a := p.Attempts[c.AttemptID]
 		if a == nil {
 			return r, ErrNotFound
@@ -257,9 +271,26 @@ func apply(p *Plan, member Member, c Command, now time.Time, newID string) (Rece
 			a.ValidUntil = now.Add(AttemptTTL)
 			r.Status = "resumable"
 		} else {
+			if c.Action == "pause" {
+				if strings.TrimSpace(c.Reason) == "" {
+					return r, errors.New("pause reason required")
+				}
+				p.Work[a.ItemID].PausedReason = c.Reason
+				p.Work[a.ItemID].PausedBy = member.ID
+			}
 			a.Released = true
 			r.Status = "released"
+			if c.Action == "pause" {
+				r.Status = "paused"
+			}
 		}
+	case "unblock":
+		w := p.Work[c.ItemID]
+		if w == nil || w.CompletedBy != "" || w.PausedReason == "" || strings.TrimSpace(c.Reason) == "" {
+			return r, errors.New("unblock requires an unfinished paused item and reason")
+		}
+		w.PausedReason, w.PausedBy = "", ""
+		r.Status = "unblocked"
 	case "submit":
 		a := p.Attempts[c.AttemptID]
 		if a == nil {
@@ -331,6 +362,8 @@ func apply(p *Plan, member Member, c Command, now time.Time, newID string) (Rece
 				return r, errors.New("review must cite verification of the current acceptance criteria and integration")
 			}
 			w.CompletedBy = submission.ID
+		} else if w != nil && w.ActiveAttempt == a.ID && w.Generation == a.Generation {
+			a.Released = true
 		}
 		p.Reviews = append(p.Reviews, Review{SubmissionID: submission.ID, Decision: c.Decision, Reviewer: member.ID, Reason: c.Reason, VerificationRefs: c.VerificationRefs, At: now})
 		r.SubmissionID = submission.ID
@@ -347,6 +380,11 @@ func validateDefinition(d Definition) error {
 	}
 	items := map[string]Item{}
 	for _, item := range d.Items {
+		if item.Job != nil {
+			if err := validateJob(*item.Job); err != nil {
+				return err
+			}
+		}
 		if !validID(item.ID) || strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.AcceptanceCriteria) == "" {
 			return errors.New("items require identifier, title and acceptance criteria")
 		}

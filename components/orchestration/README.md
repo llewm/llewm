@@ -1,6 +1,6 @@
 # Shared agent work
 
-`llewm-orchestrate` is the first manual orchestration milestone: engineers share
+`llewm-orchestrate` coordinates manually started clients: engineers share
 reviewed plans and a work pool, run their own agents using their own provider
 accounts, and return attributable context and results. An engineer with assignment
 permission can transfer unfinished responsibility without losing completed work.
@@ -13,8 +13,12 @@ Continuity remains independently usable without this service.
 This milestone coordinates manually launched work. It does not launch agents,
 create worktrees, hold provider credentials, merge commits, or enforce spending
 limits. There is no automatic runner, provider quota pooling, push notification,
-or production deployment installed by building it. Workers poll `show` and call
-`resume` before continuing; offline work is reconciled on submission.
+or production deployment installed by building it. An already-running agent can
+use the [client work queue](docs/client-work-queue.md) through a separate stdio MCP
+adapter. It discovers reviewed jobs, reports progress and moves to independent
+work while another result awaits review or a job needs human input. The client
+owns execution. Manual workers can still poll `show` and call `resume` before
+continuing; offline work is reconciled on submission.
 
 ## Build and start a coordinator
 
@@ -173,6 +177,8 @@ busy plan may require retries even when engineers work on different items.
 | `claim` | `base_version`, `item_id`, `machine`, `agent` | Reserve one ready item and return `attempt_id` |
 | `resume` | `attempt_id` | Check current authority and renew a valid attempt for 30 minutes |
 | `release` | `attempt_id` | Release a valid attempt so the item can be claimed again |
+| `pause` | `attempt_id`, `reason` | Release your attempt and record a blocker; unrelated jobs stay ready |
+| `unblock` | `base_version`, `item_id`, `reason` | An assignment-authorized operator clears a runtime blocker; claim a new attempt |
 | `submit` | `attempt_id`, `kind`, `context`, references | Append context or a result, retaining stale contributions |
 | `review` | `base_version`, `submission_id`, `decision`, `reason`, `verification_refs` | Accept/adopt a result or reject it |
 
@@ -210,6 +216,13 @@ cite verification against current criteria and integration. The coordinator mark
 the item complete only after review; it never merges code. Combining partial work
 means publishing a new result that references both contributions. Completed item
 definitions cannot be changed or removed; represent rework as a new item.
+
+A result submitted while its attempt was valid remains out of the ready queue
+while awaiting review, even if that attempt expires. Explicit reassignment or a
+new accepted revision can release new scope while retaining the old result for
+reconciliation. Rejecting a current result releases its attempt for a retry; it
+does not release a newer worker's attempt. Late results already stale at receipt
+do not block current work.
 
 ## Reassignment and offline recovery
 
@@ -249,6 +262,8 @@ claims, reassignments and renewals; it does not imply existing agents stopped.
 
 - `POST /v1/commands`: the command schema above; actor identity is authenticated.
 - `GET /v1/plans`: plan summaries.
+- `POST /v1/queue`: bounded authenticated discovery over an explicit plan
+  allowlist and reported worker platform/capabilities; discovery never claims.
 - `GET /v1/plans/ID`: accepted/proposed revisions, assignments, attempts, handoffs,
   submissions and reviews; `ready` is caller-specific and `submissions` includes
   current reconciliation status.
@@ -276,7 +291,7 @@ another independently writable coordinator or sync it through Continuity memory.
 For a backup, stop the coordinator and other local writers, then preserve the
 database and any SQLite sidecars together before restarting. Restore to one
 authority. Automatic failover, multi-master sync, team deployment, detailed capacity
-budgets, runner adapters, and automatic Continuity writeback are future work.
+budgets, unattended agent runners, and automatic Continuity writeback are future work.
 
 Automated tests cover the Dave/Alice/Jerry transfer with three completed nodes,
 late adoption/rejection, preserved child assignments, plan collaboration, source

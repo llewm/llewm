@@ -108,3 +108,35 @@ func TestServeRejectsPlaintextPublicListener(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCredentialImportCreatesPrivateNonOverwritingFile(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "received.token")
+	target := filepath.Join(dir, "private", "worker.token")
+	token := "lworch_" + strings.Repeat("a", 64)
+	if err := os.WriteFile(source, []byte(token+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	args := []string{"credential-import", "--file", source, "--token-file", target}
+	if err := run(args, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), token) {
+		t.Fatal("credential printed")
+	}
+	if got, err := readPrivateToken(target); err != nil || got != token {
+		t.Fatalf("private import failed: %v", err)
+	}
+	if err := run(args, &out, &out); err == nil {
+		t.Fatal("existing private credential overwritten")
+	}
+	for _, invalid := range []string{"wrong", token + strings.Repeat(" ", 300), "lworch_" + strings.Repeat("z", 64)} {
+		if err := os.WriteFile(source, []byte(invalid), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := run([]string{"credential-import", "--file", source, "--token-file", filepath.Join(dir, "private", "invalid.token")}, &out, &out); err == nil {
+			t.Fatal("invalid credential imported")
+		}
+	}
+}

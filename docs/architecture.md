@@ -96,7 +96,13 @@ not to an offline agent process or a source repository. The versioned HTTP/CLI
 interface performs no generic execution or automatic merge.
 
 The first milestone supports one authoritative coordinator per team project,
-manual claims and source-plan imports. An import is a proposed execution snapshot
+manual claims, source-plan imports and purpose-built MCP tools for already-running
+clients. The bounded work queue matches reviewed platform/capability requirements
+and keeps submitted or paused work from stalling unrelated jobs. Those labels and
+scope descriptions are routing/context, not OS confinement or new permissions.
+The client owns execution; the coordinator and adapter never start agents or run
+commands. See the [client work queue](../components/orchestration/docs/client-work-queue.md).
+An import is a proposed execution snapshot
 that needs coordinator review; collaborative revisions and source-plan changes
 require explicit reconciliation. Continuity writeback, automatic runners, provider
 budget enforcement and team deployment are not implemented. The coordinator is
