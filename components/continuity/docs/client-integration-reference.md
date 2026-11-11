@@ -56,7 +56,10 @@ and install its local Llewm package. They were checked against the installed
 CLI's help; fresh-client activation still needs verification after installation.
 
 The `SessionStart` hook returns the compiled bootstrap as additional developer
-context. `PostToolUse` can return the opt-in checkpoint reminder described below;
+context. Claude Code does not pass that context to subagents, so its
+`SubagentStart` hook returns only the resolved Continuity rules (built-in rules
+after configuration, at most 4 KiB, no checkpoint or history). The Codex plugin
+registers no subagent hook. `PostToolUse` can return the opt-in checkpoint reminder described below;
 the other configured hooks record lifecycle observations without semantic
 checkpoint creation. Hook-driven usage ingestion is described in [usage](usage.md).
 

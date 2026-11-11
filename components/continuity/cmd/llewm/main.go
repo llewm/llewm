@@ -1520,6 +1520,15 @@ func hookCommand() *cobra.Command {
 				_ = application.ObservePresence(cmd.Context(), event.Client, event.SessionID, invocation.ID, event.EventType, envelope.CWD, event.ReceivedAt)
 				// Best-effort: attribution never blocks a hook.
 				application.ObserveHeads(cmd.Context(), event.Client, event.SessionID, strings.ToLower(event.EventType), envelope.ToolName, envelope.ToolInput)
+				if strings.EqualFold(event.EventType, "subagentstart") {
+					// Subagents do not receive the parent's SessionStart context.
+					return writeJSON(cmd.OutOrStdout(), map[string]any{
+						"hookSpecificOutput": map[string]any{
+							"hookEventName":     "SubagentStart",
+							"additionalContext": application.Bootstrap.SubagentContext(event.SessionID),
+						},
+					})
+				}
 				if strings.EqualFold(event.EventType, "sessionstart") {
 					// A resumed session keeps its session ID, so its live task presence comes first.
 					packet, err := application.Bootstrap.BuildForSession(cmd.Context(), application.ProjectID, application.Root, application.Config.Project.Name, checkpoint.Selection{}, event.SessionID)
