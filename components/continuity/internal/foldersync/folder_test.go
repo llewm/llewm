@@ -391,9 +391,7 @@ func TestContainerRejectsUnsupportedAndSymlinkMarkers(t *testing.T) {
 	if err := os.Remove(filepath.Join(directory, MarkerFile)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(external, filepath.Join(directory, MarkerFile)); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, external, filepath.Join(directory, MarkerFile))
 	if _, err := Inspect(directory); err == nil {
 		t.Fatal("symlink marker accepted")
 	}
