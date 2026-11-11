@@ -21,8 +21,10 @@ func lockFileMode(path string, immediate bool) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Keep the legacy sync lock held while its containing clone is retired.
-	// Go's ordinary OpenFile does not request delete-sharing on Windows.
+	// Request delete-sharing so the lock never blocks deleting or renaming the
+	// lock file itself; Go's ordinary OpenFile does not. Windows still refuses
+	// to rename a directory containing any open file, see
+	// parentRenameKeepsOpenFiles.
 	handle, err := windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_ALWAYS, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		return nil, err
@@ -39,3 +41,7 @@ func lockFileMode(path string, immediate bool) (*os.File, error) {
 	}
 	return file, nil
 }
+
+// parentRenameKeepsOpenFiles is false: Windows refuses to rename a directory
+// while any file inside it is open, even with delete-sharing.
+const parentRenameKeepsOpenFiles = false

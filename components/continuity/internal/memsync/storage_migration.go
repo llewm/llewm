@@ -438,7 +438,7 @@ func completeBareClone(ctx context.Context, paths cloneStoragePaths, remote stri
 			return err
 		}
 		if original == p.Root {
-			if err := parent.Rename(filepath.Base(p.Root), filepath.Base(p.Retained)); err != nil {
+			if err := retireOriginalClone(ctx, parent, p, legacyLock, r, remote, access); err != nil {
 				return err
 			}
 			if err := syncCloneParent(parent); err != nil {
@@ -460,5 +460,43 @@ func completeBareClone(ctx context.Context, paths cloneStoragePaths, remote stri
 		return err
 	}
 	_, err = recordsync.WriteFile(parent, filepath.Base(p.Receipt)+".done", r.done(), false)
+	return err
+}
+
+// retireOriginalClone renames the original working clone to its retained path.
+// Where the platform cannot rename a directory holding an open file (Windows),
+// the legacy lock is released first: the rename itself then fails while any
+// legacy writer holds a file inside the clone, and the retained clone is
+// verified against the preparation receipt afterwards and moved back if it
+// changed in between.
+func retireOriginalClone(ctx context.Context, parent *os.Root, p cloneStoragePaths, legacyLock *os.File, r cloneStorageReceipt, remote string, access Access) error {
+	released := !parentRenameKeepsOpenFiles
+	if released {
+		if err := legacyLock.Close(); err != nil {
+			return err
+		}
+	}
+	rootName, retainedName := filepath.Base(p.Root), filepath.Base(p.Retained)
+	if err := parent.Rename(rootName, retainedName); err != nil {
+		if released {
+			return fmt.Errorf("retire original clone (a legacy sync writer may still be active): %w", err)
+		}
+		return err
+	}
+	if !released {
+		return nil
+	}
+	retainedRepo := access.git(p.Retained)
+	retainedRepo.WorkTree = p.Retained
+	retained, err := snapshotClone(ctx, retainedRepo, remote, true)
+	if err == nil && sourceMatchesReceipt(retained, r) {
+		return nil
+	}
+	if err == nil {
+		err = fmt.Errorf("original clone changed while it was retired")
+	}
+	if restoreErr := parent.Rename(retainedName, rootName); restoreErr != nil {
+		return fmt.Errorf("%w; restoring the original clone path also failed: %v", err, restoreErr)
+	}
 	return err
 }

@@ -31,3 +31,7 @@ func lockFileMode(path string, immediate bool) (*os.File, error) {
 	}
 	return file, nil
 }
+
+// parentRenameKeepsOpenFiles is true: POSIX renames a directory while files
+// inside it are open, so a held lock fences writers across the rename.
+const parentRenameKeepsOpenFiles = true
