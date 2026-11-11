@@ -121,6 +121,12 @@ the selected project and plan. Inspect the command's help before applying.
 Export publishes a complete directory without overwriting an existing destination.
 Inspect and plan do not mutate semantic state.
 
+Directory and Git-reviewed exports flush each written file, then rename the
+verified staging directory into place. On Unix they also flush the staging and
+destination directories. On Windows, file flushes use `FlushFileBuffers` on the
+read/write file handle; Unix-style directory flushing is not attempted, so
+Windows exports do not separately certify parent-directory crash durability.
+
 Planning validates the bundle, lineage and dependencies, then classifies records
 as append, already present, collision, invalid or unsupported.
 Apply is transactional: validation, dependency, collision, storage or receipt

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -277,13 +278,23 @@ func readBoundedRegularFile(path string, limit int) ([]byte, error) {
 	return body, nil
 }
 
+// syncDirectory confirms path names an existing directory, then applies the
+// platform's directory flush (see flushDirectory). Open, stat and flush errors
+// are returned unchanged.
 func syncDirectory(path string) error {
 	handle, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer handle.Close()
-	return handle.Sync()
+	info, err := handle.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return &os.PathError{Op: "sync directory", Path: path, Err: errors.New("not a directory")}
+	}
+	return flushDirectory(handle)
 }
 
 func CuratedV1Omissions() []Omission {
