@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -98,7 +101,7 @@ func TestObjectTransportBareExactBytesAndTreeOrder(t *testing.T) {
 			}
 			// Bare fixtures never gain a worktree/index as a side effect.
 			for _, name := range []string{"index", "a", leaf.name} {
-				if _, err := os.Lstat(filepath.Join(transport.repo.Dir, name)); !os.IsNotExist(err) {
+				if _, err := os.Lstat(filepath.Join(transport.repo.Dir, name)); !os.IsNotExist(err) && !invalidPlatformName(err) {
 					t.Fatalf("worktree/index unexpectedly created: %s %v", name, err)
 				}
 			}
@@ -256,4 +259,10 @@ func TestObjectTransportRejectsCorruptLooseBlob(t *testing.T) {
 	if _, err := transport.readBlob(ctx, object, 100); err == nil {
 		t.Fatal("damaged Git object escaped independent identity check")
 	}
+}
+
+// invalidPlatformName reports whether err means the platform cannot even name
+// the path (Windows ERROR_INVALID_NAME, e.g. a newline), so it cannot exist.
+func invalidPlatformName(err error) bool {
+	return runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(123))
 }
