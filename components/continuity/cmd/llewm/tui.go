@@ -192,24 +192,16 @@ func tuiCommand() *cobra.Command {
 				return fmt.Errorf("terminal initialization failed: %w; use llewm work list or llewm history search", err)
 			}
 			defer screen.Fini()
-			stopRefresh := make(chan struct{})
-			defer close(stopRefresh)
-			go func() {
-				ticker := time.NewTicker(5 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-stopRefresh:
-						return
-					case <-ticker.C:
-						_ = screen.PostEvent(tcell.NewEventInterrupt(nil))
-					}
-				}
-			}()
 			state := newTerminalView(appTerminalSource{app: application, checkout: checkout})
 			if err := state.load(cmd.Context()); err != nil {
 				return err
 			}
+			// Schedule the next refresh after handling the previous one. A fixed
+			// ticker can queue repeated reads when this project's load is slow.
+			refreshTimer := time.AfterFunc(5*time.Second, func() {
+				_ = screen.PostEvent(tcell.NewEventInterrupt(nil))
+			})
+			defer refreshTimer.Stop()
 			for {
 				state.draw(screen)
 				event := screen.PollEvent()
@@ -219,6 +211,7 @@ func tuiCommand() *cobra.Command {
 				switch e := event.(type) {
 				case *tcell.EventInterrupt:
 					_ = state.autoRefresh(cmd.Context())
+					refreshTimer.Reset(5 * time.Second)
 				case *tcell.EventResize:
 					screen.Sync()
 				case *tcell.EventKey:

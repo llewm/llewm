@@ -38,7 +38,7 @@ Use `n`/`p` for pages in Timeline, Decisions, History and Checkpoints, `[ ]` for
 plan revisions, `f` for track/work-item filters, and `k` for timeline/history kinds.
 PgUp/PgDn scroll the detail pane; `z` or Enter expands it. Escape first collapses
 expanded detail. `r` refreshes saved data while staying in the current view or
-navigation stack. The top-level Tracks overview also refreshes every five seconds,
+navigation stack. The top-level Tracks overview also refreshes after five idle seconds following each read,
 preserving the selected task or track and detail scroll. Automatic refresh pauses
 while reading expanded details, help, search input or a drilled-in record, and in
 other views. The Tracks filter bar shows when its saved snapshot was updated;
@@ -49,15 +49,16 @@ help; `q` or Ctrl-C exits.
 Tracks opens with the `open` filter: unfinished tracks, including imported
 proposals and deferred work. Completed, abandoned and superseded work is hidden.
 Use `f` to reach `all` for finished tracks or `everything` to also include finished
-tasks without a roadmap node. The latest project-wide checkpoint's visible track is initially selected
-and highlighted. This is saved history, not the current task of every session.
+tasks without a roadmap node. The latest project-wide checkpoint's visible track
+is initially selected and highlighted. This is saved history, not the current task of every session.
 
 The `actions` filter shows tracks whose selected task has unresolved checkpoint
 actions. Rows show the selected task's saved checkpoint status when available,
 otherwise the roadmap status or binding state. Detail labels roadmap state as
 `Track` and checkpoint state as `Saved`; disagreement remains visible rather
 than changing either record. Human task titles replace IDs where a saved
-checkpoint is available; IDs and bindings remain in Detail. The detail pane shows the selected task's checkpoint age, status and next
+checkpoint is available; IDs and bindings remain in Detail. The detail pane shows
+the selected task's checkpoint age, status and next
 action; age is a prompt to review, not evidence that work is complete. For a
 complete cross-task action list, including nonselected tasks on a shared track,
 use `llewm checkpoint actions --all`.
