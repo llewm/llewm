@@ -197,6 +197,8 @@ func (s Service) prepare(ctx context.Context, input Record) (Record, string, err
 	if input.SupersedesID, err = text("supersedes ID", input.SupersedesID, false); err != nil {
 		return Record{}, "", err
 	}
+	// History and record results return narrative:ID; accept that ref as well as the bare ID.
+	input.SupersedesID = strings.TrimPrefix(input.SupersedesID, "narrative:")
 	if input.SupersedesID == input.ID && input.SupersedesID != "" {
 		return Record{}, "", fmt.Errorf("a narrative cannot supersede itself")
 	}
