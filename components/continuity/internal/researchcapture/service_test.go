@@ -95,3 +95,18 @@ func TestReportForCheckpointSkipsLightDiscovery(t *testing.T) {
 		t.Fatalf("light report: %+v err=%v", report, err)
 	}
 }
+
+func TestDiscoveryKindRecognizesShellSourceFetches(t *testing.T) {
+	for command, want := range map[string]string{
+		"mkdir -p scratch && cd scratch && git clone --depth 50 https://github.com/example/tool.git repo": "external",
+		"curl -s https://api.example.org/v1/items | jq .":                                                 "external",
+		"gh api repos/example/tool/contents":                                                              "external",
+		"grep -rn validateTarget internal":                                                                "repository",
+		"go test ./...":                                                                                   "",
+		"git commit -m 'git clone docs'":                                                                  "",
+	} {
+		if got := discoveryKind("Bash", command); got != want {
+			t.Errorf("discoveryKind(%q) = %q, want %q", command, got, want)
+		}
+	}
+}

@@ -108,7 +108,9 @@ type CheckpointOutput struct {
 	UnnarratedCommits []worknarrative.UnnarratedCommit `json:"unnarrated_commits,omitempty" jsonschema:"the engineer's recent commits (last 14 days) that no narrative describes; record one per commit with continuity_narrative_record and commit"`
 	// ResearchCapture compares bounded discovery activity with task-linked durable output.
 	ResearchCapture *researchcapture.Report `json:"research_capture,omitempty" jsonschema:"advisory comparison of substantial discovery activity with task-linked durable records and checkpoint evidence"`
-	Preflight       *bootstrap.Readiness    `json:"preflight,omitempty" jsonschema:"dry run result; nothing was saved"`
+	// UnlinkedRecords is advisory; it never blocks the checkpoint.
+	UnlinkedRecords []string             `json:"unlinked_records,omitempty" jsonschema:"records this session wrote since its last checkpoint that neither link to this task nor appear in evidence_refs"`
+	Preflight       *bootstrap.Readiness `json:"preflight,omitempty" jsonschema:"dry run result; nothing was saved"`
 }
 
 // CheckpointGetInput exports one checkpoint by ID or finds checkpoints by text.
@@ -552,6 +554,7 @@ func newServer(application *app.App) *mcp.Server {
 
 func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 	runtimeState := buildinfo.CaptureRuntime()
+	ledger := &sessionLedger{}
 	server := mcp.NewServer(&mcp.Implementation{Name: "llewm", Version: runtimeState.Build.ApplicationVersion}, nil)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
@@ -650,9 +653,15 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			switch input.Action {
 			case "acquire":
 				result, err := application.Leases.Acquire(ctx, request)
+				if err == nil && kind == "task" {
+					ledger.bind(id)
+				}
 				return nil, result, err
 			case "renew":
 				result, err := application.Leases.Renew(ctx, request)
+				if err == nil && kind == "task" {
+					ledger.bind(id)
+				}
 				return nil, result, err
 			case "release":
 				result, err := application.Leases.Release(ctx, request)
@@ -775,6 +784,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 	addTool(server, &mcp.Tool{Name: "continuity_bootstrap", Description: "Read SessionStart bootstrap; unchanged returns a notice unless full."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BootstrapInput) (*mcp.CallToolResult, BootstrapOutput, error) {
 			selection := checkpoint.Selection{CheckpointID: input.CheckpointID, TaskID: input.TaskID, SessionID: input.SessionID}
+			ledger.bind(input.TaskID)
 			inferredSession := false
 			if input.CurrentSessionID == "" && selection == (checkpoint.Selection{}) {
 				input.CurrentSessionID = soleRecentSession(ctx, application, startedAt)
@@ -830,7 +840,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 				if err != nil {
 					return nil, CheckpointOutput{}, err
 				}
-				return nil, CheckpointOutput{Preflight: &result, ResearchCapture: application.ResearchCapture(ctx, value)}, nil
+				return nil, CheckpointOutput{Preflight: &result, ResearchCapture: application.ResearchCapture(ctx, value), UnlinkedRecords: unlinkedRecords(ctx, application.DB, application.ProjectID, value.TaskID, ledger.written(), value.EvidenceRefs)}, nil
 			}
 			if err := application.CheckWriter(ctx); err != nil {
 				var stale *database.StaleWriterError
@@ -855,7 +865,9 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 				}
 				return nil, CheckpointOutput{}, err
 			}
-			return nil, CheckpointOutput{ID: created.Checkpoint.ID, Lease: created.Lease, SessionLease: created.SessionLease, CarriedForward: created.CarriedForward, Reconciled: created.Reconciled, ActionCreated: created.ActionCreated, UnnarratedCommits: application.UnnarratedCommits(ctx), ResearchCapture: application.ResearchCapture(ctx, value)}, nil
+			unlinked := unlinkedRecords(ctx, application.DB, application.ProjectID, value.TaskID, ledger.written(), value.EvidenceRefs)
+			ledger.saved(value.TaskID)
+			return nil, CheckpointOutput{ID: created.Checkpoint.ID, Lease: created.Lease, SessionLease: created.SessionLease, CarriedForward: created.CarriedForward, Reconciled: created.Reconciled, ActionCreated: created.ActionCreated, UnnarratedCommits: application.UnnarratedCommits(ctx), ResearchCapture: application.ResearchCapture(ctx, value), UnlinkedRecords: unlinked}, nil
 		})
 	addTool(server, &mcp.Tool{Name: "continuity_checkpoint_actions", Description: "List task's unresolved actions; select task_id or all when ambiguous."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input CheckpointActionsInput) (*mcp.CallToolResult, CheckpointActionsOutput, error) {
@@ -965,7 +977,11 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		})
 	addWriteTool(server, application, &mcp.Tool{Name: "continuity_decision_record", Description: "Record an explicit user decision with typed links."}, func(ctx context.Context, _ *mcp.CallToolRequest, input DecisionRecordInput) (*mcp.CallToolResult, Receipt, error) {
 		value, err := application.Decisions.Append(ctx, decision.Record{ID: input.ID, ProjectID: application.ProjectID, Title: input.Title, Rationale: input.Rationale, Disposition: input.Disposition, Actor: input.Actor, ActorType: input.ActorType, Authority: input.Authority, ReviewSource: input.ReviewSource, SupersedesID: input.SupersedesID, Links: input.Links})
-		return nil, decisionReceipt(value), err
+		receipt := decisionReceipt(value)
+		if err == nil {
+			ledger.add(receipt.Ref)
+		}
+		return nil, receipt, err
 	})
 	addTool(server, &mcp.Tool{Name: "continuity_history_search", Description: "Search history before diagnosis/redesign; expand refs with history_show and verify current evidence."}, func(ctx context.Context, _ *mcp.CallToolRequest, input HistorySearchInput) (*mcp.CallToolResult, history.SearchPage, error) {
 		page, err := application.History.Search(ctx, application.ProjectID, history.SearchOptions{SourceURL: input.SourceURL, State: input.State, Query: input.Query, Topic: input.Topic, Kinds: input.Kinds, Families: input.Families, Since: input.Since, Until: input.Until, Linked: input.Linked, Limit: input.Limit, Offset: input.Offset, MaxBytes: input.MaxBytes})
@@ -984,13 +1000,23 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		if err != nil {
 			return nil, Receipt{}, fmt.Errorf("occurred_to: %w", err)
 		}
-		value := worknarrative.Record{Source: input.Source, ID: input.ID, ProjectID: application.ProjectID, Title: input.Title, Trigger: input.Trigger, OccurredFrom: from, OccurredTo: to, Claims: input.Claims, Anchors: input.Anchors, Creator: input.Creator, CreatorInvocationID: input.CreatorInvocationID, SupersedesID: input.SupersedesID}
+		value := worknarrative.Record{Source: input.Source, ID: input.ID, ProjectID: application.ProjectID, Title: input.Title, Trigger: input.Trigger, OccurredFrom: from, OccurredTo: to, Claims: input.Claims, Anchors: ledger.anchorNarrative(input.Anchors), Creator: input.Creator, CreatorInvocationID: input.CreatorInvocationID, SupersedesID: input.SupersedesID}
+		var receipt Receipt
 		if input.Commit == "" {
 			record, err := application.Narratives.Append(ctx, value)
-			return nil, narrativeReceipt(worknarrative.RecordResult{Record: record}), err
+			receipt = narrativeReceipt(worknarrative.RecordResult{Record: record})
+			if err != nil {
+				return nil, receipt, err
+			}
+		} else {
+			record, note, err := application.Narratives.RecordCommit(ctx, value, input.Commit, input.Repo, input.SkipNote)
+			receipt = narrativeReceipt(worknarrative.RecordResult{Record: record, Note: &note})
+			if err != nil {
+				return nil, receipt, err
+			}
 		}
-		record, note, err := application.Narratives.RecordCommit(ctx, value, input.Commit, input.Repo, input.SkipNote)
-		return nil, narrativeReceipt(worknarrative.RecordResult{Record: record, Note: &note}), err
+		ledger.add(receipt.Ref)
+		return nil, receipt, nil
 	})
 	addWriteTool(server, application, &mcp.Tool{Name: "continuity_track_plan_record", Description: "Record plan progress/intent under policy; omit items for explicit human review."}, func(ctx context.Context, _ *mcp.CallToolRequest, input TrackPlanRecordInput) (*mcp.CallToolResult, Receipt, error) {
 		if input.Items == nil {
@@ -1048,8 +1074,14 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		return nil, TrackPlanResult{Outline: &outline}, nil
 	})
 	addWriteTool(server, application, &mcp.Tool{Name: "continuity_item_capture", Description: "Capture pending idea/bug/task/research; active work unchanged."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemCaptureInput) (*mcp.CallToolResult, Receipt, error) {
-		v, err := application.WorkItems.Capture(ctx, workitem.Capture{Item: workitem.Item{ID: input.ID, ProjectID: application.ProjectID, Kind: input.Kind, Title: input.Title, Body: input.Body, Observed: input.Observed, Reproduction: input.Reproduction, Environment: input.Environment, Severity: input.Severity, Tags: input.Tags, TaskID: input.TaskID, CheckpointID: input.CheckpointID, RoadmapNodeID: input.RoadmapNodeID, Creator: input.Creator, Model: input.Model}, From: input.From})
-		return nil, itemReceipt(v), err
+		// An item captured mid-task belongs to the session's task unless the caller names one.
+		taskID := cmp.Or(input.TaskID, ledger.task())
+		v, err := application.WorkItems.Capture(ctx, workitem.Capture{Item: workitem.Item{ID: input.ID, ProjectID: application.ProjectID, Kind: input.Kind, Title: input.Title, Body: input.Body, Observed: input.Observed, Reproduction: input.Reproduction, Environment: input.Environment, Severity: input.Severity, Tags: input.Tags, TaskID: taskID, CheckpointID: input.CheckpointID, RoadmapNodeID: input.RoadmapNodeID, Creator: input.Creator, Model: input.Model}, From: input.From})
+		receipt := itemReceipt(v)
+		if err == nil {
+			ledger.add(receipt.Ref)
+		}
+		return nil, receipt, err
 	})
 	addTool(server, &mcp.Tool{Name: "continuity_item", Description: "Read item by id; report drafts bug without submission; otherwise list/audit/friction."}, func(ctx context.Context, _ *mcp.CallToolRequest, input ItemInput) (*mcp.CallToolResult, ItemResult, error) {
 		if input.Report {
