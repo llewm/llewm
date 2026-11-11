@@ -29,7 +29,12 @@ func TestMovedCheckoutKeepsItsProjectAndHistory(t *testing.T) {
 	before := projectShow(t)
 
 	moved := filepath.Join(filepath.Dir(root), "moved")
-	t.Chdir(filepath.Dir(root))
+	// Leave the checkout with os.Chdir: t.Chdir keeps the previous directory
+	// open until cleanup, and Windows refuses to rename an open directory.
+	// testProject's t.Chdir cleanup still restores the original directory.
+	if err := os.Chdir(filepath.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Rename(root, moved); err != nil {
 		t.Fatal(err)
 	}
