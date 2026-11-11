@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func fixture(t *testing.T, client string) (string, map[string][]byte) {
@@ -43,7 +45,7 @@ func TestInspectFindsStaleMissingAndExtraContent(t *testing.T) {
 				case "extra-skill":
 					os.WriteFile(filepath.Join(root, "skills/extra.md"), []byte("old removed skill"), 0o600)
 				case "symlink":
-					os.Symlink(filepath.Join(root, ".mcp.json"), filepath.Join(root, "extra.json"))
+					symlinktest.Create(t, filepath.Join(root, ".mcp.json"), filepath.Join(root, "extra.json"))
 				case "oversize":
 					os.WriteFile(filepath.Join(root, "extra"), make([]byte, (1<<20)+1), 0o600)
 				}

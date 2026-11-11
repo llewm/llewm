@@ -13,6 +13,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/project"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 type fingerprints struct {
@@ -243,9 +244,7 @@ func TestSymlinkedSpellingIsNotAMove(t *testing.T) {
 	db, commits, resolver := identityStore(t)
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(real, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, real, link)
 	commits.commits[real] = "root-a"
 	commits.commits[link] = "root-a"
 	created, err := resolver.Ensure(ctx, real, "a", true)

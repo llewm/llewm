@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func TestRegistryRoutesFederatedMembersWithoutProjectBodies(t *testing.T) {
@@ -67,9 +69,7 @@ func TestWorkspaceRoutesFollowManifestDiskAndSymlinks(t *testing.T) {
 	}
 	// A symlinked path to the workspace must reach the same routes.
 	link := filepath.Join(base, "link")
-	if err := os.Symlink(group, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, group, link)
 	// c left the manifest; b's checkout was removed from disk.
 	if err := os.RemoveAll(filepath.Join(group, "b")); err != nil {
 		t.Fatal(err)

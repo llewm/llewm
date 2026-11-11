@@ -8,6 +8,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -270,9 +271,7 @@ func TestSharedFolderRefusesProtectedStorage(t *testing.T) {
 		t.Fatal("child of live state accepted")
 	}
 	alias := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(private, alias); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, private, alias)
 	if err := Separate(alias, private); err == nil {
 		t.Fatal("symlink alias to live state accepted")
 	}
