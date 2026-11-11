@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
@@ -115,24 +116,22 @@ func TestBrokerCLIAndHookCycle(t *testing.T) {
 	if err = hook(strings.Replace(envelope, "session\"", "other\"", 1), &out); err == nil {
 		t.Fatal("foreign session reused cursor")
 	}
-	// A held lock is another concurrent hook: a quiet no-op that writes nothing.
+	// Busy locks wait within the caller's budget and report a timeout explicitly.
 	before, _ := os.ReadFile(cursor)
-	held, err := privatestorage.Create(cursor + ".lock")
+	held, err := privatestorage.Lock(context.Background(), cursor+".lock")
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	err = brokerHook(ctx, h.URL, tokenPath, "codex", "task", "active", cursor, "", strings.NewReader(envelope), &out)
+	cancel()
 	held.Close()
-	out.Reset()
-	if err = hook(envelope, &out); err != nil || out.Len() != 0 {
-		t.Fatalf("busy lock: %v %q", err, out.String())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("busy lock: %v", err)
 	}
 	if after, _ := os.ReadFile(cursor); !bytes.Equal(before, after) {
 		t.Fatal("busy lock advanced cursor")
 	}
-	if _, err = os.Stat(cursor + ".lock"); err != nil {
-		t.Fatal("busy call removed the holder's lock")
-	}
-	os.Remove(cursor + ".lock")
 	// A cursor directory derives one private cursor per envelope session.
 	cursors := filepath.Join(dir, "cursors")
 	byDir := func(envelope string) error {
@@ -143,7 +142,13 @@ func TestBrokerCLIAndHookCycle(t *testing.T) {
 			t.Fatal(id, err)
 		}
 	}
-	names, _ := os.ReadDir(cursors)
+	entries, _ := os.ReadDir(cursors)
+	var names []os.DirEntry
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".cursor") {
+			names = append(names, entry)
+		}
+	}
 	if len(names) != 3 || names[0].Name() != "dir-a.project.cursor" || names[1].Name() != "dir-b.project.cursor" || !strings.HasPrefix(names[2].Name(), "h") {
 		t.Fatalf("derived cursors: %v", names)
 	}
@@ -192,4 +197,114 @@ func TestBrokerCLIAndHookCycle(t *testing.T) {
 	if err != nil || feed.Sessions[0].State != "ended" {
 		t.Fatal("end not observed")
 	}
+}
+
+func TestBrokerHookPreservesTaskAndSerializesEndResume(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	db, tokenPath := filepath.Join(dir, "broker.db"), filepath.Join(dir, "token")
+	for _, args := range [][]string{{"broker-init", "--db", db, "--project", "project", "--machine", "machine"}, {"broker-member", "--db", db, "--id", "engineer", "--permissions", "work", "--token-file", tokenPath}} {
+		if err := run(args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := coordination.OpenBroker(db, false, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	token, err := readPrivateToken(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(transport.BrokerHandler(store))
+	defer server.Close()
+	cursor := filepath.Join(dir, "session.cursor")
+	hook := func(event string, out io.Writer) error {
+		return brokerHook(context.Background(), server.URL, tokenPath, "codex", "", "active", cursor, "", strings.NewReader(`{"session_id":"session","hook_event_name":"`+event+`"}`), out)
+	}
+	send := func(c coordination.BrokerCommand) coordination.BrokerReceipt {
+		t.Helper()
+		c.SchemaVersion = 1
+		receipt, err := store.BrokerExecute(context.Background(), token, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return receipt
+	}
+	if err = hook("SessionStart", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	send(coordination.BrokerCommand{RequestID: "peer-start", Action: "state", SessionID: "peer", Agent: "claude", State: "active", TTLSeconds: 60})
+	// Store a task-addressed message before this task is bound. The previous
+	// task-less cursor will advance beyond it, so rebinding must reset that cursor.
+	message := send(coordination.BrokerCommand{RequestID: "offline", Action: "message", SessionID: "peer", ToTask: "task", Text: "Check this task"})
+	if err = hook("PostToolUse", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	send(coordination.BrokerCommand{RequestID: "task", Action: "state", SessionID: "session", TaskID: "task", Agent: "codex", State: "active", TTLSeconds: 60, Text: "Working", Refs: []string{"file:work"}})
+	var out bytes.Buffer
+	if err = hook("PostToolUse", &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "broker_pull") {
+		t.Fatal("task message hint missing after scope change")
+	}
+	query := coordination.BrokerQuery{SessionID: "session", TaskID: "task", ReplyTo: ""}
+	feed, err := store.BrokerPull(context.Background(), token, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range feed.Events {
+		if e.ID == message.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("task message lost")
+	}
+	for _, session := range feed.Sessions {
+		if session.ID == "session" && (session.TaskID != "task" || session.Summary != "Working" || len(session.Refs) != 1) {
+			t.Fatalf("scope erased: %+v", session)
+		}
+	}
+	beforeEnd, err := os.ReadFile(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := privatestorage.Lock(context.Background(), cursor+".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- hook("SessionEnd", io.Discard) }()
+	select {
+	case err := <-done:
+		held.Close()
+		t.Fatalf("SessionEnd did not wait: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	held.Close()
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	if afterEnd, err := os.ReadFile(cursor); err != nil || !bytes.Equal(beforeEnd, afterEnd) {
+		t.Fatalf("SessionEnd consumed unread notifications: %v", err)
+	}
+	query.WatchSession = "session"
+	feed, err = store.BrokerPull(context.Background(), token, query)
+	if err != nil || feed.Sessions[0].State != "ended" {
+		t.Fatalf("end lost: %+v %v", feed, err)
+	}
+	if err = hook("PostToolUse", io.Discard); err == nil {
+		t.Fatal("late heartbeat revived ended session")
+	}
+	if err = hook("SessionStart", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	feed, err = store.BrokerPull(context.Background(), token, query)
+	if err != nil || feed.Sessions[0].State != "active" || feed.Sessions[0].Summary != "Working" {
+		t.Fatalf("resume lost scope: %+v %v", feed, err)
+	}
+	send(coordination.BrokerCommand{RequestID: "reply", Action: "message", SessionID: "session", TaskID: "task", ReplyTo: message.ID, Text: "Resumed and received"})
 }

@@ -68,20 +68,25 @@ claude mcp add --scope local llewm-broker -- /ABS/llewm-orchestrate broker-mcp \
 Codex runs one app-server for all threads and gives MCP servers no per-thread
 session ID, so a per-session adapter cannot be configured. Codex agents use the
 CLI (`broker-request`/`broker-pull`) with the session ID that the hook hint names.
-A static configuration has no task; see the task binding note below.
+A static hook preserves the session task; see the task binding note below.
 This is a separate adapter from `mcp` (the reviewed job queue). No allowed plan is
 needed for project-level messages. Configuration is explicit: this release does
 not discover host sessions, edit client configuration or automatically install
-hooks. A restarted session needs its new session ID. A task ID is optional; use
+hooks. A resumed session may reuse its actual session ID; SessionStart explicitly
+reopens contact. A genuinely new session uses its new ID. A task ID is optional; use
 it when replies must remain discoverable after that session ends. When changing
-task bindings, update the adapter and hook together and use a separate cursor.
+task bindings, update any task-configured adapter or hook and use a separate agent
+inbox cursor.
 
-**Task binding.** Each hook heartbeat publishes the hook's configured task, and a
-task change starts a new scope. A session whose explicit `broker_state` sets a
-task loses it at the next heartbeat from a task-less hook. Its pulls with that
-task are then refused, and replies routed to that task are not seen. With static
-host configuration, leave the task unset everywhere and use session or project
-routing. Task routing to offline recipients needs a per-task hook and adapter.
+**Task binding.** A hook without `--task` sends `keep_task: true`, preserving
+an explicit session task and its announced scope. The state receipt returns the
+effective `task_id`; the hook uses that task for its inbox pull. When the effective
+task changes, its notification cursor resets so older messages to the new task
+remain discoverable. Agent inbox cursors must likewise be scoped to the actual
+task. An MCP adapter's configured task must match session state; changing that
+binding requires reconfiguring the adapter. A state update without `keep_task`
+explicitly sets or clears the task. Hook configurations with `--task` continue
+to set that task explicitly.
 
 The five tools are:
 
@@ -101,8 +106,11 @@ same request ID after an uncertain upload; changed input conflicts.
 
 An empty state summary/omitted refs preserve the previous scope for the same task,
 so hook heartbeats do not erase an agent's announcement. A task change starts a
-new scope. `ended` is terminal for that session ID; it is appropriate for actual
-session termination, not a turn-ending Stop event. An expired session may renew
+new scope. `ended` rejects ordinary heartbeats and messages. An authenticated
+owner may explicitly reopen the same session with active state and `resume: true`
+(the hook does this only for SessionStart; MCP exposes `resume` on `broker_state`).
+Repeated requests retain their original idempotent receipts. Use `ended` for
+actual session termination, not a turn-ending Stop event. An expired session may renew
 contact; expired contact alone neither completes work nor releases a shared claim.
 
 ## Request and reply example
@@ -197,21 +205,26 @@ notification hints only. The agent's inspected inbox cursor is separate and must
 still be pulled routinely, even if a host drops a hint. Do not run a context hook
 asynchronously if the host cannot surface its output.
 
-The hook has a three-second request budget, uses a private cursor file and advances
-it only after successful output. A concurrent invocation that finds the private
-`.lock` file exits successfully without output or cursor change, because hosts run
-hooks for parallel tool calls at the same time. A crashed hook may leave that
-lock, and then every later hook for that session is a silent no-op. Verify that
-no hook is running before removing it. An unavailable broker returns an error
-without advancing the cursor. Hook errors must be configured as advisory by the
-host; this command is not an approval gate. Real host rendering/delivery remains
-a deployment qualification check; automated tests exercise the envelope contract.
+The notification cursor advances only after successful output. SessionEnd
+publishes its state without consuming unread notification history.
+The hook has a three-second budget covering lock acquisition and requests. All
+hooks, including SessionEnd, wait for a private OS lock instead of silently
+skipping concurrent events. If contention outlasts the budget, the hook reports
+an error without advancing its cursor. An ended session rejects delayed ordinary
+heartbeats, so they cannot reopen contact. The OS releases the lock when its
+process closes or crashes. The `.lock` file stays in place and must not be
+removed while hooks may run: waiters must share the same file. Existing unlocked
+files do not suppress hooks. An unavailable broker returns an error without
+advancing the cursor. Hook errors must be configured as advisory by the host;
+this command is not an approval gate. Real host rendering/delivery remains a
+deployment qualification check; automated tests exercise the envelope contract.
 
 CLI users and custom wrappers can instead use `broker-info`, `broker-request
 --file COMMAND.json`, and `broker-pull --file QUERY.json`, each with endpoint and
 token-file flags. The command JSON is the MCP mutation's fields plus
 `schema_version: 1`, `action: state|message|ack`, `session_id` and optional `task_id`.
-State uses `agent`, `state`, `ttl_seconds`, `text` and `refs`. Pull JSON uses
+State uses `agent`, `state`, `ttl_seconds`, `text`, `refs`, optional `keep_task`
+(without `task_id`) and optional `resume` (active state only). Pull JSON uses
 `session_id`, optional `task_id`, `after`, optional `broker_id`, `reply_to`,
 `watch_session` and `wait_seconds`.
 
