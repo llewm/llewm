@@ -312,16 +312,17 @@ func WriteDefault(root string) (string, error) {
 	return path, encodeConfig(f, portableDefault(root))
 }
 
-// portableDefault writes paths relative to the checkout so the config survives a
-// move. A CONTINUITY_HOME store stays absolute because it lives outside the checkout.
+// portableDefault writes paths relative to the checkout, with forward slashes,
+// so the config survives a move to another location or platform. A
+// CONTINUITY_HOME store stays absolute because it lives outside the checkout.
 func portableDefault(root string) Config {
 	cfg := Default(root)
 	cfg.Project.Root = ""
 	if rel, err := filepath.Rel(root, cfg.Storage.Database); err == nil && filepath.IsLocal(rel) {
-		cfg.Storage.Database = rel
+		cfg.Storage.Database = filepath.ToSlash(rel)
 	}
 	if rel, err := filepath.Rel(root, cfg.Backups.Dir); err == nil && filepath.IsLocal(rel) {
-		cfg.Backups.Dir = rel
+		cfg.Backups.Dir = filepath.ToSlash(rel)
 	}
 	return cfg
 }
