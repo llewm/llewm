@@ -1,2 +1,7 @@
+# Check out every text file exactly as stored (LF) on all platforms, so goldens,
+# canonical bytes, embedded migrations, scripts and gofmt agree with the index
+# regardless of a machine-wide core.autocrlf setting.
+* text=auto eol=lf
+
 # Plugin files must match the executable's embedded bytes on every platform.
 components/continuity/plugins/** text eol=lf
