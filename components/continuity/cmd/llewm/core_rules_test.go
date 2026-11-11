@@ -134,7 +134,7 @@ func TestMemoryRepositoryRuleAppearsOnlyWithSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	clone := filepath.Join(t.TempDir(), "memory-clone")
-	if err := os.WriteFile(configPath, append(base, []byte("\n[sync]\n  remote = \"https://example.invalid/memory.git\"\n  clone = \""+clone+"\"\n  manual = true\n")...), 0o600); err != nil {
+	if err := os.WriteFile(configPath, append(base, []byte("\n[sync]\n  remote = \"https://example.invalid/memory.git\"\n  clone = '"+clone+"'\n  manual = true\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := runCLI(t, "", "bootstrap"); !strings.Contains(got, "- memory-repository: The memory repository clone at `"+clone+"` is managed by Continuity sync.") {
