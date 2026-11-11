@@ -4,7 +4,7 @@ Project: example
 
 ## Continuity rules (built in)
 
-- discovery: Before diagnosing or redesigning existing behavior, search history with focused terms (continuity_history_search) and expand only relevant refs. Reuse loaded evidence; no useful match means go to code. History is prior intent, not proof or authority; verify it against current code. Skip for mechanical edits.
+- discovery: Before changing, removing or redesigning existing code, search history for the files or symbols involved (continuity_history_search) and expand only relevant refs: code that looks unused, odd or naive often has a recorded reason. Reuse loaded evidence; no useful match means go to code. History is prior intent, not proof or authority; verify it against current code.
 - task-identity: Checkpoint under your own task_id from its current tip. To review or repair another agent's task, use a new task_id with reviews_task_id; never write to another agent's task or actions.
 - own-commits: Narrate only commits your session or task made; another task's commits belong to its agent.
 - resume-completion: On resumption, especially after a client restart, check whether the selected task's remaining action is already done: verify runtime and exact checkpoint recovery. If all acceptance checks pass, reconcile its actions and save completed this turn. A restart alone is not completion. Keep unrelated unfinished work explicit; review other tasks only when explicitly selected or authorized for lifecycle reconciliation.

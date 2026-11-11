@@ -71,6 +71,33 @@ What this shows:
   unused, odd or naive often has a recorded reason") searched in 3/3 sessions
   and passed 2/3. The failing session searched but did not open the result.
 
+### Results: claude-opus-5-5, 2026-11-11
+
+Run `opus-1`: 48 sessions, $10.38 in total.
+
+| Workload | none | notes | llewm | llewm + discovery-v1 |
+| --- | --- | --- | --- | --- |
+| tz | 3/3, $0.245 | 3/3, $0.226 | 3/3, $0.164 | 3/3, $0.159 |
+| migrate | 0/3 | 3/3, $0.216 | 3/3, $0.355 | 3/3, $0.363 |
+| cache | 0/3 | 3/3, $0.187 | 3/3, $0.180 | 3/3, $0.224 |
+| cleanup | 0/3 | 3/3, $0.133 | 1/3, $0.208 | 3/3, $0.229 |
+| **Tasks correct** | **3/12 (25%)** | **12/12** | **10/12 (83%)** | **12/12 (100%)** |
+| Cost per correct task | $0.84 | $0.18 | $0.27 | $0.25 |
+
+- Opus confirms the Sonnet pattern. Without Continuity it finishes only the
+  task recoverable from code. With Continuity and discovery-v1 it finishes all
+  of them.
+- On `tz`, recovered research cut cost by 33% and wall time by half (52 s → 24 s).
+- On `cleanup`, discovery-v1 searched history in every session and passed 3/3.
+  The built-in wording passed 1/3.
+- `migrate` costs more under Continuity than under `notes`. These sessions save
+  their own checkpoint and narrative for the next session, which is the write
+  side of the same mechanism. The `notes` arm never updates `NOTES.md`.
+- Counting failures, cost per correct task is about 3× lower with Continuity than
+  without it.
+
+discovery-v1 replaced the built-in discovery rule after this run.
+
 Reproduce:
 
     python3 -I scripts/value_bench.py --self-test
