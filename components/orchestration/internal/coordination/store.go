@@ -48,6 +48,10 @@ CREATE TABLE membership_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, memb
 // Open owns only an orchestration database. Creation is explicit, and the parent
 // must be private so SQLite journals cannot expose team context or token hashes.
 func Open(path string, create bool) (*Store, error) {
+	return openStore(path, create, 1280790354, schema)
+}
+
+func openStore(path string, create bool, expectedID int, definition string) (*Store, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -101,11 +105,11 @@ func Open(path string, create bool) (*Store, error) {
 		}
 		var applicationID, version int
 		e = probe.QueryRow("PRAGMA application_id").Scan(&applicationID)
-		if e == nil && applicationID == 1280790354 {
+		if e == nil && applicationID == expectedID {
 			e = probe.QueryRow("SELECT version FROM metadata").Scan(&version)
 		}
 		probe.Close()
-		if e != nil || applicationID != 1280790354 || version != SchemaVersion {
+		if e != nil || applicationID != expectedID || version != SchemaVersion {
 			return nil, errors.New("not a supported orchestration database; refusing to open for writing")
 		}
 	}
@@ -116,7 +120,7 @@ func Open(path string, create bool) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	fail := func(err error) (*Store, error) { db.Close(); return nil, err }
 	if create {
-		if _, err = db.Exec(schema); err != nil {
+		if _, err = db.Exec(definition); err != nil {
 			return fail(err)
 		}
 	}

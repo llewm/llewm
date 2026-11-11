@@ -84,6 +84,21 @@ changes can be reviewed together; components can still produce separate executab
 and releases. Consider separate repositories only when ownership, permissions, or
 release independence warrants the coordination cost.
 
+## Machine-local agent coordination
+
+Orchestration also owns an independently started machine-local broker with a
+distinct private database identity. Its loopback API and stdio MCP adapter exchange
+durable project-level messages and advisory session/task scope. Cursor-based pulls
+and bounded waits let already-running clients participate at their own hook/work
+boundaries. Explicit acknowledgments remain separate from storage and delivery.
+The hook command emits bounded inbox hints and retains no raw hook/tool payloads.
+
+Local coordination remains available without the shared work coordinator. A future
+explicit bridge may forward selected typed messages/observations with origin and
+receipt provenance; it must not replicate active databases or manufacture shared
+claim authority offline. No bridge, automatic host configuration or agent launcher
+is implemented. See [the local broker contract](../components/orchestration/docs/agent-broker.md).
+
 ## Agent host and execution-control boundary
 
 The manual orchestration coordinator authenticates engineers and serializes
