@@ -39,8 +39,8 @@ Engineer commands (authenticate with a private token file):
   broker-info --endpoint URL --token-file PATH
   broker-request --endpoint URL --token-file PATH --file COMMAND.json
   broker-pull --endpoint URL --token-file PATH --file QUERY.json
-  broker-mcp --endpoint URL --token-file PATH --session ID --agent LABEL [--task ID]
-  broker-hook --endpoint URL --token-file PATH --agent LABEL --cursor-file PATH [--task ID]
+  broker-mcp --endpoint URL --token-file PATH (--session ID | --session-env VAR) --agent LABEL [--task ID]
+  broker-hook --endpoint URL --token-file PATH --agent LABEL (--cursor-file PATH | --cursor-dir DIR) [--task ID]
               [--state active|ended] (reads session_id and hook_event_name from JSON stdin)
   list    --endpoint URL --token-file PATH
   show    --endpoint URL --token-file PATH --plan ID [--history --after SEQUENCE]
@@ -94,6 +94,8 @@ func run(args []string, out, stderr io.Writer) error {
 	session := flags.String("session", "", "actual client session identifier")
 	task := flags.String("task", "", "advisory task identifier")
 	cursorFile := flags.String("cursor-file", "", "private per-session hook cursor file")
+	cursorDir := flags.String("cursor-dir", "", "private directory for hook cursors derived from each envelope's session_id and the task")
+	sessionEnv := flags.String("session-env", "", "environment variable holding the actual client session identifier, when --session is not given")
 	state := flags.String("state", "active", "hook session observation: active or ended")
 	var allowedPlans, capabilities []string
 	flags.Func("allow-plan", "explicit plan permitted for this MCP client (repeatable)", func(s string) error { allowedPlans = append(allowedPlans, s); return nil })
@@ -124,11 +126,16 @@ func run(args []string, out, stderr io.Writer) error {
 	case "credential-import":
 		return importCredential(*file, *tokenFile, out)
 	case "broker-hook":
-		return brokerHook(ctx, *endpoint, *tokenFile, *agent, *task, *state, *cursorFile, os.Stdin, out)
+		return brokerHook(ctx, *endpoint, *tokenFile, *agent, *task, *state, *cursorFile, *cursorDir, os.Stdin, out)
 	case "broker-mcp":
 		token, err := readPrivateToken(*tokenFile)
 		if err != nil {
 			return err
+		}
+		if *session == "" && *sessionEnv != "" {
+			if *session = os.Getenv(*sessionEnv); *session == "" {
+				return fmt.Errorf("--session-env %s is unset or empty", *sessionEnv)
+			}
 		}
 		server, err := worker.NewBrokerServer(worker.BrokerConfig{Endpoint: *endpoint, Token: token, SessionID: *session, TaskID: *task, Agent: *agent})
 		if err != nil {

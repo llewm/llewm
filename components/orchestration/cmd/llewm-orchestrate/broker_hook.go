@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,12 +29,14 @@ type hookCursor struct {
 // brokerHook accepts a host envelope but persists only session identity and a
 // cursor. It never retains tool input, transcript paths or the raw envelope.
 // Its cursor tracks notifications, independently of an agent's inspected inbox.
-func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cursorPath string, input io.Reader, out io.Writer) error {
+// Exactly one of cursorPath and cursorDir is set; cursorDir derives a private
+// per-session/task file so one static host hook configuration serves every session.
+func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cursorPath, cursorDir string, input io.Reader, out io.Writer) error {
 	if err := transport.ValidateLocalEndpoint(endpoint); err != nil {
 		return err
 	}
-	if cursorPath == "" {
-		return errors.New("--cursor-file is required and must be unique to this session/task")
+	if (cursorPath == "") == (cursorDir == "") {
+		return errors.New("exactly one of --cursor-file (unique to this session/task) or --cursor-dir is required")
 	}
 	body, err := io.ReadAll(io.LimitReader(input, 1<<20+1))
 	if err != nil {
@@ -48,6 +51,12 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 	}
 	if err = json.Unmarshal(body, &event); err != nil {
 		return errors.New("invalid hook envelope")
+	}
+	if cursorDir != "" {
+		if event.SessionID == "" {
+			return errors.New("hook envelope has no session_id")
+		}
+		cursorPath = filepath.Join(cursorDir, hookCursorName(event.SessionID, task))
 	}
 	if event.Name == "SessionEnd" {
 		state = "ended"
@@ -71,6 +80,11 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 	// A crashed hook leaves a visible lock; no automatic stale-lock takeover.
 	lock := cursorPath + ".lock"
 	lockFile, lockErr := privatestorage.Create(lock)
+	if errors.Is(lockErr, os.ErrExist) {
+		// Hosts run hooks for parallel tool calls concurrently. The holder
+		// publishes the heartbeat and hint; this call is a quiet no-op.
+		return nil
+	}
 	if lockErr != nil {
 		return fmt.Errorf("cursor locked or unavailable: %w", lockErr)
 	}
@@ -119,14 +133,17 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 	}
 	count := 0
 	for _, e := range feed.Events {
-		if e.Command.SessionID != event.SessionID {
+		// Every hook publishes a state heartbeat, so counting other sessions'
+		// state would hint on nearly every tool call. Hint only on messages and
+		// acknowledgments; state remains visible through broker_pull.
+		if e.Command.SessionID != event.SessionID && e.Command.Action != "state" {
 			count++
 		}
 	}
 	if count > 0 && event.Name != "SessionEnd" {
 		// Only a bounded hint enters host context. The agent reads actual messages
 		// with its own durable cursor and acknowledges after inspection.
-		hint := fmt.Sprintf("Local agent broker has %d new coordination events. Call broker_pull using your own saved inbox cursor; hook notifications do not acknowledge messages. Broker %s.", count, feed.Broker.ID)
+		hint := fmt.Sprintf("Local agent broker has %d new messages or acknowledgments for session %s. Call broker_pull (or llewm-orchestrate broker-pull) using your own saved inbox cursor; hook notifications do not acknowledge messages. Broker %s.", count, event.SessionID, feed.Broker.ID)
 		if err = json.NewEncoder(out).Encode(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": event.Name, "additionalContext": hint}}); err != nil {
 			return err
 		}
@@ -134,6 +151,28 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 	cursor.BrokerID = feed.Broker.ID
 	cursor.After = feed.NextAfter
 	return saveHookCursor(cursorPath, cursor)
+}
+
+// hookCursorName keeps readable session/task IDs and hashes anything else, so a
+// caller-supplied identifier can never name a path outside the cursor directory.
+func hookCursorName(session, task string) string {
+	if task == "" {
+		task = "project"
+	}
+	part := func(s string) string {
+		for _, r := range s {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+				sum := sha256.Sum256([]byte(s))
+				return "h" + hex.EncodeToString(sum[:12])
+			}
+		}
+		if len(s) > 96 {
+			sum := sha256.Sum256([]byte(s))
+			return "h" + hex.EncodeToString(sum[:12])
+		}
+		return s
+	}
+	return part(session) + "." + part(task) + ".cursor"
 }
 
 func saveHookCursor(path string, cursor hookCursor) error {

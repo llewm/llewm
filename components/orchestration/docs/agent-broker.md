@@ -55,12 +55,33 @@ dist/llewm-orchestrate broker-mcp \
 ```
 
 Configure the other agent with its own actual session ID, agent label and task.
+Instead of `--session`, `--session-env VAR` reads the ID from an environment
+variable the host sets for each session, so one static configuration serves every
+session. Claude Code sets `CLAUDE_CODE_SESSION_ID` for the MCP servers it starts:
+
+```sh
+claude mcp add --scope local llewm-broker -- /ABS/llewm-orchestrate broker-mcp \
+  --endpoint http://127.0.0.1:9468 --token-file /ABS/engineer.token \
+  --session-env CLAUDE_CODE_SESSION_ID --agent claude-code
+```
+
+Codex runs one app-server for all threads and gives MCP servers no per-thread
+session ID, so a per-session adapter cannot be configured. Codex agents use the
+CLI (`broker-request`/`broker-pull`) with the session ID that the hook hint names.
+A static configuration has no task; see the task binding note below.
 This is a separate adapter from `mcp` (the reviewed job queue). No allowed plan is
 needed for project-level messages. Configuration is explicit: this release does
 not discover host sessions, edit client configuration or automatically install
 hooks. A restarted session needs its new session ID. A task ID is optional; use
 it when replies must remain discoverable after that session ends. When changing
 task bindings, update the adapter and hook together and use a separate cursor.
+
+**Task binding.** Each hook heartbeat publishes the hook's configured task, and a
+task change starts a new scope. A session whose explicit `broker_state` sets a
+task loses it at the next heartbeat from a task-less hook. Its pulls with that
+task are then refused, and replies routed to that task are not seen. With static
+host configuration, leave the task unset everywhere and use session or project
+routing. Task routing to offline recipients needs a per-task hook and adapter.
 
 The five tools are:
 
@@ -149,7 +170,8 @@ are conditions for the agent to assess, not authorization to reclaim work.
 `broker-hook` accepts a bounded Codex/Claude-style hook JSON envelope on stdin.
 It reads only `session_id` and `hook_event_name`, publishes a heartbeat, checks
 local changes, and emits a bounded `hookSpecificOutput.additionalContext` hint
-when another session has posted coordination events. It does not inject message
+when another session has posted messages or acknowledgments routed to it. Other
+sessions' state heartbeats are not counted, because every hook publishes one. It does not inject message
 bodies or retain raw hook/tool input. Supported events are SessionStart,
 UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, PostCompact, Stop and
 SessionEnd. SessionEnd publishes `ended`; Stop keeps the session active.
@@ -166,14 +188,20 @@ dist/llewm-orchestrate broker-hook \
 
 The host supplies stdin; configure an absolute executable/token/cursor path if its
 working directory can vary. The adapter's session and task must match the hook.
-Use an independent cursor file for each actual session/task. Hook delivery tracks
+Use an independent cursor file for each actual session/task. Alternatively,
+`--cursor-dir DIR` derives a private `SESSION.TASK.cursor` file from each envelope's
+`session_id`, so one static host hook serves every session. IDs outside
+`[A-Za-z0-9_-]` are hashed into the name. The hint names the session ID, so an
+agent without a session-aware adapter can pull through the CLI. Hook delivery tracks
 notification hints only. The agent's inspected inbox cursor is separate and must
 still be pulled routinely, even if a host drops a hint. Do not run a context hook
 asynchronously if the host cannot surface its output.
 
 The hook has a three-second request budget, uses a private cursor file and advances
-it only after successful output. A concurrent invocation refuses the private
-`.lock` file; a later hook can retry. A crashed hook may leave that lock: verify
+it only after successful output. A concurrent invocation that finds the private
+`.lock` file exits successfully without output or cursor change, because hosts run
+hooks for parallel tool calls at the same time. A crashed hook may leave that
+lock, and then every later hook for that session is a silent no-op. Verify that
 no hook is running before removing it. An unavailable broker returns an error
 without advancing the cursor. Hook errors must be configured as advisory by the
 host; this command is not an approval gate. Real host rendering/delivery remains
