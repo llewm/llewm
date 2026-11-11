@@ -46,7 +46,7 @@ func TestMemoryRepositoryRuleNeedsSyncAndNamesTheClone(t *testing.T) {
 		t.Fatalf("synced rules: %#v %v", synced, err)
 	}
 	last := synced[len(synced)-1]
-	if last.ID != "memory-repository" || !strings.Contains(last.Text, "clone at `/data/memory` is managed by Continuity sync") || strings.Contains(last.Text, "{clone}") {
+	if last.ID != "memory-repository" || !strings.Contains(last.Text, "manages the memory repository clone at `/data/memory`") || strings.Contains(last.Text, "{clone}") {
 		t.Fatalf("memory rule: %#v", last)
 	}
 	// Overrides may use the placeholder too; disabling works like any rule.
