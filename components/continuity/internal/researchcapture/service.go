@@ -80,7 +80,7 @@ func (s Service) ReportForCheckpoint(ctx context.Context, projectID string, cand
 		}
 	}
 	report.DurableRecords = report.Narratives + report.Decisions + report.WorkItems
-	if contains(kinds, "web") {
+	if contains(kinds, "web") || contains(kinds, "external") {
 		base := ` FROM work_narratives n JOIN work_narrative_claims c ON c.project_id=n.project_id AND c.narrative_id=n.id WHERE n.project_id=? AND EXISTS(SELECT 1 FROM work_narrative_anchors a WHERE a.project_id=n.project_id AND a.narrative_id=n.id AND a.anchor_kind='task' AND a.target=?) AND (?='' OR n.recorded_at>?) AND NOT EXISTS(SELECT 1 FROM superseded_records s WHERE s.project_id=n.project_id AND s.family='narrative' AND s.id=n.id)`
 		args := []any{projectID, candidate.TaskID, since, since}
 		if report.CitedClaims, err = count(ctx, s.DB, `SELECT COUNT(*)`+base+` AND EXISTS(SELECT 1 FROM work_narrative_citations e WHERE e.project_id=n.project_id AND e.narrative_id=n.id AND e.claim_ordinal=c.ordinal)`, args...); err != nil {
@@ -93,7 +93,7 @@ func (s Service) ReportForCheckpoint(ctx context.Context, projectID string, cand
 			return nil, err
 		}
 		if report.CitedClaims == 0 || report.SourceObservations == 0 || report.UncitedFindings > 0 {
-			report.Reasons = []string{"web discovery needs task-linked findings with structured source citations; unrelated records and checkpoint references do not establish source coverage"}
+			report.Reasons = []string{"web or external-source discovery needs task-linked findings with structured source citations; unrelated records and checkpoint references do not establish source coverage"}
 			if report.UncitedFindings > 0 {
 				report.Reasons = append(report.Reasons, fmt.Sprintf("%d outcome/verification claims lack citations; review which actually depend on web evidence", report.UncitedFindings))
 			}
@@ -183,7 +183,14 @@ func discoveryKind(tool, command string) string {
 			return "history"
 		}
 	}
-	for _, marker := range []string{"rg ", "git log", "git show", "git blame", "sed -n", "go doc", "find "} {
+	// Fetching another project's code or an API through the shell is source
+	// research, like a web fetch.
+	for _, marker := range []string{"git clone", "curl ", "wget ", "gh api", "gh repo view", "gh repo clone"} {
+		if strings.HasPrefix(value, marker) || strings.Contains(value, " "+marker) {
+			return "external"
+		}
+	}
+	for _, marker := range []string{"rg ", "grep ", "git grep", "git log", "git show", "git blame", "sed -n", "go doc", "find "} {
 		if strings.HasPrefix(value, marker) || strings.Contains(value, " "+marker) {
 			return "repository"
 		}

@@ -145,6 +145,11 @@ claim citations using the narrative skill even when tool observations are missin
 Review `uncited_findings`, `cited_claims` and `source_observations`; an unrelated
 record or a checkpoint reference does not establish web-source coverage. Never
 add invented citations to silence an advisory; state the missing evidence.
+`unlinked_records` lists records this session wrote since its last checkpoint
+that neither link to the task nor appear in `evidence_refs`; add each one to
+`evidence_refs` or say where it belongs. After a task lease, checkpoint, or
+task-selected bootstrap, narratives and work items that name no task are linked
+to that task automatically.
 If readiness is false, use its section byte accounting to shorten optional detail
 while preserving the task kernel, important failed attempts, and stable references;
 do not raise the budget or silently discard higher-authority guidance. Dry-run the

@@ -439,6 +439,18 @@ eager tool-definition budget is 21 KiB (previously 20 KiB), allowing this one
 additional schema while retaining the aggregate regression check. It checks
 publication in the configured Git remote; it does not publish or import records.
 
+API 141 links records to the session's task. Each client session runs its own
+MCP process, which remembers the task named by its last task lease, checkpoint,
+or task-selected bootstrap. A narrative recorded with no `task` anchor gets one
+for that task, and a work item captured with no `task_id` gets that task.
+Checkpoint dry runs and saves return `unlinked_records`: refs this process wrote
+since its last saved checkpoint that neither link to the checkpoint's task nor
+appear in `evidence_refs`. The list is advisory and never blocks the save. The
+CLI is not a session and does not link records automatically. Research capture
+also counts shell fetches of external sources (`git clone`, `curl`, `wget`,
+`gh api`, `gh repo view|clone`) as `external` discovery, which needs cited
+findings like web discovery does.
+
 ### Input constraints
 
 MCP API 140 advertises service constraints in `tools/list` input schemas:
