@@ -23,61 +23,35 @@ import (
 
 func Handler(store *coordination.Store) http.Handler {
 	mux := http.NewServeMux()
-	write := func(w http.ResponseWriter, value any, err error) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		if err != nil {
-			status := http.StatusBadRequest
-			if errors.Is(err, coordination.ErrForbidden) {
-				status = http.StatusForbidden
-			}
-			if errors.Is(err, coordination.ErrNotFound) {
-				status = http.StatusNotFound
-			}
-			if errors.Is(err, coordination.ErrConflict) {
-				status = http.StatusConflict
-			}
-			w.WriteHeader(status)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		json.NewEncoder(w).Encode(value)
-	}
-	token := func(r *http.Request) string {
-		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-			return ""
-		}
-		return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	}
 	mux.HandleFunc("POST /v1/commands", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, coordination.MaxCommandBytes)
 		defer r.Body.Close()
 		var c coordination.Command
 		if err := Decode(r.Body, &c); err != nil {
-			write(w, nil, errors.New("invalid command JSON, unknown field, trailing data or body too large"))
+			writeResponse(w, nil, errors.New("invalid command JSON, unknown field, trailing data or body too large"))
 			return
 		}
-		result, err := store.Execute(r.Context(), token(r), c)
-		write(w, result, err)
+		result, err := store.Execute(r.Context(), bearerToken(r), c)
+		writeResponse(w, result, err)
 	})
 	mux.HandleFunc("GET /v1/plans", func(w http.ResponseWriter, r *http.Request) {
-		result, err := store.List(r.Context(), token(r))
-		write(w, result, err)
+		result, err := store.List(r.Context(), bearerToken(r))
+		writeResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /v1/queue", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, coordination.MaxCommandBytes)
 		defer r.Body.Close()
 		var query coordination.QueueRequest
 		if err := Decode(r.Body, &query); err != nil {
-			write(w, nil, errors.New("invalid queue JSON"))
+			writeResponse(w, nil, errors.New("invalid queue JSON"))
 			return
 		}
-		result, err := store.Queue(r.Context(), token(r), query)
-		write(w, result, err)
+		result, err := store.Queue(r.Context(), bearerToken(r), query)
+		writeResponse(w, result, err)
 	})
 	mux.HandleFunc("GET /v1/plans/{id}", func(w http.ResponseWriter, r *http.Request) {
-		result, err := store.Read(r.Context(), token(r), r.PathValue("id"))
-		write(w, result, err)
+		result, err := store.Read(r.Context(), bearerToken(r), r.PathValue("id"))
+		writeResponse(w, result, err)
 	})
 	mux.HandleFunc("GET /v1/plans/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		var after int64
@@ -86,11 +60,11 @@ func Handler(store *coordination.Store) http.Handler {
 			after, err = strconv.ParseInt(value, 10, 64)
 		}
 		if err != nil {
-			write(w, nil, errors.New("after must be an integer"))
+			writeResponse(w, nil, errors.New("after must be an integer"))
 			return
 		}
-		result, err := store.History(r.Context(), token(r), r.PathValue("id"), after)
-		write(w, result, err)
+		result, err := store.History(r.Context(), bearerToken(r), r.PathValue("id"), after)
+		writeResponse(w, result, err)
 	})
 	return mux
 }
@@ -189,4 +163,31 @@ func Request(ctx context.Context, endpoint, token, method, path string, body, ca
 		return nil, fmt.Errorf("coordinator returned %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
 	}
 	return data, nil
+}
+
+func writeResponse(w http.ResponseWriter, value any, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, coordination.ErrForbidden) {
+			status = http.StatusForbidden
+		}
+		if errors.Is(err, coordination.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		if errors.Is(err, coordination.ErrConflict) {
+			status = http.StatusConflict
+		}
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(value)
+}
+func bearerToken(r *http.Request) string {
+	if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		return ""
+	}
+	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 }

@@ -20,6 +20,11 @@ work while another result awaits review or a job needs human input. The client
 owns execution. Manual workers can still poll `show` and call `resume` before
 continuing; offline work is reconciled on submission.
 
+The same executable also provides an independent [machine-local agent broker](docs/agent-broker.md)
+for durable project messages, advisory session state, hook-cycle checks and bounded
+pull/wait delivery. It uses a distinct local-only database and grants no shared
+work claims. No cross-machine message bridge or client hooks are installed automatically.
+
 ## Build and start a coordinator
 
 From this component:
