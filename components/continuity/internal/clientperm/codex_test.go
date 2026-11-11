@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -56,12 +57,18 @@ func TestCodexReconcile(t *testing.T) {
 	if strings.Contains(string(changed.Files[0].After), "continuity_info") || !strings.Contains(string(changed.Files[0].After), `approval_mode = "prompt"`) || strings.Contains(string(changed.Files[1].After), `decision="allow"`) {
 		t.Fatal("bad reconciliation")
 	}
+	// Compare with the mode the platform reports before Apply: Windows maps
+	// the fixture's 0640 to 0666, so only preservation is portable.
+	before, err := os.Stat(filepath.Join(home, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := changed.Apply(); err != nil {
 		t.Fatal(err)
 	}
-	info, _ := os.Stat(filepath.Join(home, "config.toml"))
-	if info.Mode().Perm() != 0640 {
-		t.Fatal("mode changed")
+	info, err := os.Stat(filepath.Join(home, "config.toml"))
+	if err != nil || info.Mode().Perm() != before.Mode().Perm() || (runtime.GOOS != "windows" && info.Mode().Perm() != 0640) {
+		t.Fatalf("mode changed: %v -> %v (%v)", before.Mode().Perm(), info, err)
 	}
 }
 func TestCodexRefusesEditsAndStalePreview(t *testing.T) {
