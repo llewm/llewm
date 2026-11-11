@@ -434,9 +434,14 @@ Tool-result byte counts cannot measure all schema, skill, or host-envelope costs
 A cached token still occupies context; a byte-derived token estimate is not a
 provider-reported token count.
 
+API 140 adds the bounded `continuity_sync_publication` read tool. The measured
+eager tool-definition budget is 21 KiB (previously 20 KiB), allowing this one
+additional schema while retaining the aggregate regression check. It checks
+publication in the configured Git remote; it does not publish or import records.
+
 ### Input constraints
 
-MCP API 139 advertises service constraints in `tools/list` input schemas:
+MCP API 140 advertises service constraints in `tools/list` input schemas:
 allowed values (including nested narrative anchors and citations), bounded lists,
 pagination and byte-budget ranges, defaults, and date/time formats. History search
 keeps its 50-result page limit; advance `offset` for another page. Explicit zero

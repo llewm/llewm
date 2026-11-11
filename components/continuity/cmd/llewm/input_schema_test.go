@@ -55,6 +55,12 @@ func TestMCPInputSchemasMatchServiceConstraints(t *testing.T) {
 			t.Fatalf("%s: valid=%v, want %v: %s: %v", tool, err == nil, want, b, err)
 		}
 	}
+	t.Run("publication selectors", func(t *testing.T) {
+		check(t, "continuity_sync_publication", map[string]any{"refs": []string{"checkpoint:one", "narrative:two"}}, true)
+		check(t, "continuity_sync_publication", map[string]any{"refs": []string{}}, false)
+		check(t, "continuity_sync_publication", map[string]any{"refs": []string{"decision:one"}}, false)
+		check(t, "continuity_sync_publication", map[string]any{"refs": []string{"checkpoint:one"}, "envelope_sha256": "wrong"}, false)
+	})
 	t.Run("history bounds and defaults", func(t *testing.T) {
 		for _, limit := range []int{-1, 0, 1, history.MaxSearchLimit, history.MaxSearchLimit + 1} {
 			for _, max := range []int{-1, 0, history.MinMaxBytes - 1, history.MinMaxBytes, history.MaxMaxBytes, history.MaxMaxBytes + 1} {

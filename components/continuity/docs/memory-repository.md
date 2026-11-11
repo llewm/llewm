@@ -1220,6 +1220,45 @@ no askpass, and changes no global environment or Git configuration. A configured
 keyring helper still controls its own wallet access; a locked or unavailable
 keyring can require explicit setup before automatic sync succeeds.
 
+## Publication receipts and exact record checks
+
+`exported_records` counts new exports in that attempt. Zero does not mean saved
+work is missing: an earlier automatic sync may already have published it.
+The Git result's `publication` receipt separates that count from delivery:
+`snapshot_published` identifies the immutable `snapshot_head` contained in the
+observed `remote_head`, with branch, lineage and observation time. `unconfirmed`
+does not assert delivery. This covers only the committed snapshot, not database
+writes created afterward, and `peer_receipt: unconfirmed` never claims that a
+second machine imported anything. Semantic import errors remain separate from
+transport publication.
+
+`llewm sync status --output json` exposes `last_publication`, the last recorded
+observation for this exact build, project and Git destination. It performs no
+network check; its timestamp is historical, and damaged or mismatched receipts
+are not trusted. Builds with dirty or unknown source identity do not reuse cached
+receipts. A successful new sync refreshes that observation even when it
+exports zero new records.
+
+To check the remote now, without publishing or importing:
+
+```sh
+llewm sync verify checkpoint:CHECKPOINT_ID narrative:NARRATIVE_ID --output json
+```
+
+This fetches the configured Git remote without prompting, validates bounded
+transport layout and block/envelope bytes, and reports each identity as
+`published` or `not_in_observed_remote` at the returned head and time. A failed
+fetch or invalid transport remains unconfirmed; cached success is not substituted.
+Missing records return a nonzero CLI exit status. Publication is not a semantic
+import or dependency-health certificate.
+
+The result lists transport `envelope_sha256` values, including retained versions
+of the requested ID. To require exact bytes, check one reference with
+`--envelope-sha256 HASH`; this is an envelope hash, not a narrative's semantic
+hash or a source Git commit. Checks accept at most 16 checkpoint/narrative refs
+and return at most 16 KiB. The MCP equivalent is
+`continuity_sync_publication` with `refs` and optional `envelope_sha256`.
+
 ## Other transports
 
 Git is optional. [Shared-folder History sync](shared-folder-history.md) can use

@@ -116,7 +116,10 @@ func syncCommand() *cobra.Command {
 						}
 					} else {
 						if result.Git != nil {
-							fmt.Fprintf(cmd.OutOrStdout(), "Sync %s: exported %d, imported %d, unpushed commits %d\n%s\n", result.Git.Outcome, result.Git.ExportedRecords, result.Git.ImportedRecords, result.Git.UnpushedCommits, result.Git.Detail)
+							fmt.Fprintf(cmd.OutOrStdout(), "Sync %s: newly exported %d, imported %d, unpushed commits %d\n%s\n", result.Git.Outcome, result.Git.ExportedRecords, result.Git.ImportedRecords, result.Git.UnpushedCommits, result.Git.Detail)
+							if receipt := result.Git.Publication; receipt != nil {
+								fmt.Fprintf(cmd.OutOrStdout(), "Publication: %s; committed snapshot %s; peer receipt unconfirmed\n", receipt.State, receipt.SnapshotHead)
+							}
 						}
 						for _, folder := range result.Folders {
 							fmt.Fprintf(cmd.OutOrStdout(), "Folder %s: %s; published locally %d, imported %d; peer receipt %s\n", folder.Endpoint, folder.Outcome, folder.PublishedRecords, folder.ImportedRecords, folder.PeerReceipt)
@@ -309,6 +312,9 @@ memory repository holds none.`,
 					line = "Sync: not configured (llewm sync init --remote URL)"
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), line)
+				if receipt := value.LastPublication; receipt != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "Last publication observation (%s): %s; snapshot %s; peer receipt unconfirmed\n", receipt.ObservedAt, receipt.State, receipt.SnapshotHead)
+				}
 				if value.Identity == nil {
 					fmt.Fprintln(cmd.OutOrStdout(), "Identity: none (llewm sync init)")
 				} else {
@@ -319,8 +325,49 @@ memory repository holds none.`,
 		},
 	}
 	status.Flags().StringVar(&statusOutput, "output", "text", "text or json")
+	var verifyOutput, envelopeHash string
+	verify := &cobra.Command{
+		Use:   "verify REF [REF...]",
+		Short: "Fetch Git history and verify checkpoint/narrative publication, without importing or publishing",
+		Args:  cobra.RangeArgs(1, 16),
+		RunE: func(cmd *cobra.Command, refs []string) error {
+			format, err := outputFormat(verifyOutput)
+			if err != nil {
+				return err
+			}
+			return withReadOnlyApp(cmd, func(application *app.App) error {
+				syncer, err := projectSyncer(application)
+				if err != nil {
+					return err
+				}
+				syncer.NoPrompt = true
+				value, checkErr := syncer.CheckPublication(cmd.Context(), refs, envelopeHash)
+				if format == "json" {
+					if err := writeJSON(cmd.OutOrStdout(), value); err != nil {
+						return err
+					}
+				} else {
+					for _, record := range value.Records {
+						fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", record.Ref, record.State)
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), "Peer receipt: unconfirmed; presence is checked only at the observed remote head.")
+				}
+				if checkErr != nil {
+					return checkErr
+				}
+				for _, record := range value.Records {
+					if record.State != "published" {
+						return errors.New("requested record is absent from the observed remote")
+					}
+				}
+				return nil
+			})
+		},
+	}
+	verify.Flags().StringVar(&verifyOutput, "output", "text", "text or json")
+	verify.Flags().StringVar(&envelopeHash, "envelope-sha256", "", "require this exact envelope hash (one reference only)")
 
-	parent.AddCommand(initialize, status, syncFolderCommand(), syncRelayCommand())
+	parent.AddCommand(initialize, status, verify, syncFolderCommand(), syncRelayCommand())
 	return parent
 }
 
@@ -437,6 +484,10 @@ func projectSyncStatus(ctx context.Context, application *app.App) (historyStatus
 			return value, err
 		}
 		value.Configured, value.Remote, value.Clone = true, redact.String(syncer.Remote), syncer.Clone
+		value.LastPublication, err = syncer.PublicationStatus(ctx)
+		if err != nil {
+			return value, err
+		}
 		value.Settings = syncSettings(ctx, application.Config.Sync, syncer.Clone)
 	}
 	value.Configured = application.Config.Sync.Configured()

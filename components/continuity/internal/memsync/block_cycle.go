@@ -132,6 +132,10 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		return result, err
 	}
 	result.ExportedRecords = count
+	captured, err := s.objects.currentBranch(local)
+	if err != nil {
+		return result, err
+	}
 	head, err := repo.run(local, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return result, err
@@ -308,6 +312,10 @@ func (s Syncer) cycleBlocks(ctx context.Context, p plan) (Result, error) {
 		result.Detail = "transport processed; " + result.SemanticPending
 	}
 	result.UnpushedCommits = unpushed(local, repo, branch)
+	result.Publication, err = s.recordPublication(local, repo, identity.LineageID, captured.OID, branch, !offline && !deferred)
+	if err != nil {
+		return result, fmt.Errorf("record publication receipt: %w", err)
+	}
 	if !p.convert && guardErr == nil {
 		s.rememberUnchanged(local, repo, before, result)
 	}

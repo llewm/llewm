@@ -580,6 +580,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 			}
 			return nil, output, nil
 		})
+	registerSyncPublication(server, application)
 	addTool(server, &mcp.Tool{Name: "continuity_procedure", Description: "Read a reviewed procedure; omit id to list."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ProcedureShowInput) (*mcp.CallToolResult, ProcedureResult, error) {
 			if input.ID == "" {

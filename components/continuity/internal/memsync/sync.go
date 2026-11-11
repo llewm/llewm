@@ -274,6 +274,7 @@ type Syncer struct {
 
 // Result describes one sync attempt.
 type Result struct {
+	Publication *PublicationReceipt `json:"publication,omitempty"`
 	// Unchanged reports reuse of a completed, guarded sync proof.
 	Unchanged       bool   `json:"unchanged,omitempty"`
 	ID              string `json:"id"`
@@ -427,7 +428,7 @@ func (s Syncer) fetch(ctx context.Context, repo git, p plan) error {
 		return err
 	}
 	defer cancel()
-	_, err = repo.run(bounded, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	_, err = repo.run(bounded, "fetch", "--quiet", "--prune", "--no-tags", "origin", "+refs/heads/*:refs/remotes/origin/*")
 	return budgetCause(bounded, err)
 }
 
@@ -543,12 +544,13 @@ type Attempt struct {
 
 // Status summarizes recent sync attempts for a project.
 type Status struct {
-	Configured    bool     `json:"configured"`
-	Remote        string   `json:"remote,omitempty"`
-	Clone         string   `json:"clone,omitempty"`
-	Latest        *Attempt `json:"latest,omitempty"`
-	LastSynced    *Attempt `json:"last_synced,omitempty"`
-	OfflineStreak int      `json:"offline_streak"`
+	LastPublication *PublicationReceipt `json:"last_publication,omitempty"`
+	Configured      bool                `json:"configured"`
+	Remote          string              `json:"remote,omitempty"`
+	Clone           string              `json:"clone,omitempty"`
+	Latest          *Attempt            `json:"latest,omitempty"`
+	LastSynced      *Attempt            `json:"last_synced,omitempty"`
+	OfflineStreak   int                 `json:"offline_streak"`
 	// Settings names each deliberate setting that differs from the default, so
 	// a changed behavior is always visible.
 	Settings []string `json:"settings,omitempty"`

@@ -16,7 +16,9 @@ import (
 // model on every request: each tool's name, description, and input schema.
 // See docs/client-integration-reference.md#interface-context-budgets for
 // measurement limits. Raise the budget only with a reason.
-const toolDefinitionBudget = 20 << 10
+// API140 adds one bounded publication-check tool (27 tools total). Allow one
+// additional KiB while continuing to measure the complete eager definitions.
+const toolDefinitionBudget = 21 << 10
 
 func TestMCPToolDefinitionsFitTheBudget(t *testing.T) {
 	ctx, session, _ := toolSchemaSession(t)

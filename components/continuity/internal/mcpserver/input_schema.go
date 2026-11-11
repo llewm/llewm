@@ -30,6 +30,11 @@ func inputSchema[T any]() *jsonschema.Schema {
 	}
 	p := s.Properties
 	switch any(*new(T)).(type) {
+	case SyncPublicationInput:
+		array(p["refs"], 1, 16)
+		p["refs"].Items.Pattern = `^(checkpoint|narrative):[^\r\n\x00]+$`
+		p["refs"].Items.MaxLength = ptr(523)
+		p["envelope_sha256"].Pattern = `^($|[0-9a-f]{64})$`
 	case PinInput:
 		p["target"].Pattern = `^($|(resource|procedure|decision|topic):.+)$`
 		p["scope"].Pattern = `^($|project|(topic|roadmap_node|task):.+)$`

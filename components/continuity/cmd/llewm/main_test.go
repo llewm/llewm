@@ -29,7 +29,7 @@ import (
 )
 
 // expectedMCPToolCount is the number of tools the MCP server registers.
-const expectedMCPToolCount = 26
+const expectedMCPToolCount = 27
 
 // latestSchema is the newest migration this build embeds.
 var latestSchema = func() string {

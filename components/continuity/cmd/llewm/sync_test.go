@@ -11,11 +11,69 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
 )
+
+func TestSyncPublicationCLIAndMCP(t *testing.T) {
+	oldCommit := buildinfo.Commit
+	buildinfo.Commit = strings.Repeat("a", 40)
+	t.Cleanup(func() { buildinfo.Commit = oldCommit })
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	remote := filepath.Join(t.TempDir(), "memory.git")
+	if out, err := exec.Command("git", "init", "--quiet", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	root := testProject(t)
+	runCLI(t, "", "init")
+	runCLI(t, "", "sync", "init", "--remote", remote)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child.Dir = t.TempDir()
+	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "publication-check", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "continuity_narrative_record", Arguments: map[string]any{
+		"id": "publication-story", "title": "Saved result", "creator": "test", "trigger": "manual", "claims": []map[string]any{{"kind": "outcome", "text": "Completed work", "authority": "caller_asserted"}},
+	}})
+	if err != nil || result.IsError {
+		t.Fatalf("record: %+v %v", result, err)
+	}
+	runCLI(t, "", "sync")
+	var check memsync.PublicationCheck
+	if err := json.Unmarshal([]byte(runCLI(t, "", "sync", "verify", "narrative:publication-story", "--output", "json")), &check); err != nil || check.Records[0].State != "published" {
+		t.Fatalf("CLI publication: %+v %v", check, err)
+	}
+	result, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "continuity_sync_publication", Arguments: map[string]any{"refs": []string{"narrative:publication-story"}}})
+	if err != nil || result.IsError {
+		t.Fatalf("MCP publication: %+v %v", result, err)
+	}
+	body, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &check); err != nil || check.Records[0].State != "published" || check.PeerReceipt != "unconfirmed" {
+		t.Fatalf("MCP publication: %s %v", body, err)
+	}
+	if err, _ := runCLIError("sync", "verify", "checkpoint:missing", "--output", "json"); err == nil {
+		t.Fatal("missing remote record returned success")
+	}
+	var status struct {
+		Last *memsync.PublicationReceipt `json:"last_publication"`
+	}
+	if err := json.Unmarshal([]byte(runCLI(t, "", "sync", "status", "--output", "json")), &status); err != nil || status.Last == nil || status.Last.State != "snapshot_published" {
+		t.Fatalf("last publication: %+v %v", status, err)
+	}
+}
 
 func TestCPUProfileBoundsAndFileSafety(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cpu.pprof")
@@ -144,7 +202,7 @@ func TestSyncCommandsAcrossTwoCheckouts(t *testing.T) {
 	}
 	runCLI(t, "", "decision", "record", "--file", decisionFile)
 	profile := filepath.Join(t.TempDir(), "sync.pprof")
-	if out := runCLI(t, "", "sync", "--revalidate", "--cpu-profile", profile); !strings.Contains(out, "Sync synced: exported") {
+	if out := runCLI(t, "", "sync", "--revalidate", "--cpu-profile", profile); !strings.Contains(out, "Sync synced: newly exported") {
 		t.Fatalf("machine A sync: %s", out)
 	}
 	if info, err := os.Stat(profile); err != nil || info.Size() == 0 {

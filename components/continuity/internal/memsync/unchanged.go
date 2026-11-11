@@ -189,6 +189,10 @@ func (s Syncer) tryUnchanged(ctx context.Context, repo git, p plan, g syncGuard)
 	}
 	result := Result{Outcome: OutcomeSynced, Detail: "synced with " + redact.String(s.Remote), Unchanged: true}
 	result.ImportedHead, _ = repo.run(ctx, "rev-parse", "--verify", "--quiet", "HEAD")
+	result.Publication, err = s.recordPublication(ctx, repo, lineage, result.ImportedHead, branch, true)
+	if err != nil {
+		return Result{}, false, fetched
+	}
 	if s.Leases != nil {
 		result.LeaseNotes = s.syncLeases(ctx, repo, p)
 	}
