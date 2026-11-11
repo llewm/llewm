@@ -19,11 +19,12 @@ import (
 )
 
 type hookCursor struct {
-	Endpoint  string `json:"endpoint"`
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	BrokerID  string `json:"broker_id"`
-	After     int64  `json:"after"`
+	Endpoint    string `json:"endpoint"`
+	SessionID   string `json:"session_id"`
+	TaskID      string `json:"task_id"`
+	InboxTaskID string `json:"inbox_task_id,omitempty"`
+	BrokerID    string `json:"broker_id"`
+	After       int64  `json:"after"`
 }
 
 // brokerHook accepts a host envelope but persists only session identity and a
@@ -76,27 +77,22 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 	if err = privatestorage.CheckDir(filepath.Dir(cursorPath)); err != nil {
 		return err
 	}
-	// An exclusive private lock file is portable and refuses concurrent cursor writers.
-	// A crashed hook leaves a visible lock; no automatic stale-lock takeover.
-	lock := cursorPath + ".lock"
-	lockFile, lockErr := privatestorage.Create(lock)
-	if errors.Is(lockErr, os.ErrExist) {
-		// Hosts run hooks for parallel tool calls concurrently. The holder
-		// publishes the heartbeat and hint; this call is a quiet no-op.
-		return nil
+	// All hooks, including SessionEnd, serialize within the request budget.
+	// The OS releases the lock on exit/crash; never unlink its shared inode.
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lockFile, err := privatestorage.Lock(ctx, cursorPath+".lock")
+	if err != nil {
+		return fmt.Errorf("cursor lock unavailable: %w", err)
 	}
-	if lockErr != nil {
-		return fmt.Errorf("cursor locked or unavailable: %w", lockErr)
-	}
-	lockFile.Close()
-	defer os.Remove(lock)
+	defer lockFile.Close()
 	cursor := hookCursor{Endpoint: endpoint, SessionID: event.SessionID, TaskID: task}
 	if f, e := privatestorage.Open(cursorPath); e == nil {
-		defer f.Close()
-		if err = privatestorage.CheckFile(f); err != nil {
-			return err
+		if err = privatestorage.CheckFile(f); err == nil {
+			err = transport.Decode(io.LimitReader(f, 4097), &cursor)
 		}
-		if err = transport.Decode(io.LimitReader(f, 4097), &cursor); err != nil {
+		f.Close()
+		if err != nil {
 			return errors.New("invalid hook cursor")
 		}
 		if cursor.Endpoint != endpoint || cursor.SessionID != event.SessionID || cursor.TaskID != task {
@@ -116,19 +112,27 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 		}
 		return json.Unmarshal(data, reply)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
 	var random [16]byte
 	if _, err = rand.Read(random[:]); err != nil {
 		return err
 	}
-	c := coordination.BrokerCommand{SchemaVersion: 1, RequestID: "hook-" + hex.EncodeToString(random[:]), Action: "state", SessionID: event.SessionID, TaskID: task, Agent: agent, State: state, TTLSeconds: 600}
+	c := coordination.BrokerCommand{SchemaVersion: 1, RequestID: "hook-" + hex.EncodeToString(random[:]), Action: "state", SessionID: event.SessionID, TaskID: task, KeepTask: task == "", Resume: event.Name == "SessionStart" && state == "active", Agent: agent, State: state, TTLSeconds: 600}
 	var receipt coordination.BrokerReceipt
 	if err = request("/v1/broker/commands", c, &receipt); err != nil {
 		return err
 	}
+	// SessionEnd emits no hint. Leave unread notification history for a resume.
+	if event.Name == "SessionEnd" {
+		return nil
+	}
+	// A static hook follows the task resolved atomically by the state update.
+	// Never reuse a cursor across task filters: offline task messages may be older.
+	if cursor.InboxTaskID != receipt.TaskID {
+		cursor.After = 0
+	}
+	cursor.InboxTaskID = receipt.TaskID
 	var feed coordination.BrokerFeed
-	if err = request("/v1/broker/pull", coordination.BrokerQuery{SessionID: event.SessionID, TaskID: task, BrokerID: cursor.BrokerID, After: cursor.After}, &feed); err != nil {
+	if err = request("/v1/broker/pull", coordination.BrokerQuery{SessionID: event.SessionID, TaskID: receipt.TaskID, BrokerID: cursor.BrokerID, After: cursor.After}, &feed); err != nil {
 		return err
 	}
 	count := 0
@@ -140,10 +144,14 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 			count++
 		}
 	}
-	if count > 0 && event.Name != "SessionEnd" {
+	if count > 0 {
 		// Only a bounded hint enters host context. The agent reads actual messages
 		// with its own durable cursor and acknowledges after inspection.
-		hint := fmt.Sprintf("Local agent broker has %d new messages or acknowledgments for session %s. Call broker_pull (or llewm-orchestrate broker-pull) using your own saved inbox cursor; hook notifications do not acknowledge messages. Broker %s.", count, event.SessionID, feed.Broker.ID)
+		sessionLabel := event.SessionID
+		if receipt.TaskID != "" {
+			sessionLabel += fmt.Sprintf(" (task %s)", receipt.TaskID)
+		}
+		hint := fmt.Sprintf("Local agent broker has %d new messages or acknowledgments for session %s. Call broker_pull (or llewm-orchestrate broker-pull) using your own saved inbox cursor; hook notifications do not acknowledge messages. Broker %s.", count, sessionLabel, feed.Broker.ID)
 		if err = json.NewEncoder(out).Encode(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": event.Name, "additionalContext": hint}}); err != nil {
 			return err
 		}

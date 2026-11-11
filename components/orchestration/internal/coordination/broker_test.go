@@ -247,7 +247,7 @@ func TestBrokerWaitSeesOtherProcessAndCancels(t *testing.T) {
 func TestBrokerRejectsUnboundedAndAmbiguousCommands(t *testing.T) {
 	f := newBrokerFixture(t)
 	base := BrokerCommand{SchemaVersion: 1, RequestID: "bad", Action: "message", SessionID: "alice-session", TaskID: "task-a", Text: "hello"}
-	for _, change := range []func(*BrokerCommand){func(c *BrokerCommand) { c.Text = strings.Repeat("x", 16385) }, func(c *BrokerCommand) { c.ToTask = "task-b"; c.ToSession = "bob-session" }, func(c *BrokerCommand) { c.ReplyTo = "unknown" }, func(c *BrokerCommand) { c.Action = "claim" }, func(c *BrokerCommand) { c.Refs = []string{""} }} {
+	for _, change := range []func(*BrokerCommand){func(c *BrokerCommand) { c.Text = strings.Repeat("x", 16385) }, func(c *BrokerCommand) { c.ToTask = "task-b"; c.ToSession = "bob-session" }, func(c *BrokerCommand) { c.ReplyTo = "unknown" }, func(c *BrokerCommand) { c.Action = "claim" }, func(c *BrokerCommand) { c.Resume = true }, func(c *BrokerCommand) { c.KeepTask = true }, func(c *BrokerCommand) { c.Refs = []string{""} }} {
 		c := base
 		change(&c)
 		if _, err := f.s.BrokerExecute(context.Background(), f.alice, c); err == nil {
@@ -304,5 +304,54 @@ func TestBrokerWaitRechecksRevocationAndCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("revoked waiter continued")
+	}
+}
+
+func TestBrokerExplicitResumeAndKeepTask(t *testing.T) {
+	f := newBrokerFixture(t)
+	ctx := context.Background()
+	end := BrokerCommand{SchemaVersion: 1, RequestID: "end", Action: "state", SessionID: "alice-session", KeepTask: true, Agent: "test", State: "ended", TTLSeconds: 60}
+	receipt := f.send(t, f.alice, end)
+	if receipt.TaskID != "task-a" {
+		t.Fatal("keep_task receipt lost binding")
+	}
+	resume := end
+	resume.RequestID = "resume"
+	resume.State = "active"
+	resume.Resume = true
+	if _, err := f.s.BrokerExecute(ctx, f.bob, resume); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("foreign resume: %v", err)
+	}
+	bad := end
+	bad.RequestID = "bad"
+	bad.Resume = true
+	if _, err := f.s.BrokerExecute(ctx, f.alice, bad); err == nil {
+		t.Fatal("resume ended state accepted")
+	}
+	bad = resume
+	bad.TaskID = "ambiguous"
+	if _, err := f.s.BrokerExecute(ctx, f.alice, bad); err == nil {
+		t.Fatal("explicit and preserved task accepted")
+	}
+	resumed := f.send(t, f.alice, resume)
+	if f.send(t, f.alice, resume) != resumed {
+		t.Fatal("resume retry not idempotent")
+	}
+	// Retrying an old end must return its old receipt without ending the resumed session.
+	if f.send(t, f.alice, end) != receipt {
+		t.Fatal("end retry changed")
+	}
+	feed, err := f.s.BrokerPull(ctx, f.alice, BrokerQuery{SessionID: "alice-session", TaskID: "task-a", WatchSession: "alice-session"})
+	if err != nil || feed.Sessions[0].State != "active" {
+		t.Fatalf("resume failed: %+v %v", feed, err)
+	}
+	clear := resume
+	clear.RequestID = "clear"
+	clear.Resume = false
+	clear.KeepTask = false
+	f.send(t, f.alice, clear)
+	feed, err = f.s.BrokerPull(ctx, f.alice, BrokerQuery{SessionID: "alice-session", WatchSession: "alice-session"})
+	if err != nil || feed.Sessions[0].TaskID != "" {
+		t.Fatalf("explicit unbind failed: %+v %v", feed, err)
 	}
 }

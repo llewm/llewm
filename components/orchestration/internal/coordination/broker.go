@@ -84,6 +84,8 @@ type BrokerCommand struct {
 	Action        string   `json:"action"` // state, message, ack
 	SessionID     string   `json:"session_id"`
 	TaskID        string   `json:"task_id,omitempty"`
+	KeepTask      bool     `json:"keep_task,omitempty"` // state heartbeat preserves the current binding
+	Resume        bool     `json:"resume,omitempty"`    // explicit SessionStart may reopen ended contact
 	Agent         string   `json:"agent,omitempty"`
 	State         string   `json:"state,omitempty"`
 	TTLSeconds    int      `json:"ttl_seconds,omitempty"`
@@ -99,7 +101,8 @@ type BrokerReceipt struct {
 	BrokerID      string `json:"broker_id"`
 	ID            string `json:"id"`
 	Sequence      int64  `json:"sequence"`
-	Status        string `json:"status"` // locally_stored, acknowledged
+	Status        string `json:"status"`            // locally_stored, acknowledged
+	TaskID        string `json:"task_id,omitempty"` // effective task after a state update
 }
 
 type BrokerEvent struct {
@@ -153,6 +156,9 @@ func cleanBrokerCommand(c BrokerCommand) (BrokerCommand, error) {
 	}
 	switch c.Action {
 	case "state":
+		if c.KeepTask && c.TaskID != "" || c.Resume && c.State != "active" {
+			return c, errors.New("keep_task requires omitted task_id; resume requires active state")
+		}
 		if c.State != "active" && c.State != "ended" {
 			return c, errors.New("state must be active or ended")
 		}
@@ -160,7 +166,7 @@ func cleanBrokerCommand(c BrokerCommand) (BrokerCommand, error) {
 			return c, errors.New("state requires agent and ttl_seconds 30..1800; no message routing")
 		}
 	case "message", "ack":
-		if c.State != "" || c.Agent != "" || c.TTLSeconds != 0 || (c.ToSession != "" && c.ToTask != "") {
+		if c.KeepTask || c.Resume || c.State != "" || c.Agent != "" || c.TTLSeconds != 0 || (c.ToSession != "" && c.ToTask != "") {
 			return c, errors.New("message requires at most one recipient and no state fields")
 		}
 		if c.Action == "message" && strings.TrimSpace(c.Text) == "" {
@@ -258,14 +264,17 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 	if c.Action != "state" && err != nil {
 		return empty, errors.New("publish session state before messaging")
 	}
-	if err == nil && previous.State == "ended" && !(c.Action == "state" && c.State == "ended") {
-		return empty, errors.New("ended session cannot publish; use a new session ID")
+	if err == nil && previous.State == "ended" && !(c.Action == "state" && (c.State == "ended" || c.Resume)) {
+		return empty, errors.New("ended session requires explicit active state with resume")
 	}
 	if c.Action != "state" && c.TaskID != previous.TaskID {
 		return empty, errors.New("task_id must match session state")
 	}
 	now := s.now()
 	if c.Action == "state" {
+		if c.KeepTask {
+			c.TaskID = previous.TaskID
+		}
 		if c.Text == "" && c.TaskID == previous.TaskID {
 			c.Text = previous.Summary
 		}
@@ -317,7 +326,7 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 		return empty, err
 	}
 	event := BrokerEvent{Sequence: seq, ID: id, Actor: m.ID, At: now, Command: c}
-	receipt := BrokerReceipt{SchemaVersion: 1, BrokerID: identity.ID, ID: id, Sequence: seq, Status: "locally_stored"}
+	receipt := BrokerReceipt{SchemaVersion: 1, BrokerID: identity.ID, ID: id, Sequence: seq, Status: "locally_stored", TaskID: c.TaskID}
 	if c.Action == "ack" {
 		receipt.Status = "acknowledged"
 	}

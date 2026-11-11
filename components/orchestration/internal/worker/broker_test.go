@@ -63,6 +63,11 @@ func TestBrokerMCPRequestReplyAndAcknowledgment(t *testing.T) {
 		t.Fatal(replies)
 	}
 	callTool(t, alice, "broker_send", BrokerSendInput{RequestID: "bad", ReplyTo: request.ID, Text: "spoof reply"}, true)
+	callTool(t, alice, "broker_state", BrokerStateInput{RequestID: "end", State: "ended", TTLSeconds: 60}, false)
+	callTool(t, alice, "broker_state", BrokerStateInput{RequestID: "late", State: "active", TTLSeconds: 60}, true)
+	callTool(t, alice, "broker_state", BrokerStateInput{RequestID: "resume", State: "active", Resume: true, TTLSeconds: 60}, false)
+	callTool(t, alice, "broker_send", BrokerSendInput{RequestID: "resumed-send", ToTask: "task-b", Text: "Resumed same session"}, false)
+
 }
 
 func TestBrokerMCPRefusesRemoteAndInvalidIdentity(t *testing.T) {
