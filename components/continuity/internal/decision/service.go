@@ -73,15 +73,28 @@ func cleanID(name, value string, required bool) (string, error) {
 
 func normalizeDecisionID(value string) string { return strings.TrimPrefix(value, "decision:") }
 
+var targetKinds = []string{"task", "checkpoint", "roadmap_node", "track_plan", "work_item", "narrative", "commit", "decision"}
+
 func validateTarget(kind, id, revision string) (string, string, string, error) {
 	kind = strings.TrimSpace(kind)
-	if !oneOf(kind, "task", "checkpoint", "roadmap_node", "track_plan", "work_item", "narrative", "commit", "decision") {
+	if !oneOf(kind, targetKinds...) {
 		return "", "", "", fmt.Errorf("unsupported target kind %q", kind)
 	}
 	var err error
 	id, err = clean("target ID", id, maxIDBytes, true, true)
 	if err != nil {
 		return "", "", "", err
+	}
+	// Accept the history ref form (kind:ID) as well as the bare ID, and reject a
+	// ref that still names a family, which would store a link nothing resolves.
+	id = strings.TrimPrefix(id, kind+":")
+	for _, family := range targetKinds {
+		if strings.HasPrefix(id, family+":") {
+			return "", "", "", fmt.Errorf("%s target ID %q names a %s ref; pass the bare ID or %s:ID", kind, id, family, kind)
+		}
+	}
+	if id == "" {
+		return "", "", "", errors.New("target ID is required")
 	}
 	revision, err = clean("target revision", revision, 128, false, true)
 	if err != nil {
