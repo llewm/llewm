@@ -540,6 +540,11 @@ func portableText(value, projectRoot string) string {
 		if root == "." || root == string(filepath.Separator) {
 			continue
 		}
+		// Text may carry the location as recorded (for example with mixed Windows
+		// separators), cleaned, or slash-separated; redact every spelling.
+		if recorded := strings.TrimRight(candidate, `/\`); recorded != "" && recorded != root {
+			value = strings.ReplaceAll(value, recorded, "[PROJECT_ROOT]")
+		}
 		value = strings.ReplaceAll(value, root, "[PROJECT_ROOT]")
 		slashRoot := filepath.ToSlash(root)
 		if slashRoot != root {
