@@ -13,8 +13,8 @@ never from the transcript.
 
 Results go to a run directory (default $XDG_CACHE_HOME/llewm/rules-ab/RUN):
 results.jsonl has one line per session and summary.md the comparison.
-A candidate passes only if no fixture's compliance drops and the geometric-mean
-cost ratio is below 1.
+A candidate passes only if no fixture's compliance drops and the upper bound of
+the geometric-mean cost ratio's 95% bootstrap CI is below 1.
 """
 
 import argparse
@@ -344,10 +344,10 @@ def summarize(records, baseline, candidate, seed=0):
                      f"(95% bootstrap CI {lo:.3f}–{hi:.3f}; {len(ratios)} fixtures).")
         lines.append(f"Paired runs where the candidate cost less: {wins}, more: {losses} "
                      f"(sign test p = {sign_test(wins, losses):.3f}).")
-        verdict_ok = verdict_ok and gm < 1
+        verdict_ok = verdict_ok and hi < 1
     lines.append("")
     lines.append("Verdict: **" + ("candidate passes" if verdict_ok and ratios else "candidate does not pass") +
-                 "** (no fixture's compliance may drop, and the cost ratio must be below 1).")
+                 "** (no fixture's compliance may drop, and the cost ratio's CI must lie below 1).")
     return "\n".join(lines) + "\n"
 
 

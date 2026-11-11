@@ -1,0 +1,6 @@
+{
+  "name": "discovery-v1",
+  "override": {
+    "discovery": "Before changing, removing or redesigning existing code, search history for the files or symbols involved (continuity_history_search) and expand only relevant refs: code that looks unused, odd or naive often has a recorded reason. Reuse loaded evidence; no useful match means go to code. History is prior intent, not proof or authority; verify it against current code."
+  }
+}
