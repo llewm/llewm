@@ -48,7 +48,7 @@ type terminalSource interface {
 	Plan(ctx context.Context, id string, revision int) (*trackplan.Plan, error)
 	Ideas(ctx context.Context, status string) (workitem.ListPage, error)
 	Topics(ctx context.Context) ([]topic.Summary, error)
-	// Current returns the project's latest checkpoint, the one bootstrap resumes.
+	// Current returns the latest project-wide saved checkpoint, not live activity or session selection.
 	Current(ctx context.Context) (*checkpoint.Checkpoint, error)
 	HistorySearch(ctx context.Context, options history.SearchOptions) (history.SearchPage, error)
 	HistoryShow(ctx context.Context, refs []string) (history.ShowPage, error)
@@ -144,16 +144,15 @@ type terminalView struct {
 	// to, or -1 when that task is not in the listed tracks.
 	current      *checkpoint.Checkpoint
 	currentTrack int
-	// currentPlacement says where the current task lives when the filter
-	// hides it: roadmap:NODE, or "unbound" for a task with no roadmap node.
-	currentPlacement string
-	now              func() time.Time
-	timeline         timeline.Page
-	decisions        decision.ListPage
-	progress         map[string]planProgress
-	stack            []*terminalLevel
-	ideas            workitem.ListPage
-	topics           []topic.Summary
+	loadedAt     time.Time
+	taskTitles   map[string]string
+	now          func() time.Time
+	timeline     timeline.Page
+	decisions    decision.ListPage
+	progress     map[string]planProgress
+	stack        []*terminalLevel
+	ideas        workitem.ListPage
+	topics       []topic.Summary
 
 	ideaFilter            string
 	ideaIndex, topicIndex int
@@ -172,6 +171,7 @@ type terminalView struct {
 	help         bool
 	helpScroll   int
 	status       string
+	refreshError string
 }
 
 func tuiCommand() *cobra.Command {
@@ -192,6 +192,20 @@ func tuiCommand() *cobra.Command {
 				return fmt.Errorf("terminal initialization failed: %w; use llewm work list or llewm history search", err)
 			}
 			defer screen.Fini()
+			stopRefresh := make(chan struct{})
+			defer close(stopRefresh)
+			go func() {
+				ticker := time.NewTicker(5 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-stopRefresh:
+						return
+					case <-ticker.C:
+						_ = screen.PostEvent(tcell.NewEventInterrupt(nil))
+					}
+				}
+			}()
 			state := newTerminalView(appTerminalSource{app: application, checkout: checkout})
 			if err := state.load(cmd.Context()); err != nil {
 				return err
@@ -203,6 +217,8 @@ func tuiCommand() *cobra.Command {
 					return nil
 				}
 				switch e := event.(type) {
+				case *tcell.EventInterrupt:
+					_ = state.autoRefresh(cmd.Context())
 				case *tcell.EventResize:
 					screen.Sync()
 				case *tcell.EventKey:
@@ -227,6 +243,7 @@ func newTerminalView(source terminalSource) *terminalView {
 func (v *terminalView) load(ctx context.Context) error {
 	v.console.errors = map[string]string{}
 	v.console.loaded = map[string]bool{}
+	v.current, v.currentTrack = nil, -1
 	// Failure in one saved-data family must not hide the rest of the console.
 	for _, view := range terminalTopViews[:5] {
 		var err error
@@ -235,12 +252,15 @@ func (v *terminalView) load(ctx context.Context) error {
 			v.work, err = v.source.Work(ctx, v.filter)
 			if err == nil {
 				v.current, err = v.source.Current(ctx)
+				if err == nil {
+					v.loadTaskTitles(ctx)
+				}
 			}
 			if err == nil {
 				err = v.loadProgress(ctx)
 			}
 			if err == nil {
-				err = v.placeCurrent(ctx)
+				v.placeCurrent()
 			}
 		case "timeline":
 			v.timeline, err = v.source.Timeline(ctx, v.kind, "")
@@ -260,6 +280,7 @@ func (v *terminalView) load(ctx context.Context) error {
 		v.workIndex = v.currentTrack
 	}
 	v.timelineCursors, v.stack = nil, nil
+	v.loadedAt = v.now()
 	return v.detail(ctx)
 }
 
@@ -290,24 +311,16 @@ func (v *terminalView) loadProgress(ctx context.Context) error {
 
 func livePlan(status string) bool { return status == "accepted" || status == "active" }
 
-// currentTrackIndex finds the track whose tasks include the latest checkpoint's task.
-// placeCurrent finds the current task's row under the filter, and when the
-// filter hides it, where it lives instead.
-func (v *terminalView) placeCurrent(ctx context.Context) error {
-	v.currentTrack, v.currentPlacement = currentTrackIndex(v.work.Items, v.current), ""
-	if v.currentTrack >= 0 || v.current == nil || v.current.TaskID == "" {
-		return nil
+// placeCurrent marks only a checkpoint successfully read in this snapshot.
+func (v *terminalView) placeCurrent() {
+	v.currentTrack = currentTrackIndex(v.work.Items, v.current)
+}
+
+func terminalTrackKey(item roadmap.TrackInventoryItem) string {
+	if item.Node != nil {
+		return "node:" + item.Node.ID
 	}
-	everything, err := v.source.Work(ctx, "everything")
-	if err != nil {
-		return err
-	}
-	if i := currentTrackIndex(everything.Items, v.current); i >= 0 && everything.Items[i].Node != nil {
-		v.currentPlacement = "roadmap:" + everything.Items[i].Node.ID
-	} else {
-		v.currentPlacement = "unbound"
-	}
-	return nil
+	return "task:" + item.SelectedTaskID
 }
 
 func currentTrackIndex(items []roadmap.TrackInventoryItem, current *checkpoint.Checkpoint) int {
@@ -327,34 +340,65 @@ func currentTrackIndex(items []roadmap.TrackInventoryItem, current *checkpoint.C
 	return -1
 }
 
-// workingGlyph marks the track being worked on; it is distinct from the ▶ status glyph.
-const workingGlyph = "◉"
+// latestCheckpointGlyph marks the latest saved checkpoint, not observed live activity.
+const latestCheckpointGlyph = "◉"
 
-// working reports whether the latest checkpoint says work is underway right now.
-func (v *terminalView) working() bool {
-	return v.current != nil && v.current.Status == "in_progress"
+func (v *terminalView) loadTaskTitles(ctx context.Context) {
+	v.taskTitles = map[string]string{}
+	for _, item := range v.work.Items {
+		if item.Node != nil || item.LatestCheckpoint == nil {
+			continue
+		}
+		cp, err := v.source.Checkpoint(ctx, item.LatestCheckpoint.ID)
+		if err != nil {
+			v.console.errors["task titles"] = err.Error()
+			continue
+		}
+		if cp != nil && cp.TaskID == item.SelectedTaskID {
+			v.taskTitles[item.SelectedTaskID] = cp.Task
+		}
+	}
 }
 
-// currentLine summarizes the latest checkpoint for the Tracks header.
+func (v *terminalView) trackTitle(item roadmap.TrackInventoryItem) string {
+	if item.Node != nil {
+		return item.Node.Title
+	}
+	if title := v.taskTitles[item.SelectedTaskID]; title != "" {
+		return title
+	}
+	if v.current != nil && v.current.TaskID == item.SelectedTaskID && v.current.Task != "" {
+		return v.current.Task
+	}
+	return valueOrUnknown(item.SelectedTaskID)
+}
+
+// currentLine describes saved state without claiming a task is running.
 func (v *terminalView) currentLine() string {
 	if v.current == nil {
 		return ""
 	}
-	label := "Last worked"
-	if v.working() {
-		label = workingGlyph + " Now"
+	name := v.current.Task
+	if name == "" {
+		name = valueOrUnknown(v.current.TaskID)
 	}
-	name := "task " + valueOrUnknown(v.current.TaskID)
-	if v.currentTrack >= 0 {
-		name = trackID(v.work.Items[v.currentTrack].Node, v.work.Items[v.currentTrack].SelectedTaskID)
-	} else if v.currentPlacement == "unbound" {
-		name += " (no roadmap node; bind with llewm roadmap link --kind task)"
-	} else if v.currentPlacement != "" {
-		name += " (on " + v.currentPlacement + ", not in this filter)"
-	} else if v.current.TaskID != "" {
-		name += " (not in this filter)"
+	if v.currentTrack < 0 {
+		name += " (outside filter)"
 	}
-	return fmt.Sprintf("%s: %s · %s · checkpoint %s (%s)", label, name, v.current.Status, v.current.CreatedAt.Local().Format("01-02 15:04"), ago(v.now().Sub(v.current.CreatedAt)))
+	return fmt.Sprintf("Latest saved: %s · %s · %s", name, v.current.Status, ago(v.now().Sub(v.current.CreatedAt)))
+}
+
+// Refresh only the overview; do not interrupt a record, search or expanded reading.
+func (v *terminalView) autoRefresh(ctx context.Context) error {
+	if v.view != "tracks" || v.level() != nil || v.help || v.inputActive || v.expanded {
+		return nil
+	}
+	err := v.refresh(ctx)
+	v.refreshError = ""
+	if err != nil {
+		v.refreshError = "Refresh failed: " + err.Error()
+	}
+	return err
 }
 
 // ago renders an elapsed duration compactly.
@@ -490,9 +534,8 @@ func (v *terminalView) key(ctx context.Context, e *tcell.EventKey) error {
 		}
 		v.work, v.workIndex, v.filter = list, 0, filter
 		delete(v.console.errors, "tracks")
-		if err := v.placeCurrent(ctx); err != nil {
-			return err
-		}
+		v.placeCurrent()
+		v.loadTaskTitles(ctx)
 	case r == 'k' && v.view == "timeline":
 		kind := cycle(terminalKinds, v.kind)
 		page, err := v.source.Timeline(ctx, kind, "")
@@ -787,21 +830,17 @@ func (v *terminalView) detail(ctx context.Context) error {
 		v.details = nil
 		if item.Node != nil {
 			kind, id = "roadmap_node", item.Node.ID
-			v.details = append(v.details, "Node: "+id, "Title: "+item.Node.Title, fmt.Sprintf("Status: %s  Priority: %d", item.Node.Status, item.Node.Priority))
+			v.details = append(v.details, "Node: "+id, fmt.Sprintf("Track: %s  Priority: %d", item.Node.Status, item.Node.Priority))
 		} else if item.SelectedTaskID != "" {
 			kind, id = "task", item.SelectedTaskID
 		}
 		if v.workIndex == v.currentTrack && v.current != nil {
-			state := "Last worked"
-			if v.working() {
-				state = "Working now"
-			}
-			v.details = append(v.details, fmt.Sprintf("%s: checkpoint %s (%s), %s", state, v.current.CreatedAt.Local().Format("01-02 15:04"), ago(v.now().Sub(v.current.CreatedAt)), v.current.Status), "Next: "+v.current.NextAction)
+			v.details = append(v.details, fmt.Sprintf("Saved: checkpoint %s (%s), %s", v.current.CreatedAt.Local().Format("01-02 15:04"), ago(v.now().Sub(v.current.CreatedAt)), v.current.Status), "Next: "+v.current.NextAction)
 		} else if item.LatestCheckpoint != nil {
 			cp := item.LatestCheckpoint
-			v.details = append(v.details, fmt.Sprintf("Checkpoint: %s (%s), %s", cp.CreatedAt.Local().Format("01-02 15:04"), ago(v.now().Sub(cp.CreatedAt)), cp.Status), "Next: "+cp.NextAction)
+			v.details = append(v.details, fmt.Sprintf("Saved: checkpoint %s (%s), %s", cp.CreatedAt.Local().Format("01-02 15:04"), ago(v.now().Sub(cp.CreatedAt)), cp.Status), "Next: "+cp.NextAction)
 		}
-		v.details = append(v.details, "Binding: "+item.BindingState, "Task: "+valueOrUnknown(item.SelectedTaskID), fmt.Sprintf("Unresolved actions: %d  Pending work items: %d", item.UnresolvedActionCount, item.PendingWorkItems))
+		v.details = append(v.details, "Title: "+v.trackTitle(item), "Binding: "+item.BindingState, "Task: "+valueOrUnknown(item.SelectedTaskID), fmt.Sprintf("Unresolved actions: %d  Pending work items: %d", item.UnresolvedActionCount, item.PendingWorkItems))
 		if p, ok := v.progress[trackID(item.Node, "")]; ok && item.Node != nil {
 			v.details = append(v.details, fmt.Sprintf("Plan: %d of %d items completed (p to open)", p.done, p.total))
 		}
@@ -912,25 +951,19 @@ func (v *terminalView) rows(width int) []string {
 	var rows listRows
 	switch v.view {
 	case "tracks":
-		idWidth := 0
-		for _, item := range v.work.Items {
-			idWidth = max(idWidth, runewidth.StringWidth(trackID(item.Node, item.SelectedTaskID)))
-		}
-		rows.widths = []int{2, 11, 5, min(idWidth+2, width/3)}
+		rows.widths = []int{2, 13}
 		for i, item := range v.work.Items {
-			status, priority, title := item.BindingState, "", ""
-			if item.Node != nil {
-				status, priority, title = item.Node.Status, fmt.Sprintf("P%d", item.Node.Priority), item.Node.Title
+			status := item.BindingState
+			if item.LatestCheckpoint != nil {
+				status = item.LatestCheckpoint.Status
+			} else if item.Node != nil {
+				status = item.Node.Status
 			}
 			glyph := statusGlyph(status)
 			var right []string
 			if i == v.currentTrack {
-				if v.working() {
-					glyph = workingGlyph
-					right = append(right, "working now")
-				} else {
-					right = append(right, "last worked")
-				}
+				glyph = latestCheckpointGlyph
+				right = append(right, "latest checkpoint")
 			}
 			if p, ok := v.progress[trackID(item.Node, "")]; ok && item.Node != nil {
 				right = append(right, fmt.Sprintf("plan %d/%d", p.done, p.total))
@@ -938,7 +971,7 @@ func (v *terminalView) rows(width int) []string {
 			if len(item.Anomalies) > 0 {
 				right = append(right, fmt.Sprintf("%d findings", len(item.Anomalies)))
 			}
-			rows.add(title, strings.Join(right, " · "), glyph, status, priority, trackID(item.Node, item.SelectedTaskID))
+			rows.add(v.trackTitle(item), strings.Join(right, " · "), glyph, status)
 		}
 	case "timeline":
 		rows.widths = []int{12, 18}
@@ -1147,7 +1180,7 @@ func (v *terminalView) hint() string {
 	}
 	switch v.view {
 	case "tracks":
-		return "→ history · p plan · c checkpoints · f filter · " + common
+		return "Tab view · r refresh · ? help · q quit · → history · f filter"
 	case "timeline":
 		return "k kind · n/p page · " + common
 	case "decisions":
@@ -1177,7 +1210,7 @@ func (v *terminalView) context() string {
 	case "tracks":
 		summary := fmt.Sprintf("Tracks · filter %s · %d of %d", v.filter, len(v.work.Items), v.work.InventoryTotal)
 		if line := v.currentLine(); line != "" {
-			return line + " · " + summary
+			return summary + " · " + line
 		}
 		return summary
 	case "timeline":
@@ -1215,7 +1248,18 @@ func (v *terminalView) filterLine() string {
 	}
 	switch v.view {
 	case "tracks":
-		return " FILTER: " + v.filter + "  [f: change]"
+		snapshot := ""
+		if !v.loadedAt.IsZero() {
+			mode := "auto 5s"
+			if v.help || v.inputActive || v.expanded {
+				mode = "paused"
+			}
+			if len(v.console.errors) > 0 {
+				snapshot = " · partial"
+			}
+			snapshot += " · read " + v.loadedAt.Local().Format("15:04:05") + " · " + mode
+		}
+		return " FILTER: " + v.filter + "  [f: change]" + snapshot
 	case "ideas":
 		return " FILTER: status=" + filterValue(v.ideaFilter, "all") + "  [f: change]"
 	case "timeline":
@@ -1243,9 +1287,6 @@ func (v *terminalView) draw(s tcell.Screen) {
 	put(s, 0, 0, width, v.tabLine(width), bold)
 	onTracks := v.view == "tracks" && len(v.stack) == 0
 	contextStyle := tcell.StyleDefault.Dim(true)
-	if onTracks && v.working() {
-		contextStyle = tcell.StyleDefault.Bold(true)
-	}
 	put(s, 0, 1, width, v.context(), contextStyle)
 
 	body := height - 4
@@ -1288,7 +1329,13 @@ func (v *terminalView) draw(s tcell.Screen) {
 	}
 	status := v.status
 	if status == "" {
+		status = v.refreshError
+	}
+	if status == "" {
 		status = v.hint()
+		if width < 100 {
+			status = "Tab view · r refresh · ? help · q quit"
+		}
 	}
 	if v.inputActive {
 		prompt := "Search history: "
@@ -1327,6 +1374,8 @@ var terminalHelp = []string{
 	"k                 cycle event kind (Timeline) or claim kind (History)",
 	"n p               next / previous page (Timeline, Decisions, History, Checkpoints)",
 	"r                 refresh from saved state",
+	"Tracks overview refreshes every 5s; reading/search/help pauses it.",
+	"Latest saved checkpoint is project-wide, not proof of live activity.",
 	"q or Ctrl-C       quit",
 	"",
 	"PgUp/PgDn scroll this help; other keys close it.",
