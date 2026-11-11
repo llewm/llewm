@@ -14,7 +14,7 @@ func TestCoreRulesAreBuiltInAndConfigurable(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
 	runCLI(t, "", "checkpoint", "create", "--task-id", "work", "--task", "Work", "--next", "Continue")
-	if got := runCLI(t, "", "bootstrap"); !strings.Contains(got, "## Continuity rules (built in)\n\n- discovery: Before diagnosing") {
+	if got := runCLI(t, "", "bootstrap"); !strings.Contains(got, "## Continuity rules (built in)\n\n- discovery: Before changing, removing or redesigning") {
 		t.Fatalf("built-in rules missing:\n%s", got)
 	}
 	configPath := filepath.Join(root, ".llewm/continuity", "config.toml")
@@ -36,7 +36,7 @@ func TestCoreRulesAreBuiltInAndConfigurable(t *testing.T) {
 	// A typo never fails the bootstrap: the built-in rules apply, with a warning.
 	write("\n[guidance.core]\n  disable = [\"discvery\"]\n")
 	got = runCLI(t, "", "bootstrap")
-	if !strings.Contains(got, "- discovery: Before diagnosing") || !strings.Contains(got, `Configuration ignored: project config: unknown core rule "discvery"`) {
+	if !strings.Contains(got, "- discovery: Before changing, removing or redesigning") || !strings.Contains(got, `Configuration ignored: project config: unknown core rule "discvery"`) {
 		t.Fatalf("invalid configuration not reported:\n%s", got)
 	}
 }
@@ -137,7 +137,7 @@ func TestMemoryRepositoryRuleAppearsOnlyWithSync(t *testing.T) {
 	if err := os.WriteFile(configPath, append(base, []byte("\n[sync]\n  remote = \"https://example.invalid/memory.git\"\n  clone = '"+clone+"'\n  manual = true\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := runCLI(t, "", "bootstrap"); !strings.Contains(got, "- memory-repository: The memory repository clone at `"+clone+"` is managed by Continuity sync.") {
+	if got := runCLI(t, "", "bootstrap"); !strings.Contains(got, "- memory-repository: Continuity sync manages the memory repository clone at `"+clone+"`.") {
 		t.Fatalf("memory rule missing with sync:\n%s", got)
 	}
 }

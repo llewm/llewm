@@ -1,0 +1,10 @@
+{
+  "name": "short-v1",
+  "override": {
+    "discovery": "Before diagnosing or redesigning existing behavior, run continuity_history_search with focused terms. History is prior intent; verify it against code. Skip for mechanical edits.",
+    "task-identity": "Checkpoint only under your own task_id. To review another agent's task, use a new task_id with reviews_task_id.",
+    "own-commits": "Narrate only your own commits.",
+    "resume-completion": "On resume, first check whether the remaining action is already done. If it is, verify it and save the task completed. A restart alone is not completion.",
+    "checkout-lifecycle": "Work in the current checkout and branch. Create a branch or worktree only for a confirmed concurrent writer, explicit isolation, or a required workflow; open tasks, branches and presence do not prove one. After integration, remove only clean task worktrees and branches with no unique commits."
+  }
+}

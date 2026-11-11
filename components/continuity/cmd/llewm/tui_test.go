@@ -27,6 +27,8 @@ import (
 type fakeTerminalSource struct {
 	showError          string
 	workError          string
+	currentError       string
+	backlinksError     string
 	project            projectView
 	checkpointPages    map[string]checkpoint.ListPage
 	checkpointRecords  map[string]*checkpoint.Checkpoint
@@ -64,6 +66,9 @@ func TestTUIHealthShowsRecordedSyncModeAndDuration(t *testing.T) {
 }
 
 func (f *fakeTerminalSource) Current(context.Context) (*checkpoint.Checkpoint, error) {
+	if f.currentError != "" {
+		return nil, errors.New(f.currentError)
+	}
 	return f.current, nil
 }
 
@@ -128,6 +133,9 @@ func (f *fakeTerminalSource) Decision(_ context.Context, id string) (decision.Re
 }
 
 func (f *fakeTerminalSource) Backlinks(context.Context, string, string, string) (decision.BacklinkPage, error) {
+	if f.backlinksError != "" {
+		return decision.BacklinkPage{}, errors.New(f.backlinksError)
+	}
 	return decision.BacklinkPage{IncludedFamilies: []string{"decision"}}, nil
 }
 
@@ -610,7 +618,7 @@ func TestTUISearchPromptAndReferenceOpening(t *testing.T) {
 	}
 }
 
-func TestTUIOpensOnTheTrackBeingWorkedOn(t *testing.T) {
+func TestTUIOpensOnTheTrackWithTheLatestSavedCheckpoint(t *testing.T) {
 	view, source := newFakeTerminal(t)
 	checkpointAt := time.Date(2026, 9, 27, 9, 44, 0, 0, time.UTC)
 	view.now = func() time.Time { return checkpointAt.Add(12 * time.Minute) }
@@ -622,24 +630,21 @@ func TestTUIOpensOnTheTrackBeingWorkedOn(t *testing.T) {
 	if view.workIndex != 2 || view.currentTrack != 2 {
 		t.Fatalf("opened on row %d, current %d", view.workIndex, view.currentTrack)
 	}
-	if context := view.context(); !strings.HasPrefix(context, "◉ Now: node-c · in_progress · checkpoint ") || !strings.Contains(context, "(12m ago) · Tracks · filter open") {
+	if context := view.context(); !strings.Contains(context, "Latest saved:") || !strings.Contains(context, "in_progress") || !strings.Contains(context, "12m ago") {
 		t.Fatalf("context = %q", context)
 	}
-	if row := view.rows(120)[2]; !strings.HasPrefix(row, "◉") || !strings.Contains(row, "working now") {
+	if row := view.rows(120)[2]; !strings.HasPrefix(row, "◉") || !strings.Contains(row, "latest checkpoint") {
 		t.Fatalf("current row = %q", row)
 	}
-	if details := strings.Join(view.details, "\n"); !strings.Contains(details, "Working now: checkpoint") || !strings.Contains(details, "Next: Start slice 2") {
+	if details := strings.Join(view.details, "\n"); !strings.Contains(details, "Saved:") || !strings.Contains(details, "Next: Start slice 2") || strings.Contains(strings.ToLower(details), "working now") {
 		t.Fatalf("details:\n%s", details)
 	}
 
-	// With the selection elsewhere the current row stays bold and the header is emphasized.
+	// With the selection elsewhere the latest-checkpoint row stays bold.
 	_ = press(t, view, tcell.KeyHome)
 	screen := simulationScreen(t, 120, 20)
 	view.draw(screen)
 	cells, width, _ := screen.GetContents()
-	if _, _, attrs := cells[1*width].Style.Decompose(); attrs&tcell.AttrBold == 0 || attrs&tcell.AttrDim != 0 {
-		t.Fatalf("header is not emphasized: %v", attrs)
-	}
 	if _, _, attrs := cells[(2+2)*width].Style.Decompose(); attrs&tcell.AttrBold == 0 || attrs&tcell.AttrReverse != 0 {
 		t.Fatalf("current row is not bold: %v", attrs)
 	}
@@ -668,7 +673,7 @@ func TestTUIShowsSelectedOlderTaskCheckpoint(t *testing.T) {
 	}
 }
 
-func TestTUISaysLastWorkedWhenNothingIsInProgress(t *testing.T) {
+func TestTUIUsesSavedLabelsForACompletedLatestCheckpoint(t *testing.T) {
 	view, source := newFakeTerminal(t)
 	checkpointAt := time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)
 	view.now = func() time.Time { return checkpointAt.Add(50 * time.Hour) }
@@ -677,10 +682,10 @@ func TestTUISaysLastWorkedWhenNothingIsInProgress(t *testing.T) {
 	if err := view.load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if context := view.context(); !strings.HasPrefix(context, "Last worked: node-e · completed") || !strings.Contains(context, "(2d ago)") {
+	if context := view.context(); !strings.Contains(context, "Latest saved:") || !strings.Contains(context, "completed") || !strings.Contains(context, "2d ago") {
 		t.Fatalf("context = %q", context)
 	}
-	if row := view.rows(120)[4]; strings.HasPrefix(row, "◉") || !strings.Contains(row, "last worked") {
+	if row := view.rows(120)[4]; !strings.HasPrefix(row, "◉") || !strings.Contains(row, "latest checkpoint") {
 		t.Fatalf("row = %q", row)
 	}
 }
@@ -691,7 +696,7 @@ func TestTUINamesACurrentTaskOutsideTheFilter(t *testing.T) {
 	if err := view.load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if view.workIndex != 0 || view.currentTrack != -1 || !strings.HasPrefix(view.context(), "◉ Now: task unlisted (no roadmap node; bind with llewm roadmap link --kind task) · in_progress · checkpoint ") {
+	if view.workIndex != 0 || view.currentTrack != -1 || !strings.Contains(view.context(), "Latest saved:") || !strings.Contains(view.context(), "unlisted") {
 		t.Fatalf("index %d current %d context %q", view.workIndex, view.currentTrack, view.context())
 	}
 }
@@ -937,5 +942,228 @@ func TestTUIConsoleFailedDrillAndInitialSectionStayRecoverable(t *testing.T) {
 	}
 	if v.level().plan.Revision != 1 || v.level().latest != 2 {
 		t.Fatalf("exact reference lost revision: %+v", v.level())
+	}
+}
+
+func TestTUIUnboundLatestTaskShowsHumanTitle(t *testing.T) {
+	v, f := newFakeTerminal(t)
+	f.work.Items = []roadmap.TrackInventoryItem{{SelectedTaskID: "sync-publication-receipts-20261111", BindingState: "unbound"}}
+	f.current = &checkpoint.Checkpoint{ID: "latest", TaskID: f.work.Items[0].SelectedTaskID, Task: "Verify publication receipts", Status: "in_progress", CreatedAt: time.Now()}
+	if err := v.load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, width := range []int{60, 80} {
+		screen := simulationScreen(t, width, 16)
+		v.draw(screen)
+		if got := screenText(screen)[2]; !strings.Contains(got, f.current.Task) {
+			t.Fatalf("%d-column task row hides title: %q", width, got)
+		}
+	}
+}
+
+func TestTUIEssentialFooterControlsRemainVisible(t *testing.T) {
+	for _, width := range []int{60, 80} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			v, _ := newFakeTerminal(t)
+			screen := simulationScreen(t, width, 16)
+			for i, name := range terminalTopViews {
+				if err := press(t, v, rune('1'+i)); err != nil {
+					t.Fatal(err)
+				}
+				v.draw(screen)
+				footer := screenText(screen)[15]
+				for _, want := range []string{"r refresh", "? help", "q quit"} {
+					if !strings.Contains(footer, want) {
+						t.Fatalf("%s footer hides %q: %q", name, want, footer)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTUIRefreshKeepsSelectedWorkIdentityAfterReordering(t *testing.T) {
+	for _, unbound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unbound=%t", unbound), func(t *testing.T) {
+			v, f := newFakeTerminal(t)
+			if unbound {
+				f.work.Items[1] = roadmap.TrackInventoryItem{SelectedTaskID: "selected-task", BindingState: "unbound"}
+			}
+			if err := v.load(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			v.workIndex = 1
+			selected := f.work.Items[1]
+			f.work.Items = append([]roadmap.TrackInventoryItem(nil), f.work.Items...)
+			f.work.Items[1], f.work.Items[7] = f.work.Items[7], selected
+			if err := press(t, v, 'r'); err != nil {
+				t.Fatal(err)
+			}
+			if v.workIndex != 7 {
+				t.Fatalf("refresh selected row %d, want moved row 7", v.workIndex)
+			}
+		})
+	}
+}
+
+func TestTUIRefreshReadsNewCheckpointWithoutInferringLiveActivity(t *testing.T) {
+	v, f := newFakeTerminal(t)
+	at := time.Date(2026, 11, 11, 8, 0, 0, 0, time.UTC)
+	f.current = &checkpoint.Checkpoint{ID: "old", TaskID: "task-a", Task: "Old work", Status: "in_progress", CreatedAt: at.Add(-48 * time.Hour)}
+	v.now = func() time.Time { return at }
+	if err := v.load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.current = &checkpoint.Checkpoint{ID: "new", TaskID: "task-b", Task: "New work", Status: "completed", CreatedAt: at}
+	if v.current.ID != "old" {
+		t.Fatal("fixture unexpectedly changed the loaded checkpoint")
+	}
+	if err := press(t, v, 'r'); err != nil {
+		t.Fatal(err)
+	}
+	if v.current.ID != "new" || !strings.Contains(v.context(), "Latest saved:") || !strings.Contains(v.context(), "completed") {
+		t.Fatalf("refresh did not show new saved checkpoint: %q", v.context())
+	}
+	if strings.Contains(strings.ToLower(v.context()), "working now") || strings.Contains(v.context(), "◉ Now") {
+		t.Fatalf("saved checkpoint implies live work: %q", v.context())
+	}
+}
+
+func TestTUIAutoRefreshUpdatesTracksAndPreservesReading(t *testing.T) {
+	for _, mode := range []string{"tracks", "help", "input", "expanded", "drilled", "timeline"} {
+		t.Run(mode, func(t *testing.T) {
+			v, f := newFakeTerminal(t)
+			f.current = &checkpoint.Checkpoint{ID: "before", TaskID: "task-a", Status: "in_progress", CreatedAt: time.Now()}
+			if err := v.load(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "help":
+				v.help = true
+			case "input":
+				v.inputActive = true
+			case "expanded":
+				v.expanded = true
+			case "drilled":
+				if err := press(t, v, 'p'); err != nil {
+					t.Fatal(err)
+				}
+				if v.level() == nil {
+					t.Fatal("fixture did not drill into a plan")
+				}
+			case "timeline":
+				if err := press(t, v, '2'); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.current = &checkpoint.Checkpoint{ID: "after", TaskID: "task-b", Status: "completed", CreatedAt: time.Now()}
+			if err := v.autoRefresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := "before"
+			if mode == "tracks" {
+				want = "after"
+			}
+			if v.current.ID != want {
+				t.Fatalf("auto-refresh in %s read checkpoint %q, want %q", mode, v.current.ID, want)
+			}
+		})
+	}
+}
+
+func TestTUIPartialRefreshClearsLatestCheckpointPlacement(t *testing.T) {
+	v, f := newFakeTerminal(t)
+	f.work.Items[2].SelectedTaskID = "latest-task"
+	f.current = &checkpoint.Checkpoint{ID: "latest", TaskID: "latest-task", Status: "in_progress"}
+	if err := v.load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if v.currentTrack != 2 {
+		t.Fatal("fixture did not place latest checkpoint")
+	}
+	f.currentError = "latest checkpoint temporarily unavailable"
+	if err := v.autoRefresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if v.current != nil || v.currentTrack != -1 {
+		t.Fatalf("partial load retained latest placement: %+v at %d", v.current, v.currentTrack)
+	}
+	for _, row := range v.rows(120) {
+		if strings.Contains(row, "latest checkpoint") {
+			t.Fatalf("failed checkpoint read marked an unrelated row: %q", row)
+		}
+	}
+	if !strings.Contains(strings.Join(v.details, "\n"), f.currentError) {
+		t.Fatalf("partial failure hidden: %v", v.details)
+	}
+}
+
+func TestTUIRefreshDistinguishesEqualNodeAndTaskIDs(t *testing.T) {
+	for _, selectTask := range []bool{false, true} {
+		t.Run(fmt.Sprintf("selectTask=%t", selectTask), func(t *testing.T) {
+			v, f := newFakeTerminal(t)
+			node := roadmap.TrackInventoryItem{Node: &roadmap.NodeRef{ID: "same", Title: "Roadmap work", Status: "active"}}
+			task := roadmap.TrackInventoryItem{SelectedTaskID: "same", BindingState: "unbound"}
+			f.work.Items = []roadmap.TrackInventoryItem{node, task}
+			if err := v.load(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			v.workIndex = 0
+			if selectTask {
+				v.workIndex = 1
+			}
+			f.work.Items = []roadmap.TrackInventoryItem{task, node}
+			if err := v.refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got := v.work.Items[v.workIndex]
+			if (got.Node == nil) != selectTask {
+				t.Fatalf("selection changed kind after reorder: %+v", got)
+			}
+		})
+	}
+}
+
+func TestTUIAutoRefreshClearsTransientErrorAndKeepsStatus(t *testing.T) {
+	v, f := newFakeTerminal(t)
+	v.status = "Existing navigation notice"
+	f.backlinksError = "temporary detail read failure"
+	if err := v.autoRefresh(context.Background()); err == nil {
+		t.Fatal("fixture detail error was swallowed")
+	}
+	if !strings.Contains(v.refreshError, f.backlinksError) {
+		t.Fatalf("refresh error not exposed: %q", v.refreshError)
+	}
+	f.backlinksError = ""
+	if err := v.autoRefresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if v.refreshError != "" || v.status != "Existing navigation notice" {
+		t.Fatalf("recovery changed unrelated status: refresh=%q status=%q", v.refreshError, v.status)
+	}
+}
+
+func TestTUILoadsNoncurrentTaskTitleFromItsExactCheckpoint(t *testing.T) {
+	v, f := newFakeTerminal(t)
+	f.work.Items = []roadmap.TrackInventoryItem{{SelectedTaskID: "older-task", BindingState: "unbound", LatestCheckpoint: &roadmap.TrackCheckpoint{ID: "older-tip", Status: "paused"}}}
+	f.checkpointRecords["older-tip"] = &checkpoint.Checkpoint{ID: "older-tip", TaskID: "older-task", Task: "Review queue layout"}
+	f.current = &checkpoint.Checkpoint{ID: "latest", TaskID: "different-task", Task: "Other client work", Status: "completed"}
+	at := time.Date(2026, 11, 11, 8, 0, 0, 0, time.UTC)
+	v.now = func() time.Time { return at }
+	if err := v.load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.rows(60)[0]; !strings.Contains(got, "Review queue layout") || strings.Contains(got, "Other client work") {
+		t.Fatalf("wrong checkpoint title: %q", got)
+	}
+	if !v.loadedAt.Equal(at) {
+		t.Fatalf("loadedAt=%v, want %v", v.loadedAt, at)
+	}
+	at = at.Add(5 * time.Second)
+	if err := v.autoRefresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !v.loadedAt.Equal(at) {
+		t.Fatalf("refresh timestamp not advanced: %v", v.loadedAt)
 	}
 }

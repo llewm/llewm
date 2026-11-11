@@ -557,14 +557,32 @@ func (v *terminalView) refresh(ctx context.Context) error {
 		v.consoleIndex = 0
 		return v.detail(ctx)
 	}
+	selected := ""
+	if v.view == "tracks" && v.workIndex < len(v.work.Items) {
+		item := v.work.Items[v.workIndex]
+		selected = terminalTrackKey(item)
+	}
+	scroll := v.detailScroll
 	view, wi, ei, di, ii, ti := v.view, v.workIndex, v.eventIndex, v.decisionIndex, v.ideaIndex, v.topicIndex
 	if err := v.load(ctx); err != nil {
 		return err
 	}
 	v.view, v.workIndex, v.eventIndex, v.decisionIndex, v.ideaIndex, v.topicIndex = view, wi, ei, di, ii, ti
+	if selected != "" {
+		for i, item := range v.work.Items {
+			if terminalTrackKey(item) == selected {
+				v.workIndex = i
+				break
+			}
+		}
+	}
 	index, count := v.selection()
 	*index = min(*index, max(0, count-1))
-	return v.detail(ctx)
+	if err := v.detail(ctx); err != nil {
+		return err
+	}
+	v.detailScroll = scroll
+	return nil
 }
 
 // linkedHistory follows an exact commit/record anchor instead of a text guess.

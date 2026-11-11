@@ -21,6 +21,12 @@ The client runs the SessionStart hook and places its output in the first model
 request, so a fresh session sees the current task, next action, guidance, and
 pinned records without asking.
 
+<!-- continuity:requirement subagent-rules -->
+## Subagents receive the rules without the parent's task
+
+Each subagent spawn records one start event for the parent session. Its context
+gets the built-in rules, but not the parent's checkpoint task or next action.
+
 <!-- continuity:requirement mcp-tools -->
 ## Continuity MCP tools are callable
 

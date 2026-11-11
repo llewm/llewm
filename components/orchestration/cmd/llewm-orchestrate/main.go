@@ -26,12 +26,22 @@ import (
 const help = `llewm-orchestrate: manually coordinate shared agent work
 
 Operator commands (local coordinator database):
+  broker-init --db PATH --project ID --machine LABEL
+  broker-member --db PATH --id ENGINEER --permissions work --token-file PATH
+  broker-revoke --db PATH --id ENGINEER
+  broker-serve --db PATH [--listen 127.0.0.1:9468]
   init   --db PATH
   member --db PATH --id ENGINEER --permissions plan,accept,assign,review,work --token-file PATH
   revoke --db PATH --id ENGINEER
   serve  --db PATH [--listen 127.0.0.1:9467] [--tls-cert PATH --tls-key PATH]
 
 Engineer commands (authenticate with a private token file):
+  broker-info --endpoint URL --token-file PATH
+  broker-request --endpoint URL --token-file PATH --file COMMAND.json
+  broker-pull --endpoint URL --token-file PATH --file QUERY.json
+  broker-mcp --endpoint URL --token-file PATH (--session ID | --session-env VAR) --agent LABEL [--task ID]
+  broker-hook --endpoint URL --token-file PATH --agent LABEL (--cursor-file PATH | --cursor-dir DIR) [--task ID]
+              [--state active|ended] (reads session_id and hook_event_name from JSON stdin)
   list    --endpoint URL --token-file PATH
   show    --endpoint URL --token-file PATH --plan ID [--history --after SEQUENCE]
   request --endpoint URL --token-file PATH --file COMMAND.json
@@ -80,6 +90,13 @@ func run(args []string, out, stderr io.Writer) error {
 	requestID := flags.String("request-id", "", "unique idempotency key for a prepared proposal")
 	machine := flags.String("machine", "", "caller-asserted machine label for MCP claims")
 	agent := flags.String("agent", "", "caller-asserted agent label for MCP claims")
+	project := flags.String("project", "", "stable project identifier for local broker creation")
+	session := flags.String("session", "", "actual client session identifier")
+	task := flags.String("task", "", "advisory task identifier")
+	cursorFile := flags.String("cursor-file", "", "private per-session hook cursor file")
+	cursorDir := flags.String("cursor-dir", "", "private directory for hook cursors derived from each envelope's session_id and the task")
+	sessionEnv := flags.String("session-env", "", "environment variable holding the actual client session identifier, when --session is not given")
+	state := flags.String("state", "active", "hook session observation: active or ended")
 	var allowedPlans, capabilities []string
 	flags.Func("allow-plan", "explicit plan permitted for this MCP client (repeatable)", func(s string) error { allowedPlans = append(allowedPlans, s); return nil })
 	flags.Func("capability", "explicit local worker capability (repeatable)", func(s string) error { capabilities = append(capabilities, s); return nil })
@@ -108,6 +125,23 @@ func run(args []string, out, stderr io.Writer) error {
 	switch cmd {
 	case "credential-import":
 		return importCredential(*file, *tokenFile, out)
+	case "broker-hook":
+		return brokerHook(ctx, *endpoint, *tokenFile, *agent, *task, *state, *cursorFile, *cursorDir, os.Stdin, out)
+	case "broker-mcp":
+		token, err := readPrivateToken(*tokenFile)
+		if err != nil {
+			return err
+		}
+		if *session == "" && *sessionEnv != "" {
+			if *session = os.Getenv(*sessionEnv); *session == "" {
+				return fmt.Errorf("--session-env %s is unset or empty", *sessionEnv)
+			}
+		}
+		server, err := worker.NewBrokerServer(worker.BrokerConfig{Endpoint: *endpoint, Token: token, SessionID: *session, TaskID: *task, Agent: *agent})
+		if err != nil {
+			return err
+		}
+		return server.Run(ctx, &mcp.StdioTransport{})
 	case "mcp":
 		token, err := readPrivateToken(*tokenFile)
 		if err != nil {
@@ -150,20 +184,27 @@ func run(args []string, out, stderr io.Writer) error {
 		encoder := json.NewEncoder(out)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(command)
-	case "init", "member", "revoke", "serve":
+	case "init", "member", "revoke", "serve", "broker-init", "broker-member", "broker-revoke", "broker-serve":
 		if *dbPath == "" {
 			return errors.New("--db is required")
 		}
-		store, err := coordination.Open(*dbPath, cmd == "init")
+		var store *coordination.Store
+		var err error
+		localBroker := strings.HasPrefix(cmd, "broker-")
+		if localBroker {
+			store, err = coordination.OpenBroker(*dbPath, cmd == "broker-init", *project, *machine)
+		} else {
+			store, err = coordination.Open(*dbPath, cmd == "init")
+		}
 		if err != nil {
 			return err
 		}
 		defer store.Close()
 		switch cmd {
-		case "init":
+		case "init", "broker-init":
 			fmt.Fprintln(out, "Initialized private orchestration database.")
 			return nil
-		case "member":
+		case "member", "broker-member":
 			if *tokenFile == "" {
 				return errors.New("--token-file is required (must not already exist)")
 			}
@@ -198,20 +239,38 @@ func run(args []string, out, stderr io.Writer) error {
 			ok = true
 			fmt.Fprintln(out, "Enrolled engineer; credential saved to the private token file. Previous credential revoked.")
 			return nil
-		case "revoke":
+		case "revoke", "broker-revoke":
 			if err := store.Revoke(ctx, *id); err != nil {
 				return err
 			}
 			fmt.Fprintln(out, "Revoked engineer credential.")
 			return nil
-		case "serve":
+		case "serve", "broker-serve":
+			if localBroker {
+				explicitListen := false
+				flags.Visit(func(f *flag.Flag) {
+					if f.Name == "listen" {
+						explicitListen = true
+					}
+				})
+				if !explicitListen {
+					*listen = "127.0.0.1:9468"
+				}
+				if !transport.Loopback(*listen) {
+					return errors.New("local broker must listen on a literal loopback address")
+				}
+			}
 			if (*cert == "") != (*key == "") {
 				return errors.New("provide both --tls-cert and --tls-key")
 			}
 			if *cert == "" && !transport.Loopback(*listen) {
 				return errors.New("non-loopback listeners require TLS")
 			}
-			server := &http.Server{Addr: *listen, Handler: transport.Handler(store), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8192}
+			handler := transport.Handler(store)
+			if localBroker {
+				handler = transport.BrokerHandler(store)
+			}
+			server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8192}
 			stop, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 			done := make(chan struct{})
@@ -236,7 +295,12 @@ func run(args []string, out, stderr io.Writer) error {
 			}
 			return err
 		}
-	case "list", "show", "request":
+	case "list", "show", "request", "broker-info", "broker-request", "broker-pull":
+		if strings.HasPrefix(cmd, "broker-") {
+			if err := transport.ValidateLocalEndpoint(*endpoint); err != nil {
+				return err
+			}
+		}
 		token, err := readPrivateToken(*tokenFile)
 		if err != nil {
 			return err
@@ -252,7 +316,7 @@ func run(args []string, out, stderr io.Writer) error {
 				path += fmt.Sprintf("/events?after=%d", *after)
 			}
 		}
-		if cmd == "request" {
+		if cmd == "request" || cmd == "broker-request" || cmd == "broker-pull" {
 			f, err := os.Open(*file)
 			if err != nil {
 				return err
@@ -266,6 +330,15 @@ func run(args []string, out, stderr io.Writer) error {
 				return errors.New("command too large")
 			}
 			method, path = "POST", "/v1/commands"
+		}
+		if cmd == "broker-info" {
+			path = "/v1/broker"
+		}
+		if cmd == "broker-request" {
+			path = "/v1/broker/commands"
+		}
+		if cmd == "broker-pull" {
+			path = "/v1/broker/pull"
 		}
 		data, err := transport.Request(ctx, *endpoint, token, method, path, body, caPEM)
 		if err != nil {

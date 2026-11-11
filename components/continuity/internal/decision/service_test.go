@@ -145,6 +145,36 @@ func TestValidationRejectsUnreviewedAndDuplicateLinks(t *testing.T) {
 	}
 }
 
+func TestLinkTargetsAcceptRefFormAndRejectForeignPrefixes(t *testing.T) {
+	ctx := context.Background()
+	service, projectID := decisionFixture(t)
+	input := sampleRecord(projectID, "ref-form")
+	input.Links = []Link{{Kind: "subject", TargetKind: "narrative", TargetID: "narrative:episode-a"}, {Kind: "resulted_in", TargetKind: "work_item", TargetID: "item-a"}}
+	created, err := service.Append(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Links[0].TargetID != "episode-a" || created.Links[1].TargetID != "item-a" {
+		t.Fatalf("ref form was not normalized: %#v", created.Links)
+	}
+	// A lookup by ref finds the link stored by bare ID.
+	page, err := service.Backlinks(ctx, projectID, "narrative", "narrative:episode-a", "", 10, 0)
+	if err != nil || page.Total != 1 {
+		t.Fatalf("backlink by ref: %#v %v", page, err)
+	}
+	for _, bad := range []Link{
+		{Kind: "subject", TargetKind: "narrative", TargetID: "narrative:narrative:episode-a"},
+		{Kind: "subject", TargetKind: "narrative", TargetID: "work_item:item-a"},
+		{Kind: "subject", TargetKind: "work_item", TargetID: "work_item:"},
+	} {
+		input := sampleRecord(projectID, "ref-bad")
+		input.Links = []Link{bad}
+		if _, err := service.Append(ctx, input); err == nil {
+			t.Fatalf("accepted unresolvable target %#v", bad)
+		}
+	}
+}
+
 func TestBacklinksJoinExactIndexedFamilies(t *testing.T) {
 	ctx := context.Background()
 	service, projectID := decisionFixture(t)

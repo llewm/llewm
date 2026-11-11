@@ -56,7 +56,10 @@ and install its local Llewm package. They were checked against the installed
 CLI's help; fresh-client activation still needs verification after installation.
 
 The `SessionStart` hook returns the compiled bootstrap as additional developer
-context. `PostToolUse` can return the opt-in checkpoint reminder described below;
+context. Claude Code does not pass that context to subagents, so its
+`SubagentStart` hook returns only the resolved Continuity rules (built-in rules
+after configuration, at most 4 KiB, no checkpoint or history). The Codex plugin
+registers no subagent hook. `PostToolUse` can return the opt-in checkpoint reminder described below;
 the other configured hooks record lifecycle observations without semantic
 checkpoint creation. Hook-driven usage ingestion is described in [usage](usage.md).
 
@@ -438,6 +441,18 @@ API 140 adds the bounded `continuity_sync_publication` read tool. The measured
 eager tool-definition budget is 21 KiB (previously 20 KiB), allowing this one
 additional schema while retaining the aggregate regression check. It checks
 publication in the configured Git remote; it does not publish or import records.
+
+API 141 links records to the session's task. Each client session runs its own
+MCP process, which remembers the task named by its last task lease, checkpoint,
+or task-selected bootstrap. A narrative recorded with no `task` anchor gets one
+for that task, and a work item captured with no `task_id` gets that task.
+Checkpoint dry runs and saves return `unlinked_records`: refs this process wrote
+since its last saved checkpoint that neither link to the checkpoint's task nor
+appear in `evidence_refs`. The list is advisory and never blocks the save. The
+CLI is not a session and does not link records automatically. Research capture
+also counts shell fetches of external sources (`git clone`, `curl`, `wget`,
+`gh api`, `gh repo view|clone`) as `external` discovery, which needs cited
+findings like web discovery does.
 
 ### Input constraints
 

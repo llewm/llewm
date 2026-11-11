@@ -449,8 +449,8 @@ func TestScaffoldLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 15 {
-		t.Fatalf("expected 15 lifecycle fixtures, got %d", len(paths))
+	if len(paths) != 16 {
+		t.Fatalf("expected 16 lifecycle fixtures, got %d", len(paths))
 	}
 	for _, path := range paths {
 		body, err := os.ReadFile(path)
@@ -478,6 +478,19 @@ func TestScaffoldLifecycle(t *testing.T) {
 			}
 			if receipt.Output.Name != "SessionStart" || !strings.Contains(receipt.Output.Context, "Scaffold smoke test") {
 				t.Fatalf("invalid startup receipt: %s", out)
+			}
+		} else if event.Name == "SubagentStart" {
+			var receipt struct {
+				Output struct {
+					Name    string `json:"hookEventName"`
+					Context string `json:"additionalContext"`
+				} `json:"hookSpecificOutput"`
+			}
+			if err := json.Unmarshal([]byte(out), &receipt); err != nil {
+				t.Fatal(err)
+			}
+			if receipt.Output.Name != "SubagentStart" || !strings.Contains(receipt.Output.Context, "- task-identity: ") || strings.Contains(receipt.Output.Context, "Scaffold smoke test") {
+				t.Fatalf("subagent receipt must carry rules and no checkpoint: %s", out)
 			}
 		} else if out != "" {
 			t.Fatalf("unexpected hook stdout: %s", out)

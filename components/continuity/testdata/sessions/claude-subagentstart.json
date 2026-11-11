@@ -1,0 +1,8 @@
+{
+  "session_id": "fixture-claude-session",
+  "transcript_path": "/tmp/example.jsonl",
+  "cwd": "/tmp/example",
+  "hook_event_name": "SubagentStart",
+  "agent_id": "fixture-agent",
+  "agent_type": "Explore"
+}

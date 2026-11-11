@@ -71,7 +71,7 @@ func TestAppendListShowDriftAndSupersession(t *testing.T) {
 	if err != nil || shown.Record.Anchors[2].Drift != "drifted" {
 		t.Fatalf("expected drift: %#v %v", shown, err)
 	}
-	second, err := service.Append(ctx, Record{ID: "episode-2", ProjectID: projectID, Title: "Corrected", Trigger: "manual", Creator: "human", SupersedesID: first.ID, Claims: []Claim{{Kind: "decision", Text: "Use corrected account", Authority: "user_reported"}}})
+	second, err := service.Append(ctx, Record{ID: "episode-2", ProjectID: projectID, Title: "Corrected", Trigger: "manual", Creator: "human", SupersedesID: "narrative:" + first.ID, Claims: []Claim{{Kind: "decision", Text: "Use corrected account", Authority: "user_reported"}}})
 	if err != nil || second.State != "current" {
 		t.Fatalf("supersession failed: %#v %v", second, err)
 	}
