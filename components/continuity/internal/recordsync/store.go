@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/llewm/llewm/components/continuity/internal/dirsync"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
 )
@@ -169,7 +170,7 @@ func writeFile(root *os.Root, path string, body []byte, replace bool, beforeCrea
 		return true, err
 	}
 	defer directory.Close()
-	return true, directory.Sync()
+	return true, dirsync.Handle(directory)
 }
 
 func ReadObject(root *os.Root, path, lineage string) (portable.EncodedEnvelope, error) {

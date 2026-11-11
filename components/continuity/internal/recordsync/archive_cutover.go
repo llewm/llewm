@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/dirsync"
 )
 
 type archiveCutoverPaths struct{ Source, Retained, DatabaseBackup string }
@@ -248,7 +249,7 @@ func syncArchiveParent(root *os.Root) error {
 		return err
 	}
 	defer directory.Close()
-	return directory.Sync()
+	return dirsync.Handle(directory)
 }
 
 func archiveBackupDigest(ctx context.Context, path string) (string, error) {
