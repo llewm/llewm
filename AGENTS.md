@@ -23,6 +23,13 @@ not broaden its capabilities merely because the overall Llewm roadmap includes t
 - Run `go fmt ./...`, `go test ./...`, and `go vet ./...` from each changed Go module.
   Root `task check` dispatches these checks for the current component.
 - Update installation paths, CI, and documentation links when moving components.
+- Before editing, grep for every place the change must reach (callers, tests,
+  fixtures, config, exports, docs); fix a bug's root cause once, in shared code.
+- Code you move or merge keeps its validation and error handling.
+- Prefer existing repo code, then the standard library, then an existing
+  dependency, before new code. Never add a dependency for a few lines.
+- End each reply with what you skipped or did not verify, and any risk the user
+  must know.
 - Keep `/tmp` small: it is a 3 GiB per-user tmpfs quota, and filling it breaks
   builds and the shell. Put caches and build outputs on the home disk (Go uses
   its default `~/.cache/go-build`, which it trims itself). Delete scratch
