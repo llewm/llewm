@@ -44,6 +44,8 @@ func testProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("CONTINUITY_GLOBAL_HOME", t.TempDir())
+	// Default memory clones live under XDG_DATA_HOME (else ~/.local/share).
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("CONTINUITY_HOME", filepath.Join(root, ".llewm/continuity"))
 	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("# Rules\n\nRun tests.\n"), 0o600); err != nil {

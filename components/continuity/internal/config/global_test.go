@@ -10,6 +10,8 @@ func TestGlobalDir(t *testing.T) {
 	t.Setenv("CONTINUITY_GLOBAL_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("APPDATA", t.TempDir())
+	// macOS os.UserConfigDir uses $HOME/Library/Application Support.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CONTINUITY_HOME", t.TempDir())
 	base, err := os.UserConfigDir()
 	if err != nil {
