@@ -37,9 +37,12 @@ func Environ() []string {
 	return env
 }
 
-// Command returns a Git command with args and the isolated environment.
+// Command returns a Git command with args and the isolated environment. On
+// Windows it also keeps Git from opening a console window when the caller has
+// none.
 func Command(ctx context.Context, args ...string) *exec.Cmd {
 	command := exec.CommandContext(ctx, "git", args...)
 	command.Env = Environ()
+	hideConsole(command)
 	return command
 }
