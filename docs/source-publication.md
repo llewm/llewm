@@ -132,4 +132,7 @@ python3 components/continuity/scripts/dependency-notices.py --check
 ```
 
 Run the check before packaging. Notice collection is deterministic preparation,
-not a claim that arbitrary future dependencies have been reviewed.
+not a claim that arbitrary future dependencies have been reviewed. The exact
+repository-local private-storage library is covered by the root MIT license;
+its external dependencies still contribute notices. Other module replacements
+remain refused until reviewed.
