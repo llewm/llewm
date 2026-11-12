@@ -1,6 +1,7 @@
 package privatestorage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,8 +107,12 @@ func TestWindowsRejectsReparsePoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(dir, link); err != nil {
+	if err := os.Symlink(dir, link); errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
+		// Junction coverage runs without this privilege; see
+		// TestWindowsRejectsJunctionWithoutSymlinkPrivilege.
 		t.Skipf("Windows symlink privilege unavailable: %v", err)
+	} else if err != nil {
+		t.Fatal(err)
 	}
 	if err := CheckDir(link); err == nil {
 		t.Fatal("directory link accepted")

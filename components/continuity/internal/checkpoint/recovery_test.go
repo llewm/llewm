@@ -3,10 +3,12 @@ package checkpoint
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/lease"
+	"github.com/llewm/llewm/components/privatestorage"
 )
 
 func TestRecoveryStoreStagesRedactedEnvelopeAndDeduplicatesRequest(t *testing.T) {
@@ -40,8 +42,17 @@ func TestRecoveryStoreStagesRedactedEnvelopeAndDeduplicatesRequest(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("recovery mode = %o, want 600", info.Mode().Perm())
+	}
+	staged, err := privatestorage.Open(store.path(first.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	privacy := privatestorage.CheckFile(staged)
+	staged.Close()
+	if privacy != nil {
+		t.Fatalf("recovery envelope is not private: %v", privacy)
 	}
 	loaded, err := store.Get(first.ID)
 	if err != nil {

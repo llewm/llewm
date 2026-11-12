@@ -1,6 +1,7 @@
 package checkpoint
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/dirsync"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
+	"github.com/llewm/llewm/components/privatestorage"
 )
 
 const (
@@ -128,7 +130,9 @@ func (s RecoveryStore) Stage(candidate Checkpoint, reconciliation ActionReconcil
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return RecoveryEnvelope{}, err
 	}
-	temporary, err := os.CreateTemp(dir, ".stage-*")
+	// The staged envelope is created owner-only (mode 0600, or a protected DACL
+	// on Windows) before any content is written; rename keeps that protection.
+	temporary, err := createPrivateStage(dir)
 	if err != nil {
 		return RecoveryEnvelope{}, err
 	}
@@ -139,10 +143,6 @@ func (s RecoveryStore) Stage(candidate Checkpoint, reconciliation ActionReconcil
 			_ = os.Remove(temporaryName)
 		}
 	}()
-	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
-		return RecoveryEnvelope{}, err
-	}
 	if _, err := temporary.Write(append(body, '\n')); err != nil {
 		temporary.Close()
 		return RecoveryEnvelope{}, err
@@ -162,6 +162,22 @@ func (s RecoveryStore) Stage(candidate Checkpoint, reconciliation ActionReconcil
 		return RecoveryEnvelope{}, err
 	}
 	return envelope, nil
+}
+
+// createPrivateStage exclusively creates a uniquely named private file in dir.
+func createPrivateStage(dir string) (*os.File, error) {
+	for range 16 {
+		var suffix [8]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return nil, err
+		}
+		file, err := privatestorage.Create(filepath.Join(dir, ".stage-"+hex.EncodeToString(suffix[:])))
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		return file, err
+	}
+	return nil, errors.New("cannot create a unique checkpoint recovery stage file")
 }
 
 func (s RecoveryStore) path(id string) string {

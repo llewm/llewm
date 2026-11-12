@@ -3,6 +3,7 @@ module github.com/llewm/llewm/components/orchestration
 go 1.25.0
 
 require (
+	github.com/llewm/llewm/components/privatestorage v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	golang.org/x/sys v0.41.0
 	modernc.org/sqlite v1.38.2
@@ -27,3 +28,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/llewm/llewm/components/privatestorage => ../privatestorage

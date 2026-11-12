@@ -641,7 +641,10 @@ go install github.com/llewm/llewm/components/action-control/cmd/action-control@0
 ```
 
 These commands passed on Linux/amd64 with Go 1.27.2 and `GOWORK=off` in an isolated
-output directory. An isolated Continuity project also passed init/doctor, checkpoint
+output directory. Commits that reference the shared private-storage library through
+a `replace` directive cannot be installed this way until that library is published;
+build them from a clean checkout instead (see
+[source publication](../../../docs/source-publication.md)). An isolated Continuity project also passed init/doctor, checkpoint
 dry-run/save, bootstrap recovery and exact readback. These checks do not establish
 native macOS/Windows or live-client behavior.
 `go install` puts binaries in `GOBIN`, or `GOPATH/bin` by default; inspect

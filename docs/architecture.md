@@ -11,6 +11,14 @@ the manual shared-work milestone: a separately started authenticated coordinator
 reviewed plan snapshots, claims, reassignment and stale-result reconciliation.
 It consumes public Continuity plan JSON and owns its own SQLite store; provider
 accounts and manually launched execution stay on each engineer's machines.
+The library module `github.com/llewm/llewm/components/privatestorage` is shared by
+Continuity and orchestration: it creates and verifies storage private to the
+current user (POSIX modes on Unix, protected owner-only DACLs on Windows), rejects
+reparse points and wrong object types, never repairs existing permissions, and
+provides OS file locks. Consumers reference it through a `replace` directive to
+`../privatestorage`, so checkout builds, `GOWORK=off` builds and packaging work
+from the repository; a remote `go install …@version` needs a published module
+version instead (see [source publication](source-publication.md)).
 GitHub supplies the canonical public module paths; Forgejo remains the source
 authority. Component version tags include their repository subdirectory, such as
 `components/continuity/v0.1.0-preview.1`. See [source publication](source-publication.md).
@@ -29,7 +37,8 @@ context without executing it.
 Its [architecture](../components/continuity/docs/architecture.md) describes the current
 implementation. [Orchestration](../components/orchestration/README.md) is now a sibling
 component for manual coordination. Automated execution and local LLM interoperability
-remain future capabilities. No shared runtime or library has been created speculatively.
+remain future capabilities. The only shared library is `components/privatestorage`,
+extracted once Continuity and orchestration both needed it; no shared runtime exists.
 
 Continuity is a curated state and retrieval layer, not a transcript-replay or model
 state restoration layer. Persistent records keep provenance and stable references;

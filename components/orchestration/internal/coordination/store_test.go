@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
+	"github.com/llewm/llewm/components/privatestorage"
 )
 
 type fixture struct {

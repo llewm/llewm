@@ -23,6 +23,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
+	"github.com/llewm/llewm/components/privatestorage"
 )
 
 // withCPUProfile records only this process, ending at the earlier of the
@@ -34,7 +35,7 @@ func withCPUProfile(path string, duration time.Duration, run func() error) (resu
 	if duration <= 0 || duration > 5*time.Minute {
 		return errors.New("profile duration must be greater than zero and at most 5m")
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := privatestorage.Create(path)
 	if err != nil {
 		return fmt.Errorf("create CPU profile: %w", err)
 	}

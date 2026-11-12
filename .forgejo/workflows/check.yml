@@ -13,6 +13,7 @@ jobs:
           - components/continuity
           - components/action-control
           - components/orchestration
+          - components/privatestorage
     defaults:
       run:
         working-directory: ${{ matrix.component }}
@@ -28,3 +29,7 @@ jobs:
       - run: go vet ./...
       - run: test -z "$(gofmt -l .)"
       - run: go build ./...
+      # Each module must also build outside the root workspace.
+      - run: GOWORK=off go build ./...
+      - if: matrix.component == 'components/continuity'
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p '*_test.py'
