@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,17 @@ const claudeLines = `{"type":"user","sessionId":"s1","cwd":"ROOT","timestamp":"2
 {"type":"assistant","sessionId":"s1","cwd":"ROOT","timestamp":"2026-10-03T10:00:01Z","message":{"id":"msg_1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_1","name":"mcp__continuity__continuity_work","input":{"q":"private"}}],"usage":{"input_tokens":2,"cache_creation_input_tokens":16000,"cache_read_input_tokens":21000,"output_tokens":200,"output_tokens_details":{"thinking_tokens":20}}}}
 {"type":"user","sessionId":"s1","cwd":"ROOT","timestamp":"2026-10-03T10:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"0123456789"}]}]}}
 `
+
+// jsonText escapes value for insertion inside a JSON string literal, so
+// Windows paths keep their backslashes.
+func jsonText(t *testing.T, value string) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded[1 : len(encoded)-1])
+}
 
 const codexLines = `{"timestamp":"2026-10-03T11:00:00Z","type":"session_meta","payload":{"id":"c1","cwd":"ROOT"}}
 {"timestamp":"2026-10-03T11:00:01Z","type":"turn_context","payload":{"model":"gpt-6-luna","cwd":"ROOT"}}
@@ -47,7 +59,7 @@ func TestIngestReadsUsageOnceAndResumes(t *testing.T) {
 	}
 	write := func(path, body string) {
 		t.Helper()
-		if err := os.WriteFile(path, []byte(strings.ReplaceAll(body, "ROOT", root)), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(strings.ReplaceAll(body, "ROOT", jsonText(t, root))), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -187,7 +199,7 @@ func TestIngestStopsBeforeAdvancingOnUsageDrift(t *testing.T) {
 	body := strings.ReplaceAll(`{"timestamp":"2026-10-05T08:00:00Z","type":"session_meta","payload":{"id":"drift","cwd":"ROOT"}}
 {"timestamp":"2026-10-05T08:00:01Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
 {"timestamp":"2026-10-05T08:00:02Z","type":"token_usage_record","payload":{"response_id":"bad","usage":{"input_tokens":10,"cached_input_tokens":20,"output_tokens":1}}}
-`, "ROOT", root)
+`, "ROOT", jsonText(t, root))
 	if err := os.WriteFile(filepath.Join(sessionDir, "rollout-2026-10-05T08-00-00-drift.jsonl"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

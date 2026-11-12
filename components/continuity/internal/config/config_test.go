@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestLoadRebasesAStoreRecordedAtAFormerRoot(t *testing.T) {
@@ -15,7 +17,8 @@ func TestLoadRebasesAStoreRecordedAtAFormerRoot(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := "[project]\nname = \"a\"\nroot = \"/old/a\"\n\n[storage]\ndatabase = \"/old/a/.llewm/continuity/continuity.db\"\n"
+	former := filepath.Join(t.TempDir(), "old", "a")
+	legacy := "[project]\nname = \"a\"\nroot = '" + former + "'\n\n[storage]\ndatabase = '" + filepath.Join(former, ".llewm", "continuity", "continuity.db") + "'\n"
 	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +38,9 @@ func TestLoadKeepsAnAbsoluteStoreOutsideTheFormerRoot(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	custom := "[project]\nroot = \"/old/a\"\n\n[storage]\ndatabase = \"/srv/state/continuity.db\"\n"
+	former := filepath.Join(t.TempDir(), "old", "a")
+	store := filepath.Join(t.TempDir(), "srv", "state", "continuity.db")
+	custom := "[project]\nroot = '" + former + "'\n\n[storage]\ndatabase = '" + store + "'\n"
 	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +48,7 @@ func TestLoadKeepsAnAbsoluteStoreOutsideTheFormerRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Storage.Database != "/srv/state/continuity.db" {
+	if cfg.Storage.Database != store {
 		t.Fatalf("custom store was rebased: %s", cfg.Storage.Database)
 	}
 }
@@ -89,7 +94,11 @@ func TestWriteDefaultKeepsContinuityHomeAbsolute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), filepath.Join(home, "continuity.db")) || !strings.Contains(string(content), filepath.Join(home, "backups")) {
+	var written Config
+	if _, err := toml.Decode(string(content), &written); err != nil {
+		t.Fatal(err)
+	}
+	if written.Storage.Database != filepath.Join(home, "continuity.db") || written.Backups.Dir != filepath.Join(home, "backups") {
 		t.Fatalf("CONTINUITY_HOME store was not absolute:\n%s", content)
 	}
 }

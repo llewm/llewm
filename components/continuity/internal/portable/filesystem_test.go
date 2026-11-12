@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func TestBundleDirectoryPublicationIsAtomicAndNeverOverwrites(t *testing.T) {
@@ -42,9 +44,7 @@ func TestBundleDirectoryReaderRejectsSymlinkedFiles(t *testing.T) {
 	if err := os.WriteFile(manifestSource, bundle.ManifestBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(manifestSource, filepath.Join(directory, "manifest.json")); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, manifestSource, filepath.Join(directory, "manifest.json"))
 	if err := os.WriteFile(filepath.Join(directory, "records.jsonl"), bundle.RecordsBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}

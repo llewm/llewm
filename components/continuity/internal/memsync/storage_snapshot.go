@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/llewm/llewm/components/continuity/internal/dirsync"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
@@ -340,5 +341,5 @@ func syncCloneParent(root *os.Root) error {
 		return err
 	}
 	defer file.Close()
-	return file.Sync()
+	return dirsync.Handle(file)
 }

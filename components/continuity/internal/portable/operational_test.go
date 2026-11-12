@@ -414,6 +414,14 @@ func TestPortableTextRedactsEveryRecordedProjectLocation(t *testing.T) {
 	}
 }
 
+func TestPortableTextRedactsRecordedMixedSeparatorLocation(t *testing.T) {
+	recorded := `C:\work\app/nested-old`
+	got := portableText(`edited C:\work\app/nested-old\b.go and C:\work\app/nested-old/`, recorded)
+	if got != `edited [PROJECT_ROOT]\b.go and [PROJECT_ROOT]/` {
+		t.Fatalf("portableText = %q", got)
+	}
+}
+
 func TestWorkspaceSyncWatermarksRoundTrip(t *testing.T) {
 	ctx, db, projectID := operationalProject(t, "workspace")
 	lineage := "lineage:0123456789abcdef0123456789abcdef"

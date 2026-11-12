@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +38,12 @@ func TestRunDistinguishesValidAndInputError(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"validate-commit", "--policy", "missing", "--message", message}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "no such file") {
-		t.Fatalf("error code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	missing := filepath.Join(t.TempDir(), "missing")
+	_, openErr := os.Open(missing)
+	if !errors.Is(openErr, fs.ErrNotExist) {
+		t.Fatalf("missing fixture open error = %v", openErr)
+	}
+	if code := run([]string{"validate-commit", "--policy", missing, "--message", message}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), openErr.Error()) {
+		t.Fatalf("error code=%d stdout=%s stderr=%s want %q", code, stdout.String(), stderr.String(), openErr.Error())
 	}
 }

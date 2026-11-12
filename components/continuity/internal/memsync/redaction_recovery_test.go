@@ -124,7 +124,13 @@ func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		spec.Payload = []byte(strings.ReplaceAll(strings.ReplaceAll(string(spec.Payload), root, "[PROJECT_ROOT]"), b.project, "[PROJECT_ID]"))
+		// Payloads are JSON: replace the root as it is encoded there, which
+		// differs from the raw path where it holds backslashes (Windows).
+		encodedRoot, err := json.Marshal(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.Payload = []byte(strings.ReplaceAll(strings.ReplaceAll(string(spec.Payload), string(encodedRoot[1:len(encodedRoot)-1]), "[PROJECT_ROOT]"), b.project, "[PROJECT_ID]"))
 		d, err := portable.EncodeEnvelope(spec)
 		if err != nil {
 			t.Fatal(err)

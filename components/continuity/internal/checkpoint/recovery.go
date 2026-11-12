@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
+	"github.com/llewm/llewm/components/continuity/internal/dirsync"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
@@ -256,14 +257,7 @@ func (s RecoveryStore) Remove(id string) error {
 	return syncRecoveryDirectory(s.directory())
 }
 
-func syncRecoveryDirectory(dir string) error {
-	file, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return file.Sync()
-}
+func syncRecoveryDirectory(dir string) error { return dirsync.Path(dir) }
 
 func recoveryDigest(envelope RecoveryEnvelope) (string, error) {
 	envelope.Digest = ""

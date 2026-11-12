@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func TestCredentialBusDiscovery(t *testing.T) {
@@ -51,9 +53,7 @@ func TestCredentialBusDiscovery(t *testing.T) {
 		t.Fatal("accepted regular file as bus")
 	}
 	os.Remove(socket)
-	if err := os.Symlink("/missing", socket); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, "/missing", socket)
 	if got := credentialSessionEnv(env); !slices.Equal(got, env) {
 		t.Fatal("accepted symlink as bus")
 	}

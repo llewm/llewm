@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func TestBlockPublicationAndIncompleteScan(t *testing.T) {
@@ -48,9 +49,7 @@ func TestBlockPublicationAndIncompleteScan(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, base, "provider-conflict.block"), block.Bytes, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(directory, base, block.Hash+".block"), filepath.Join(directory, base, Hash("symlink")+".block")); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, filepath.Join(directory, base, block.Hash+".block"), filepath.Join(directory, base, Hash("symlink")+".block"))
 	scan, err := ScanBlocks(context.Background(), root, lineage)
 	if err != nil || len(scan.Blocks) != 1 || scan.Pending != 2 || scan.Invalid != 1 || !bytes.Equal(scan.Blocks[0].Bytes, block.Bytes) {
 		t.Fatalf("unsafe or incomplete scan: %+v %v", scan, err)
