@@ -3,90 +3,118 @@
 package memsync
 
 import (
+	"fmt"
 	"os/exec"
-	"unsafe"
+	"sync"
+	"syscall"
 
 	"golang.org/x/sys/windows"
 )
 
-// stopGently makes canceling command end Git and every process it started.
+// processTree is the job object holding Git and every process it starts.
 // Windows has no SIGTERM or process-group signal, and the default cancellation
 // kills only git.exe, orphaning transport helpers (git-remote-https, ssh) that
-// keep the remote connection and Git's output open. Git is killed first so it
-// starts nothing new, then its descendants are terminated.
-func stopGently(command *exec.Cmd) {
-	command.Cancel = func() error {
-		err := command.Process.Kill()
-		terminateDescendants(uint32(command.Process.Pid))
+// keep the remote connection and Git's output open.
+//
+// Membership is tracked by the kernel, never by process ID: a descendant joins
+// the job when it is created, stays in it after its parent exits, and an
+// unrelated process cannot join it however IDs are recycled. Git starts
+// suspended and runs only once it is in the job, so nothing it starts escapes.
+type processTree struct {
+	command *exec.Cmd
+	mu      sync.Mutex
+	job     windows.Handle // zero when no job holds the command
+}
+
+// stopGently makes canceling command terminate Git and all its descendants.
+func stopGently(command *exec.Cmd) *processTree {
+	tree := &processTree{command: command}
+	command.Cancel = tree.terminate
+	return tree
+}
+
+// start starts command suspended, assigns it to a new job and then resumes it.
+// Where no job can be created or assigned, Git still runs and cancellation
+// falls back to killing git.exe alone, as before. A Git that cannot be resumed
+// is killed and reaped rather than left suspended.
+func (t *processTree) start(command *exec.Cmd) error {
+	if t == nil {
+		return command.Start()
+	}
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return command.Start()
+	}
+	if command.SysProcAttr == nil {
+		command.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	command.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	if err := command.Start(); err != nil {
+		windows.CloseHandle(job)
 		return err
 	}
-}
-
-// terminateDescendants terminates the processes descending from root, found
-// by parent process ID. exec.Cmd still holds root's handle, so its ID cannot be
-// reused; a descendant must also have started no earlier than root, so a
-// recycled ID of an exited intermediate process is never followed to an
-// unrelated older process. A second pass catches a helper started by a
-// descendant while the first pass ran. Failures are ignored: Git's own exit
-// and WaitDelay still bound the command.
-func terminateDescendants(root uint32) {
-	rootStart, ok := processStart(root)
-	if !ok {
-		return
-	}
-	for pass := 0; pass < 2; pass++ {
-		for _, pid := range descendants(root) {
-			handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-			if err != nil {
-				continue
-			}
-			var creation, exit, kernel, user windows.Filetime
-			if windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user) == nil && creation.Nanoseconds() >= rootStart {
-				_ = windows.TerminateProcess(handle, 1)
-			}
-			windows.CloseHandle(handle)
+	// exec.Cmd holds the process handle, so this ID names Git until it is reaped.
+	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|processSuspendResume, false, uint32(command.Process.Pid))
+	if err == nil {
+		defer windows.CloseHandle(process)
+		if windows.AssignProcessToJobObject(job, process) == nil {
+			t.mu.Lock()
+			t.job = job
+			t.mu.Unlock()
+		} else {
+			windows.CloseHandle(job)
 		}
+		err = resumeProcess(process)
+	} else {
+		windows.CloseHandle(job)
 	}
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		t.release()
+		return fmt.Errorf("start Git: resume suspended process: %w", err)
+	}
+	return nil
 }
 
-// processStart returns the creation time of pid in nanoseconds.
-func processStart(pid uint32) (int64, bool) {
-	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-	if err != nil {
-		return 0, false
-	}
-	defer windows.CloseHandle(handle)
-	var creation, exit, kernel, user windows.Filetime
-	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
-		return 0, false
-	}
-	return creation.Nanoseconds(), true
-}
-
-// descendants lists the IDs of every process below root in one snapshot.
-func descendants(root uint32) []uint32 {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
-	if err != nil {
+// terminate ends every process in the job, or git.exe alone without one.
+func (t *processTree) terminate() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.job != 0 && windows.TerminateJobObject(t.job, 1) == nil {
 		return nil
 	}
-	defer windows.CloseHandle(snapshot)
-	children := map[uint32][]uint32{}
-	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
-	for err = windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
-		if entry.ProcessID != entry.ParentProcessID {
-			children[entry.ParentProcessID] = append(children[entry.ParentProcessID], entry.ProcessID)
-		}
+	return t.command.Process.Kill()
+}
+
+// release closes the job once Git is reaped. Like a process group on unix, a
+// normal exit leaves any remaining member running; only cancellation ends them.
+func (t *processTree) release() {
+	if t == nil {
+		return
 	}
-	var found []uint32
-	seen := map[uint32]bool{root: true}
-	for queue := []uint32{root}; len(queue) > 0; queue = queue[1:] {
-		for _, child := range children[queue[0]] {
-			if !seen[child] {
-				seen[child] = true
-				found = append(found, child)
-				queue = append(queue, child)
-			}
-		}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.job != 0 {
+		windows.CloseHandle(t.job)
+		t.job = 0
 	}
-	return found
+}
+
+// processSuspendResume is PROCESS_SUSPEND_RESUME, which x/sys does not name.
+const processSuspendResume = 0x0800
+
+var procNtResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
+
+// resumeProcess resumes every thread of the suspended process through its own
+// handle. It reads no thread IDs, so a recycled ID cannot resume another
+// process, and it avoids a system-wide thread snapshot on every Git start.
+func resumeProcess(process windows.Handle) error {
+	if err := procNtResumeProcess.Find(); err != nil {
+		return err
+	}
+	if status, _, _ := procNtResumeProcess.Call(uintptr(process)); status != 0 {
+		return windows.NTStatus(status)
+	}
+	return nil
 }

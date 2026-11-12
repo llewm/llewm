@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -19,7 +18,7 @@ import (
 // goroutine, process, descriptor or object cache survives the refresh.
 type gitCommitBatch struct {
 	repo   git
-	cmd    *exec.Cmd
+	cmd    *gitCommand
 	cancel context.CancelFunc
 	input  io.WriteCloser
 	pipe   io.ReadCloser
