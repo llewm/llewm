@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -159,9 +160,7 @@ func TestTransportPublicationRefusesSymlinksReplacementAndWrongPaths(t *testing.
 	if err := os.WriteFile(outside, []byte("private"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(directory, "link")); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, outside, filepath.Join(directory, "link"))
 	if _, err := ReadFile(root, "link", 100); err == nil {
 		t.Fatal("followed external symlink")
 	}

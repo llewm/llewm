@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func bundle(t *testing.T, lineage, id string) portable.Bundle {
@@ -187,9 +188,7 @@ func TestPairingFilePrivacyAndNoReplacement(t *testing.T) {
 		t.Fatalf("pairing roundtrip: %v", err)
 	}
 	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(path, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, path, link)
 	if _, err := ReadPairing(link); err == nil {
 		t.Fatal("accepted symlink")
 	}

@@ -14,6 +14,9 @@ func TestClientPermissionsPrintWriteAndDoctor(t *testing.T) {
 	testProject(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// os.UserHomeDir reads USERPROFILE on Windows; isolate it too so the test
+	// never inspects or writes the real user's client settings.
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	runCLI(t, "", "init")
 	recordProcedureFile(t, installRunbook("local-install", map[string]any{"id": "build", "description": "Build", "argv_template": []string{"go", "build", "-o", "{{bin}}.new", "./cmd/llewm"}}))

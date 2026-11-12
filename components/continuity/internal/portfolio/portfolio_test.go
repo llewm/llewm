@@ -257,6 +257,7 @@ func TestPortfolioPinFailuresAndIndependentEndpointFailures(t *testing.T) {
 func TestPortfolioCatalogValidationAndAtomicEdits(t *testing.T) {
 	isolated(t)
 	store := Store{Directory: filepath.Join(t.TempDir(), "config")}
+	absolute := filepath.Join(t.TempDir(), "absolute") // platform-absolute local Git path
 	if c, err := store.Load(); err != nil || c.Version != 1 {
 		t.Fatal(c, err)
 	}
@@ -264,7 +265,7 @@ func TestPortfolioCatalogValidationAndAtomicEdits(t *testing.T) {
 		t.Fatal("read created configuration")
 	}
 	if _, err := store.Update(func(c *Catalog) error {
-		c.Destinations = []Destination{{Kind: "git", Name: "private", Remote: "/absolute/private.git"}}
+		c.Destinations = []Destination{{Kind: "git", Name: "private", Remote: filepath.Join(absolute, "private.git")}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -285,7 +286,7 @@ func TestPortfolioCatalogValidationAndAtomicEdits(t *testing.T) {
 			t.Fatalf("accepted unsafe remote %q", remote)
 		}
 	}
-	for _, remote := range []string{"/absolute/repo.git", "git@host:group/repo.git", "ssh://git@host/group/repo.git", "https://host/group/repo.git"} {
+	for _, remote := range []string{filepath.Join(absolute, "repo.git"), "git@host:group/repo.git", "ssh://git@host/group/repo.git", "https://host/group/repo.git"} {
 		if err := ValidateRemote(remote); err != nil {
 			t.Fatalf("rejected remote %q: %v", remote, err)
 		}
@@ -294,7 +295,7 @@ func TestPortfolioCatalogValidationAndAtomicEdits(t *testing.T) {
 	p.Routes = []Route{{"private", false}}
 	q := p
 	q.Name, q.Root, q.ProjectID = "q", t.TempDir(), "project-other"
-	if (Catalog{Version: 1, Destinations: []Destination{{Kind: "git", Name: "private", Remote: "/absolute/private.git"}}, Projects: []Project{p, q}}).Validate() == nil {
+	if (Catalog{Version: 1, Destinations: []Destination{{Kind: "git", Name: "private", Remote: filepath.Join(absolute, "private.git")}}, Projects: []Project{p, q}}).Validate() == nil {
 		t.Fatal("same lineage presented as independent project")
 	}
 	if err := os.WriteFile(filepath.Join(store.Directory, "portfolio.lock"), nil, 0600); err != nil {

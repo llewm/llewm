@@ -414,16 +414,18 @@ func TestInitRefusesACloneOfAnotherRemote(t *testing.T) {
 }
 
 func TestDefaultCloneIsStablePerRemote(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/data")
+	data := filepath.Join(t.TempDir(), "data")
+	t.Setenv("XDG_DATA_HOME", data)
+	prefix := filepath.Join(data, "llewm", "memory", "llewm-memory-")
 	a, _ := DefaultClone("git@github.com:org/llewm-memory.git")
 	b, _ := DefaultClone("https://github.com/org/llewm-memory.git")
-	if !strings.HasPrefix(a, "/data/llewm/memory/llewm-memory-") || a == b {
+	if !strings.HasPrefix(a, prefix) || a == b {
 		t.Fatalf("clones: %s %s", a, b)
 	}
 	if again, _ := DefaultClone("git@github.com:org/llewm-memory.git"); again != a {
 		t.Fatalf("unstable clone path: %s %s", a, again)
 	}
-	if scp, _ := DefaultClone("flux@host:llewm-memory.git"); !strings.HasPrefix(scp, "/data/llewm/memory/llewm-memory-") {
+	if scp, _ := DefaultClone("flux@host:llewm-memory.git"); !strings.HasPrefix(scp, prefix) {
 		t.Fatalf("scp-like remote clone: %s", scp)
 	}
 }
@@ -492,8 +494,10 @@ func TestRewrittenRemoteIsRefused(t *testing.T) {
 	remote, other := bareRemote(t), bareRemote(t)
 	m := newMachine(t, "a", remote)
 	global := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(global, []byte("[url \""+other+"\"]\n\tinsteadOf = "+remote+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	// Let Git write the rule: it escapes backslashes in Windows paths, which a
+	// hand-written section name or value would turn into escape sequences.
+	if output, err := exec.Command("git", "config", "--file", global, "url."+other+".insteadOf", remote).CombinedOutput(); err != nil {
+		t.Fatalf("write rewrite rule: %v: %s", err, output)
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", global)
 	m.decide(t, "decision-a", "Rewritten")

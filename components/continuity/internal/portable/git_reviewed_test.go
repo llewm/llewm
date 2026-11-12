@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func TestGitReviewedDirectoryPartitionsAndRoundTripsBundle(t *testing.T) {
@@ -97,9 +99,7 @@ func TestGitReviewedRootMustBeRealProjectSubdirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(project, "linked")
-	if err := os.Symlink(real, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, real, link)
 	if err := validateGitReviewedRoot(project, link); err == nil || !strings.Contains(err.Error(), "real directory") {
 		t.Fatalf("symlinked root accepted: %v", err)
 	}

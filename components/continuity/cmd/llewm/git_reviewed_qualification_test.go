@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,28 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 )
+
+// claimsJSON encodes one caller-asserted outcome claim, escaping text such as
+// Windows paths that would otherwise be invalid inside a JSON string.
+func claimsJSON(t *testing.T, text string) string {
+	t.Helper()
+	body, err := json.Marshal([]map[string]string{{"kind": "outcome", "text": text, "authority": "caller_asserted"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// jsonEscaped returns text as it appears inside a JSON string, so leak checks
+// also match escaped spellings such as Windows backslashes.
+func jsonEscaped(t *testing.T, text string) []byte {
+	t.Helper()
+	body, err := json.Marshal(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body[1 : len(body)-1]
+}
 
 func TestPortableMemoryGitReviewedCLIWorkflow(t *testing.T) {
 	t.Setenv("CONTINUITY_HOME", "")
@@ -24,7 +47,7 @@ func TestPortableMemoryGitReviewedCLIWorkflow(t *testing.T) {
 		runCLI(t, "", "--project-root", root, "init")
 		runCLI(t, "", "--project-root", root, "sync", "init", "--lineage", lineage)
 	}
-	runCLI(t, "", "--project-root", source, "narrative", "record", "--id", "git-reviewed-narrative", "--title", "Reviewed export", "--trigger", "manual", "--claims-json", `[{"kind":"outcome","text":"Private source `+source+` token=git-profile-secret.","authority":"caller_asserted"}]`)
+	runCLI(t, "", "--project-root", source, "narrative", "record", "--id", "git-reviewed-narrative", "--title", "Reviewed export", "--trigger", "manual", "--claims-json", claimsJSON(t, "Private source "+source+" token=git-profile-secret."))
 	runCLI(t, "", "--project-root", collision, "narrative", "record", "--id", "git-reviewed-narrative", "--title", "Conflicting reviewed export", "--trigger", "manual", "--claims-json", `[{"kind":"outcome","text":"Same identity with different content.","authority":"caller_asserted"}]`)
 	exportRoot := filepath.Join(source, "reviewed-memory")
 	if err := os.Mkdir(exportRoot, 0o700); err != nil {
@@ -42,6 +65,7 @@ func TestPortableMemoryGitReviewedCLIWorkflow(t *testing.T) {
 	if err != nil || string(status) != "?? reviewed-memory/\n" {
 		t.Fatalf("export was not left as explicit untracked review material: status=%q err=%v", status, err)
 	}
+	escapedSource := jsonEscaped(t, source)
 	if err := filepath.WalkDir(exported.Directory, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
@@ -50,7 +74,7 @@ func TestPortableMemoryGitReviewedCLIWorkflow(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if bytes.Contains(body, []byte(source)) || bytes.Contains(body, []byte("git-profile-secret")) || strings.HasSuffix(path, "continuity.db") || strings.HasSuffix(path, "continuity.db-wal") || strings.HasSuffix(path, "continuity.db-shm") {
+		if bytes.Contains(body, []byte(source)) || bytes.Contains(body, escapedSource) || bytes.Contains(body, []byte("git-profile-secret")) || strings.HasSuffix(path, "continuity.db") || strings.HasSuffix(path, "continuity.db-wal") || strings.HasSuffix(path, "continuity.db-shm") {
 			t.Fatalf("Git-reviewed export leaked private or live-store data in %s", path)
 		}
 		return nil

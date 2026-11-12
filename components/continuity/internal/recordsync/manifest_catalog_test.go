@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func TestManifestCatalogUnionsIndependentSnapshotsAndSharesReads(t *testing.T) {
@@ -111,6 +112,9 @@ func TestManifestCatalogRejectsMissingDamagedAndUnexpectedMetadata(t *testing.T)
 					if err == nil {
 						err = os.Symlink(filepath.Base(parent)+"-real", filepath.Join(directory, parent))
 					}
+				}
+				if symlinktest.Unavailable(err) {
+					t.Skipf("Windows symlink privilege unavailable: %v", err)
 				}
 				if err != nil {
 					t.Fatal(err)

@@ -37,9 +37,10 @@ func Environ() []string {
 	return env
 }
 
-// Command returns a Git command with args and the isolated environment.
+// Command returns a Git command with args and the isolated environment, after
+// any platform-required Git options (see platformArgs).
 func Command(ctx context.Context, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, "git", args...)
+	command := exec.CommandContext(ctx, "git", append(append([]string(nil), platformArgs...), args...)...)
 	command.Env = Environ()
 	return command
 }

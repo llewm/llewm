@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/llewm/llewm/components/continuity/internal/dirsync"
 )
 
 // WorkspaceFileName is the manifest inside a workspace folder's state directory.
@@ -354,7 +356,7 @@ func ChangeWorkspaceMode(root, from, to, reviewedDigest string) (Workspace, erro
 		return Workspace{}, err
 	}
 	defer directory.Close()
-	if err := directory.Sync(); err != nil {
+	if err := dirsync.Handle(directory); err != nil {
 		return Workspace{}, err
 	}
 	return *workspace, nil

@@ -232,12 +232,77 @@ func TestCloneStorageLockRemainsHeldAcrossRetirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	if err := os.Rename(source, retained); err != nil {
+	err = os.Rename(source, retained)
+	if !parentRenameKeepsOpenFiles {
+		// Windows: a writer holding any file inside the clone fences the
+		// rename itself, which retireOriginalClone relies on after releasing
+		// its own lock.
+		if err == nil {
+			t.Fatal("rename succeeded while a file inside the clone was open")
+		}
+		if _, statErr := os.Stat(filepath.Join(source, ".git")); statErr != nil {
+			t.Fatalf("refused retirement changed the source: %v", statErr)
+		}
+		return
+	}
+	if err != nil {
 		t.Fatalf("held migration lock blocked retirement: %v", err)
 	}
 	if other, err := tryLockFile(filepath.Join(retained, ".git", "continuity-sync.lock")); err == nil {
 		other.Close()
 		t.Fatal("retirement released legacy lock")
+	}
+}
+
+func TestRetireOriginalCloneVerifiesWhereLockCannotBeHeld(t *testing.T) {
+	ctx, p, remote, access, source := cloneStorageFixture(t)
+	r := receiptForClone(p, remote, source)
+	parent, err := recordsync.OpenRoot(filepath.Dir(p.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	retire := func() error {
+		lock, err := tryLockFile(filepath.Join(p.Root, ".git", "continuity-sync.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Close()
+		return retireOriginalClone(ctx, parent, p, lock, r, remote, access)
+	}
+	// A clone that changed after preparation is restored where the lock had
+	// to be released; POSIX keeps the lock held, so nothing can change it.
+	repo := git{Dir: p.Root, Identity: []string{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"}}
+	if _, err := repo.run(ctx, "commit", "--quiet", "--allow-empty", "-m", "written after preparation"); err != nil {
+		t.Fatal(err)
+	}
+	err = retire()
+	if parentRenameKeepsOpenFiles {
+		if err != nil {
+			t.Fatalf("retire with lock held: %v", err)
+		}
+		if err := os.Rename(p.Retained, p.Root); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err == nil || !strings.Contains(err.Error(), "changed while it was retired") {
+			t.Fatalf("changed clone was retired: %v", err)
+		}
+		if !workingCloneAt(p.Root) {
+			t.Fatal("changed clone was not restored to its original path")
+		}
+		if _, err := os.Lstat(p.Retained); !os.IsNotExist(err) {
+			t.Fatalf("retained path left behind: %v", err)
+		}
+	}
+	if _, err := repo.run(ctx, "reset", "--quiet", "--hard", "HEAD~1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := retire(); err != nil {
+		t.Fatalf("retire unchanged clone: %v", err)
+	}
+	if !workingCloneAt(p.Retained) || workingCloneAt(p.Root) {
+		t.Fatal("unchanged clone was not retired")
 	}
 }
 

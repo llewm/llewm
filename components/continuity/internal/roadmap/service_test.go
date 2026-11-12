@@ -13,6 +13,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
 	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
 
@@ -423,9 +424,7 @@ func TestRoadmapCoverageObservesSourcePathTypesWithoutReturningFileBytes(t *test
 	if err := os.WriteFile(filepath.Join(root, "docs", "present.md"), []byte("do not return this content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("present.md", filepath.Join(root, "docs", "link.md")); err != nil {
-		t.Fatal(err)
-	}
+	symlinktest.Create(t, "present.md", filepath.Join(root, "docs", "link.md"))
 	for _, node := range []Node{
 		{ProjectID: projectID, ID: "a", Title: "Present", Status: "active", SourcePath: "docs/present.md", SourceRef: "HEAD"},
 		{ProjectID: projectID, ID: "b", Title: "Missing", Status: "active", SourcePath: "docs/missing.md"},
