@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/permtest"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
@@ -187,14 +188,15 @@ func TestPairingFilePrivacyAndNoReplacement(t *testing.T) {
 	if err != nil || got.Secret != server.Pairing().Secret {
 		t.Fatalf("pairing roundtrip: %v", err)
 	}
-	link := filepath.Join(t.TempDir(), "link")
-	symlinktest.Create(t, path, link)
-	if _, err := ReadPairing(link); err == nil {
-		t.Fatal("accepted symlink")
-	}
-	if err := os.Chmod(path, 0644); err != nil {
-		t.Fatal(err)
-	}
+	// A subtest, so a Windows symlink-privilege skip leaves the exposure check running.
+	t.Run("symlink", func(t *testing.T) {
+		link := filepath.Join(t.TempDir(), "link")
+		symlinktest.Create(t, path, link)
+		if _, err := ReadPairing(link); err == nil {
+			t.Fatal("accepted symlink")
+		}
+	})
+	permtest.Expose(t, path)
 	if _, err := ReadPairing(path); err == nil {
 		t.Fatal("accepted exposed pairing credential")
 	}

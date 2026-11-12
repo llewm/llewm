@@ -55,6 +55,7 @@ are separate components.
 | [Continuity](components/continuity/README.md) | Implemented preview; native macOS/Windows qualification pending | Session bootstrap, checkpoints, activity ledger, audits, and MCP |
 | [Action Control](components/action-control/README.md) | Standalone validator implemented | Versioned Git commit-message policy validation; no execution or hook installation |
 | [Orchestration](components/orchestration/README.md) | Manual coordination pilot; local fixture-qualified | Collaborative plans, authenticated claims, reassignment and stale-result review |
+| [Private storage](components/privatestorage/README.md) | Shared library | Owner-private files and directories (POSIX modes, Windows DACLs), reparse rejection and OS locks |
 
 See the
 [vision](docs/vision.md), [architecture](docs/architecture.md), and [roadmap](docs/roadmap.md).
@@ -104,11 +105,16 @@ go fmt ./...
 go test ./...
 go vet ./...
 go build -o ../../dist/llewm-orchestrate ./cmd/llewm-orchestrate
+
+cd ../privatestorage
+go fmt ./...
+go test ./...
+go vet ./...
 ```
 
 Alternatively, with [Task](https://taskfile.dev/) installed, run `task check` and
 `task build` from the repository root. Some distributions package the executable
-as `go-task`. Root tasks dispatch to all three component modules; there is no root Go
+as `go-task`. Root tasks dispatch to all four component modules; there is no root Go
 module. Build output goes in root `dist/`.
 
 ## Repository layout
@@ -116,6 +122,7 @@ module. Build output goes in root `dist/`.
 - `components/continuity/`: Continuity's Go module, tests, schemas, plugins, and documentation.
 - `components/action-control/`: Action Control's independent Go module and validator.
 - `components/orchestration/`: the independent manual team coordinator and client.
+- `components/privatestorage/`: the private-storage library shared by Continuity and orchestration.
 - `docs/`: Llewm-wide vision, architecture, and roadmap.
 - `AGENTS.md` and `CLAUDE.md`: project-wide development guidance.
 - `go.work`, `Taskfile.yml`, and `.forgejo/workflows/`: coordinated local and CI entry points.

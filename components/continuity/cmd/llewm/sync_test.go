@@ -17,6 +17,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
+	"github.com/llewm/llewm/components/privatestorage"
 )
 
 func TestSyncPublicationCLIAndMCP(t *testing.T) {
@@ -88,8 +89,17 @@ func TestCPUProfileBoundsAndFileSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm()&0o077 != 0 || info.Size() == 0 {
+	if err != nil || info.Size() == 0 {
 		t.Fatalf("profile file: info=%v err=%v", info, err)
+	}
+	profile, err := privatestorage.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privacy := privatestorage.CheckFile(profile)
+	profile.Close()
+	if privacy != nil {
+		t.Fatalf("profile file is not private: %v", privacy)
 	}
 	if out, err := exec.Command("go", "tool", "pprof", "-top", path).CombinedOutput(); err != nil {
 		t.Fatalf("read profile: %v %s", err, out)

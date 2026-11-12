@@ -6,6 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/google/jsonschema-go v0.4.3
+	github.com/llewm/llewm/components/privatestorage v0.0.0
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/segmentio/encoding v0.5.4
@@ -37,3 +38,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/llewm/llewm/components/privatestorage => ../privatestorage
