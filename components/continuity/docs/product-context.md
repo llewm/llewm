@@ -150,7 +150,7 @@ The initial product is:
 The product should work without a cloud account, database server, local model, or container runtime. Broad adoption should come through Codex and Claude Code plugins/hooks plus generic MCP, with deeper API/client integrations later.
 
 `llewm log` shows Git commit metadata with current commit-linked Llewm narratives,
-using the same section rendering as narrative-generated Git notes. It works when
+using section rendering from the canonical narrative claims. It works when
 notes were never written; commits without a narrative show their Git metadata
 only. Use `-n` to limit commits, an optional revision to choose the starting
 commit, and `--repo` to select a workspace member. Git notes are not read by this

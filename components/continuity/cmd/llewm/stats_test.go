@@ -58,7 +58,7 @@ excluded          1      1     +2       -0   +2
 	if got := runCLI(t, "", "stats", "code", "--by", "plan-item"); !strings.Contains(got, "code-plan/main Main        1      1     +3       -0   +3") || !strings.Contains(got, "(no record)") {
 		t.Fatalf("by plan item:\n%s", got)
 	}
-	runCLI(t, "", "narrative", "record", "--commit", code, "--no-note", "--title", "Main", "--creator", "ada",
+	runCLI(t, "", "narrative", "record", "--commit", code, "--title", "Main", "--creator", "ada",
 		"--claims-json", `[{"kind":"outcome","text":"Main","authority":"caller_asserted"},{"kind":"intent","text":"Start","authority":"caller_asserted"},{"kind":"verification","text":"None","authority":"caller_asserted"},{"kind":"limitation","text":"None","authority":"caller_asserted"}]`,
 		"--anchors-json", `[{"kind":"task","target":"code-task","authority":"caller_asserted"}]`)
 	if got := runCLI(t, "", "stats", "code", "--by", "task"); !strings.Contains(got, "code-task          1      1     +3") {

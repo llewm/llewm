@@ -277,7 +277,7 @@ func TestParseReadsRenderedCommitNotes(t *testing.T) {
 		{Kind: "limitation", Text: "None.", Authority: "caller_asserted"},
 		{Kind: "note", Text: "Aside.", Authority: "caller_asserted"},
 	}
-	parsed, err := Parse(worknarrative.RenderNote(commit, worknarrative.Record{Title: "Change 2026-10-01", Claims: claims}), commit)
+	parsed, err := Parse(worknarrative.RenderCommitNarrative(commit, worknarrative.Record{Title: "Change 2026-10-01", Claims: claims}), commit)
 	if err != nil {
 		t.Fatal(err)
 	}

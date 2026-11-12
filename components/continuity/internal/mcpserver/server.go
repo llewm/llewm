@@ -375,7 +375,6 @@ type NarrativeRecordInput struct {
 	CreatorInvocationID string                 `json:"creator_invocation_id,omitempty"`
 	SupersedesID        string                 `json:"supersedes_id,omitempty"`
 	Commit              string                 `json:"commit,omitempty" jsonschema:"needs outcome/intent/verification/limitation"`
-	SkipNote            bool                   `json:"skip_note,omitempty"`
 	Repo                string                 `json:"repo,omitempty" jsonschema:"commit repository"`
 }
 
@@ -991,7 +990,7 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		page, err := application.History.Show(ctx, application.ProjectID, input.Refs, input.MaxBytes)
 		return nil, page, err
 	})
-	addWriteTool(server, application, &mcp.Tool{Name: "continuity_narrative_record", Description: "Record ordered claims/anchors; commit also writes its Git note."}, func(ctx context.Context, _ *mcp.CallToolRequest, input NarrativeRecordInput) (*mcp.CallToolResult, Receipt, error) {
+	addWriteTool(server, application, &mcp.Tool{Name: "continuity_narrative_record", Description: "Record canonical claims and anchors; commit adds source identity without modifying Git."}, func(ctx context.Context, _ *mcp.CallToolRequest, input NarrativeRecordInput) (*mcp.CallToolResult, Receipt, error) {
 		from, err := optionalRFC3339(input.OccurredFrom)
 		if err != nil {
 			return nil, Receipt{}, fmt.Errorf("occurred_from: %w", err)
@@ -1004,13 +1003,16 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 		var receipt Receipt
 		if input.Commit == "" {
 			record, err := application.Narratives.Append(ctx, value)
-			receipt = narrativeReceipt(worknarrative.RecordResult{Record: record})
+			receipt = narrativeReceipt(record)
 			if err != nil {
 				return nil, receipt, err
 			}
 		} else {
-			record, note, err := application.Narratives.RecordCommit(ctx, value, input.Commit, input.Repo, input.SkipNote)
-			receipt = narrativeReceipt(worknarrative.RecordResult{Record: record, Note: &note})
+			record, err := application.Narratives.RecordCommit(ctx, value, input.Commit, input.Repo)
+			receipt = narrativeReceipt(record)
+			if len(record.Anchors) > 0 {
+				receipt.Commit = record.Anchors[0].Target
+			}
 			if err != nil {
 				return nil, receipt, err
 			}

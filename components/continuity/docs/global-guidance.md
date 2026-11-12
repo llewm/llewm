@@ -144,7 +144,7 @@ rules (built in)":
   after checking cleanliness, unique commits, and live writers.
 - `memory-repository` (only when `[sync]` names a memory repository): never edit,
   commit to, rebase, reset, or force-push the memory clone, which the rule names
-  by path; its automatic commits need no Git note or work narrative.
+  by path; its automatic commits need no work narrative.
 
 Do not copy these rules into `AGENTS.md`: the bootstrap already carries them, so
 copies cost bootstrap budget twice and drift from the behavior they describe.

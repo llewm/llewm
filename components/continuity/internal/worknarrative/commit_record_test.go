@@ -19,7 +19,7 @@ func commitClaims(verified string) []Claim {
 	}
 }
 
-func TestRecordCommitWritesGitNote(t *testing.T) {
+func TestRecordCommitDoesNotWriteGitNotes(t *testing.T) {
 	ctx, service, projectID, root := testService(t)
 	git := func(args ...string) string {
 		t.Helper()
@@ -37,44 +37,40 @@ func TestRecordCommitWritesGitNote(t *testing.T) {
 	head := git("rev-parse", "HEAD")
 
 	missing := Record{ProjectID: projectID, Title: "Change source", Creator: "test", Claims: []Claim{{Kind: "outcome", Text: "Changed.", Authority: "caller_asserted"}}}
-	if _, _, err := service.RecordCommit(ctx, missing, "HEAD", "", false); err == nil || !strings.Contains(err.Error(), "missing: intent, verification, limitation") {
+	if _, err := service.RecordCommit(ctx, missing, "HEAD", ""); err == nil || !strings.Contains(err.Error(), "missing: intent, verification, limitation") {
 		t.Fatalf("missing claims accepted: %v", err)
 	}
 
 	record := Record{ProjectID: projectID, Title: "Change source", Creator: "test", Claims: commitClaims("go test ./... passes")}
-	created, note, err := service.RecordCommit(ctx, record, "HEAD", "", false)
+	git("notes", "add", "-m", "Historical note", head)
+	before := git("rev-parse", "refs/notes/commits")
+	created, err := service.RecordCommit(ctx, record, "HEAD", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Anchors[0].Target != head || note.Action != "added" || note.Commit != head || note.Ref != NotesRef {
-		t.Fatalf("created = %+v note = %+v", created, note)
+	if created.Anchors[0].Target != head {
+		t.Fatalf("created = %+v", created)
 	}
 	want := "# " + head + " — Change source\n\n## What changed\n- Changed source.\n\n## Interface changes\n- MCP API 82 -> 83.\n\n## Why\n- Needed for the test.\n\n## Verification (run in this session)\n- go test ./... passes\n\n## Verification (inherited or reported, not rerun)\n- Earlier session: go vet passed\n\n## Limitations and remaining work\n- None; the change is complete.\n  Second line.\n"
-	if got := git("notes", "show", head) + "\n"; got != want {
+	if got := RenderCommitNarrative(head, created); got != want {
 		t.Fatalf("note =\n%s\nwant\n%s", got, want)
 	}
 
-	// The same claims again leave the note alone.
-	if _, note, err = service.RecordCommit(ctx, record, "HEAD", "", false); err != nil || note.Action != "unchanged" {
-		t.Fatalf("repeat: note = %+v err = %v", note, err)
-	}
-	// Different claims are appended as an amendment; the original note stays.
-	if _, note, err = service.RecordCommit(ctx, Record{ProjectID: projectID, Title: "Change source", Creator: "test", Claims: commitClaims("go test ./... passes again")}, "HEAD", "", false); err != nil || note.Action != "appended" {
-		t.Fatalf("amend: note = %+v err = %v", note, err)
-	}
-	amended := git("notes", "show", head)
-	if !strings.HasPrefix(amended+"\n", want) || !strings.Contains(amended, "# Amendment from narrative 2026-09-20\n\n## What changed") || strings.Count(amended, "# "+head) != 1 || !strings.Contains(amended, "passes again") {
-		t.Fatalf("amended note =\n%s", amended)
-	}
-	// skipNote records the narrative only.
+	// Existing notes stay unchanged; recording a second commit creates no note.
 	if err = os.WriteFile(filepath.Join(root, "source.md"), []byte("second\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	git("commit", "-q", "-am", "Second")
-	if _, note, err = service.RecordCommit(ctx, record, "HEAD", "", true); err != nil || note.Action != "skipped" {
-		t.Fatalf("skip: note = %+v err = %v", note, err)
+	if _, err = service.RecordCommit(ctx, record, "HEAD", ""); err != nil {
+		t.Fatal(err)
+	}
+	if after := git("rev-parse", "refs/notes/commits"); after != before {
+		t.Fatal("recording a narrative changed Git notes")
+	}
+	if got := git("notes", "show", head); got != "Historical note" {
+		t.Fatalf("historical note changed: %s", got)
 	}
 	if output, err := exec.Command("git", "-C", root, "notes", "show", "HEAD").CombinedOutput(); err == nil {
-		t.Fatalf("note written despite skip: %s", output)
+		t.Fatalf("recording a narrative wrote a Git note: %s", output)
 	}
 }

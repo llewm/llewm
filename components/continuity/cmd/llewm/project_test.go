@@ -193,7 +193,7 @@ func TestUnifiedWorkspaceGroupsItsMembersIntoOneProject(t *testing.T) {
 			RegionLocator string `json:"region_locator"`
 		} `json:"anchors"`
 	}
-	recorded := runCLI(t, "", "narrative", "record", "--title", "Daemon entry", "--claims-json", `[{"kind":"outcome","text":"Added main.go","authority":"caller_asserted"},{"kind":"intent","text":"Entry point","authority":"caller_asserted"},{"kind":"verification","text":"None needed","authority":"caller_asserted"},{"kind":"limitation","text":"None","authority":"caller_asserted"}]`, "--commit", "HEAD", "--no-note")
+	recorded := runCLI(t, "", "narrative", "record", "--title", "Daemon entry", "--claims-json", `[{"kind":"outcome","text":"Added main.go","authority":"caller_asserted"},{"kind":"intent","text":"Entry point","authority":"caller_asserted"},{"kind":"verification","text":"None needed","authority":"caller_asserted"},{"kind":"limitation","text":"None","authority":"caller_asserted"}]`, "--commit", "HEAD")
 	if err := json.Unmarshal([]byte(recorded), &narrative); err != nil {
 		t.Fatal(err)
 	}
@@ -208,19 +208,19 @@ func TestUnifiedWorkspaceGroupsItsMembersIntoOneProject(t *testing.T) {
 			RegionLocator string `json:"region_locator"`
 		} `json:"anchors"`
 	}
-	if err := json.Unmarshal([]byte(runCLI(t, "", "narrative", "record", "--commit", "HEAD", "--no-note", "--title", "t", "--claims-json", commitClaims)), &commitNarrative); err != nil || len(commitNarrative.Anchors) == 0 || commitNarrative.Anchors[0].RegionLocator != "member:joncyd" || len(commitNarrative.Anchors[0].Target) != 40 {
+	if err := json.Unmarshal([]byte(runCLI(t, "", "narrative", "record", "--commit", "HEAD", "--title", "t", "--claims-json", commitClaims)), &commitNarrative); err != nil || len(commitNarrative.Anchors) == 0 || commitNarrative.Anchors[0].RegionLocator != "member:joncyd" || len(commitNarrative.Anchors[0].Target) != 40 {
 		t.Fatalf("commit narrative: %#v %v", commitNarrative, err)
 	}
 
 	// At the workspace folder, a member must be named.
 	t.Chdir(ws)
-	if err, _ := runCLIError("narrative", "record", "--commit", "HEAD", "--no-note", "--title", "t", "--claims-json", commitClaims); err == nil || !strings.Contains(err.Error(), "name the member repository (--repo, or repo over MCP): joncy-agent, joncy-trader, joncyd") {
+	if err, _ := runCLIError("narrative", "record", "--commit", "HEAD", "--title", "t", "--claims-json", commitClaims); err == nil || !strings.Contains(err.Error(), "name the member repository (--repo, or repo over MCP): joncy-agent, joncy-trader, joncyd") {
 		t.Fatalf("commit narrative without --repo: %v", err)
 	}
-	if err, _ := runCLIError("narrative", "record", "--repo", "nope", "--commit", "HEAD", "--no-note", "--title", "t", "--claims-json", commitClaims); err == nil || !strings.Contains(err.Error(), `"nope" is not a member`) {
+	if err, _ := runCLIError("narrative", "record", "--repo", "nope", "--commit", "HEAD", "--title", "t", "--claims-json", commitClaims); err == nil || !strings.Contains(err.Error(), `"nope" is not a member`) {
 		t.Fatalf("unknown member: %v", err)
 	}
-	if err := json.Unmarshal([]byte(runCLI(t, "", "narrative", "record", "--repo", "joncy-agent", "--commit", "HEAD", "--no-note", "--title", "t", "--claims-json", commitClaims)), &commitNarrative); err != nil || commitNarrative.Anchors[0].RegionLocator != "member:joncy-agent" {
+	if err := json.Unmarshal([]byte(runCLI(t, "", "narrative", "record", "--repo", "joncy-agent", "--commit", "HEAD", "--title", "t", "--claims-json", commitClaims)), &commitNarrative); err != nil || commitNarrative.Anchors[0].RegionLocator != "member:joncy-agent" {
 		t.Fatalf("commit narrative with --repo: %#v %v", commitNarrative, err)
 	}
 	t.Chdir(filepath.Join(ws, "joncyd"))

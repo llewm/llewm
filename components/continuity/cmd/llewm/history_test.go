@@ -98,14 +98,17 @@ func TestNarrativeRecordWithCommitCLI(t *testing.T) {
 		}
 	}
 	created := runCLI(t, "", "narrative", "record", "--id", "commit-head", "--title", "Initialize", "--commit", "HEAD", "--claims-json", `[{"kind":"outcome","text":"Initialized.","authority":"caller_asserted"},{"kind":"intent","text":"Start the project.","authority":"caller_asserted"},{"kind":"verification","text":"Not applicable: nothing to check.","authority":"caller_asserted"},{"kind":"limitation","label":"Known limitations and remaining work","text":"None.","authority":"caller_asserted"}]`)
-	for _, want := range []string{`"trigger": "commit"`, `"kind": "commit"`, `"target": "AGENTS.md"`, `"content_sha256"`, `"occurred_from"`, `"label": "Known limitations and remaining work"`, `"action": "added"`} {
+	for _, want := range []string{`"trigger": "commit"`, `"kind": "commit"`, `"target": "AGENTS.md"`, `"content_sha256"`, `"occurred_from"`, `"label": "Known limitations and remaining work"`} {
 		if !strings.Contains(created, want) {
 			t.Fatalf("record missing %q: %s", want, created)
 		}
 	}
 	note, err := exec.Command("git", "-C", root, "notes", "show", "HEAD").CombinedOutput()
-	if err != nil || !strings.Contains(string(note), "— Initialize\n\n## What changed\n- Initialized.\n") || !strings.Contains(string(note), "## Verification (run in this session)\n- Not applicable") {
-		t.Fatalf("note: %v %s", err, note)
+	if err == nil {
+		t.Fatalf("recording a narrative wrote a Git note: %s", note)
+	}
+	if strings.Contains(created, `"note":`) {
+		t.Fatalf("record returned a Git-note receipt: %s", created)
 	}
 	found := runCLI(t, "", "history", "search", "--kind", "limitation")
 	if !strings.Contains(found, "narrative:commit-head#3") {

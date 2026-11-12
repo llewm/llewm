@@ -1,6 +1,6 @@
 ---
 name: narrative
-description: Record engineering history as a Continuity work narrative after every commit and at meaningful non-commit boundaries. Use right after each commit (a Git note does not replace it), after a decision or investigation worth preserving, when a checkpoint result or bootstrap lists unnarrated commits, or when project instructions require durable change detail.
+description: Record engineering history as a Continuity work narrative after every commit and at meaningful non-commit boundaries. Use right after each commit, after a decision or investigation worth preserving, when a checkpoint result or bootstrap lists unnarrated commits, or when project instructions require durable change detail.
 ---
 
 # Record a work narrative
@@ -34,22 +34,18 @@ Write one claim per section, and give each claim a `label` naming its section:
   checkpoint, task, and roadmap-node anchors yourself.
 - A commit narrative is the commit's canonical record. It needs `outcome`,
   `intent`, `verification`, and `limitation` claims; when one does not apply,
-  write a claim of that kind saying why. It then writes the commit's Git note
-  (`refs/notes/commits`) from the claims under the commit-policy headings with
-  the full hash. An existing different note is kept and the rendering is
-  appended as an amendment. Do not also write the note by hand; if one was
-  already written, pass `skip_note` (CLI `--no-note`) unless it needs the
-  amendment. The result's `note.action` is `added`, `appended`, `unchanged`, or
-  `skipped`.
+  write a claim of that kind saying why. Recording a commit narrative adds
+  source anchors and time without modifying the Git repository. Git notes are
+  not written; no second record or note synchronization is required.
 - Authority per claim: `machine_observed` only for facts a tool observed,
   `caller_asserted` for what you did or ran in this session, and
   `user_reported` for what the user said and for checks inherited from an
-  earlier session and not rerun. The note shows verification under separate
+  earlier session and not rerun. Narrative rendering separates verification
   headings by authority.
 
 Keep claims factual and bounded; do not paste transcripts or hidden reasoning.
-If other project instructions require records beyond the commit note, satisfy
-them separately. Checkpoint results
+If other project instructions require additional records, satisfy them
+separately. Checkpoint results
 (`unnarrated_commits`) and the session bootstrap list recent commits still
 missing one. Narrate only commits your session or task made. A commit labeled
 with another task (or session) belongs to that agent, which knows its intent;

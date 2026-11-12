@@ -19,16 +19,15 @@ import (
 // just sent: what to cite, what state the write produced, and the record's
 // hash. The read tools return whole records.
 type Receipt struct {
-	PlanChange *trackplan.Change         `json:"plan_change,omitempty"`
-	Ref        string                    `json:"ref" jsonschema:"the written record as kind:id, with @revision for revisioned records"`
-	Status     string                    `json:"status,omitempty" jsonschema:"the record's status, disposition, state, operation, or link relationship"`
-	Authority  string                    `json:"authority,omitempty"`
-	SHA256     string                    `json:"sha256,omitempty"`
-	Commit     string                    `json:"commit,omitempty"`
-	RecordedAt time.Time                 `json:"recorded_at,omitzero"`
-	Replay     bool                      `json:"replay,omitempty" jsonschema:"the identical record already existed; nothing new was written"`
-	Lease      string                    `json:"lease,omitempty" jsonschema:"lease state of the write when the scope is leased or the write is stale"`
-	Note       *worknarrative.NoteResult `json:"note,omitempty"`
+	PlanChange *trackplan.Change `json:"plan_change,omitempty"`
+	Ref        string            `json:"ref" jsonschema:"the written record as kind:id, with @revision for revisioned records"`
+	Status     string            `json:"status,omitempty" jsonschema:"the record's status, disposition, state, operation, or link relationship"`
+	Authority  string            `json:"authority,omitempty"`
+	SHA256     string            `json:"sha256,omitempty"`
+	Commit     string            `json:"commit,omitempty"`
+	RecordedAt time.Time         `json:"recorded_at,omitzero"`
+	Replay     bool              `json:"replay,omitempty" jsonschema:"the identical record already existed; nothing new was written"`
+	Lease      string            `json:"lease,omitempty" jsonschema:"lease state of the write when the scope is leased or the write is stale"`
 }
 
 // Receipts is the result of a write tool that can write several records.
@@ -47,11 +46,9 @@ func leaseState(stamp *lease.Stamp) string {
 	return stamp.State
 }
 
-func narrativeReceipt(value worknarrative.RecordResult) Receipt {
-	receipt := Receipt{Ref: "narrative:" + value.ID, Status: value.State, SHA256: value.SemanticSHA256, RecordedAt: value.RecordedAt, Note: value.Note}
-	if value.Note != nil {
-		receipt.Commit = value.Note.Commit
-	}
+func narrativeReceipt(value worknarrative.Record) Receipt {
+	receipt := Receipt{Ref: "narrative:" + value.ID, Status: value.State, SHA256: value.SemanticSHA256, RecordedAt: value.RecordedAt}
+
 	return receipt
 }
 

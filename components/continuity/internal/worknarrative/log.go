@@ -137,7 +137,7 @@ func (s Service) Log(ctx context.Context, projectID string, options LogOptions) 
 		if len(records) > 0 && (!options.Oneline || options.Expand) {
 			result.WriteString("\nNarratives:\n")
 			for _, record := range records {
-				for _, line := range strings.Split(strings.TrimRight(RenderNote(hash, record), "\n"), "\n") {
+				for _, line := range strings.Split(strings.TrimRight(RenderCommitNarrative(hash, record), "\n"), "\n") {
 					fmt.Fprintf(&result, "    %s\n", line)
 				}
 				result.WriteString("\n")

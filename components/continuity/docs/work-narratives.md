@@ -168,7 +168,7 @@ preservation, metadata-only route to bounded exact show, file/region drift acros
 real source change, a narrative spanning several checkpoints, and compatibility
 with existing commit-narrative discovery and portable export.
 
-Commit-linked narratives now render their Git note as described below. The
+Commit-linked narratives anchor their source commit as described below. The
 engineer/project commit policy determines which boundaries require capture;
 record/projection design does not change that policy.
 
@@ -179,35 +179,20 @@ list results include both general work narratives and the existing specialized
 commit narratives. Curated portable export/import preserves work narratives,
 ordered anchors, exact referenced invocations, and explicit supersession edges.
 
-## Commit narratives write the Git note
+## Commit-linked narratives
 
-Per decision `narrative-writes-git-note`, a narrative recorded with `--commit`
-(MCP `commit`) is the commit's canonical record. MCP API 83 adds this; there is
-no migration.
+A narrative recorded with `--commit` (MCP `commit`) is the canonical record.
+It adds the exact commit and content-hashed changed-file anchors, commit time,
+and the `commit` trigger. It requires `outcome`, `intent`, `verification`, and
+`limitation` claims; when one does not apply, say why in a claim of that kind.
+An optional `interface` claim records an API, command, or migration change.
 
-- It needs `outcome`, `intent`, `verification`, and `limitation` claims. When
-  one does not apply, a claim of that kind says why; the record is refused
-  otherwise.
-- An interface change (MCP API version, CLI commands, migrations) is its own
-  `interface` claim (migration 054, MCP API 84), rendered under its own
-  "Interface changes" heading after What changed. It is not required.
-- After the narrative is appended, Continuity renders the note: a
-  `# <full hash> — <title>` line, then the commit-policy sections in claim order:
-  What changed (`outcome`), Interface changes (`interface`), Why (`intent`), Design decisions (`decision`,
-  `constraint`, `alternative`), Verification, Limitations and remaining work
-  (`limitation`, `next_action`), and Notes (`note`). Sections without claims are
-  left out. Verification is split by authority: "run in this session"
-  (`caller_asserted`), "observed by Continuity" (`machine_observed`), and
-  "inherited or reported, not rerun" (`user_reported`).
-- The note goes to `refs/notes/commits` in the member repository holding the
-  commit. If the commit has no note, it is added. If the note already contains
-  these sections, it is left alone. Otherwise the existing note is kept and the
-  rendering is appended under `# Amendment from narrative <date>`.
-- `--no-note` (MCP `skip_note`) records the narrative only. The result is the
-  record plus `note` (`ref`, `commit`, `action`: `added`, `appended`,
-  `unchanged`, or `skipped`).
-- The narrative is written first. If the note write then fails (for example, no
-  Git identity), the record is kept and the error names it.
+Recording does not modify Git notes or any other source-repository ref.
+The CLI returns the narrative; the MCP receipt retains the exact commit identity.
+There is no `--no-note` flag or `skip_note` field because recording never writes
+notes. MCP API 142 removes those inputs and the note-write receipt; no database
+migration or writer-floor change is required.
 
-Generated notes parse back into the same claim kinds, so `narrative
-import-git-notes` and the note check still read them.
+`llewm log` renders these canonical claims directly, grouping verification by
+observed, session-run, or inherited authority. Existing Git notes are preserved;
+the explicit historical note importer can still read them when requested.

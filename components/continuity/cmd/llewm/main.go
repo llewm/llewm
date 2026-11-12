@@ -576,7 +576,6 @@ func narrativeCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "narrative", Short: "Record and retrieve commit-optional work narratives"}
 	var record worknarrative.Record
 	var claimsJSON, anchorsJSON, sourceJSON, occurredFrom, occurredTo, commitRef, commitRepository string
-	var noNote bool
 	recordCommand := &cobra.Command{Use: "record", Short: "Append one immutable work narrative", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if record.Title == "" || (record.Trigger == "" && commitRef == "") || claimsJSON == "" {
 			return errors.New("--title, --claims-json, and --trigger (or --commit) are required")
@@ -615,11 +614,11 @@ func narrativeCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return writeJSON(cmd.OutOrStdout(), worknarrative.RecordResult{Record: created})
+				return writeJSON(cmd.OutOrStdout(), created)
 			}
-			created, note, err := application.Narratives.RecordCommit(cmd.Context(), record, commitRef, commitRepository, noNote)
+			created, err := application.Narratives.RecordCommit(cmd.Context(), record, commitRef, commitRepository)
 			if created.ID != "" {
-				if writeErr := writeJSON(cmd.OutOrStdout(), worknarrative.RecordResult{Record: created, Note: &note}); writeErr != nil {
+				if writeErr := writeJSON(cmd.OutOrStdout(), created); writeErr != nil {
 					return writeErr
 				}
 			}
@@ -638,8 +637,7 @@ func narrativeCommand() *cobra.Command {
 	recordCommand.Flags().StringVar(&record.CreatorInvocationID, "creator-invocation", "", "optional exact actor invocation ID")
 	recordCommand.Flags().StringVar(&record.SupersedesID, "supersedes", "", "current project-owned work narrative corrected by this append")
 	recordCommand.Flags().StringVar(&commitRepository, "repo", "", "workspace member holding --commit (default: the member containing the working directory)")
-	recordCommand.Flags().StringVar(&commitRef, "commit", "", "commit to anchor: requires outcome, intent, verification, and limitation claims; adds the exact commit and content-hashed changed-file anchors, the commit time, and trigger commit when unset; then writes the commit's Git note from the claims")
-	recordCommand.Flags().BoolVar(&noNote, "no-note", false, "with --commit, record the narrative without writing the Git note")
+	recordCommand.Flags().StringVar(&commitRef, "commit", "", "commit to anchor: requires outcome, intent, verification, and limitation claims; adds the exact commit and content-hashed changed-file anchors, the commit time, and trigger commit when unset")
 
 	var options worknarrative.ListOptions
 	var listOutput string

@@ -4,7 +4,7 @@ The memory repository is the Git repository that History sync uses to move curat
 Continuity records between machines (see [multi-repository projects and
 sync](../../../docs/multi-repo-and-sync.md#history-sync)). It is a special case. It is
 not a code repository, and the project rules for code repositories (commit policy,
-Git notes, work narratives, roadmap freshness, review) do not apply to it. These
+work narratives, roadmap freshness, review) do not apply to it. These
 rules do.
 
 <!-- continuity:contract memory-repository -->

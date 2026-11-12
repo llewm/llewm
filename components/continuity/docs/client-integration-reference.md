@@ -498,7 +498,7 @@ MCP write tools return a receipt, not the record the caller just sent (MCP API
 revisioned records such as `plan:ID@5`), `status` (status, disposition, state,
 operation, or link relationship), `authority`, the record hash when one exists,
 `recorded_at`, `replay` when an identical record already existed, `lease` when
-the write was leased or stale, and for narratives the commit and Git note result.
+the write was leased or stale, and for narratives the exact commit identity.
 Read the record
 back with the matching read tool. The lease, pin, and checkpoint
 tools keep their results, which are already small or carry values the caller

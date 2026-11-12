@@ -14,7 +14,7 @@ func TestLogUsesNarrativesWithoutNotes(t *testing.T) {
 		t.Fatalf("unnarrated commit: %s", before)
 	}
 	claims := `[{"kind":"outcome","text":"Canonical change","authority":"caller_asserted"},{"kind":"intent","text":"Reason","authority":"caller_asserted"},{"kind":"verification","text":"Checked","authority":"caller_asserted"},{"kind":"limitation","text":"None","authority":"caller_asserted"}]`
-	runCLI(t, "", "narrative", "record", "--id", "log-test", "--title", "Recorded change", "--commit", "HEAD", "--no-note", "--claims-json", claims)
+	runCLI(t, "", "narrative", "record", "--id", "log-test", "--title", "Recorded change", "--commit", "HEAD", "--claims-json", claims)
 	output := runCLI(t, "", "log", "-n", "1")
 	for _, want := range []string{"Author:", "Date:", "Narratives:", "## What changed", "Canonical change", "## Verification (run in this session)"} {
 		if !strings.Contains(output, want) {
@@ -42,7 +42,7 @@ func TestLogFiltersAndCoverage(t *testing.T) {
 	}
 	git("-c", "user.name=Second Author", "-c", "user.email=second@example.invalid", "commit", "--allow-empty", "-m", "Second commit")
 	claims := `[{"kind":"outcome","text":"Changed","authority":"caller_asserted"},{"kind":"intent","text":"Reason","authority":"caller_asserted"},{"kind":"verification","text":"Checked","authority":"caller_asserted"},{"kind":"limitation","text":"None","authority":"caller_asserted"}]`
-	runCLI(t, "", "narrative", "record", "--title", "Second narrative", "--commit", "HEAD", "--no-note", "--claims-json", claims)
+	runCLI(t, "", "narrative", "record", "--title", "Second narrative", "--commit", "HEAD", "--claims-json", claims)
 	compact := runCLI(t, "", "log", "--oneline", "--author", "Second Author")
 	if !strings.Contains(compact, "Second commit") || strings.Contains(compact, "Narratives:") {
 		t.Fatalf("compact: %s", compact)
