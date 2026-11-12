@@ -17,7 +17,7 @@ func TestAutomaticDisabledCachingFailureAndInvalidation(t *testing.T) {
 	dir, root := t.TempDir(), t.TempDir()
 	now := time.Now().UTC()
 	installed := buildinfo.Info{GitCommit: strings.Repeat("a", 40)}
-	if r, err := Automatic(ctx, dir, installed, now); err != nil || r.Line() != "" {
+	if r, err := Automatic(ctx, dir, installed, now); err != nil || !strings.Contains(r.Line(), "update checks are off") {
 		t.Fatalf("disabled: %+v %v", r, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "update-check-cache.json")); !os.IsNotExist(err) {

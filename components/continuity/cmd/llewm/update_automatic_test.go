@@ -17,8 +17,10 @@ func TestSessionStartAutomaticUpdateFailureIsIsolatedAndConfigurable(t *testing.
 	hook := func(client string) string {
 		return runCLI(t, `{"session_id":"update-session","hook_event_name":"SessionStart"}`, "hook", client)
 	}
-	if out := hook("codex"); strings.Contains(out, "Llewm update check:") {
-		t.Fatalf("default enabled: %s", out)
+	for _, client := range []string{"codex", "claude-code"} {
+		if out := hook(client); !strings.Contains(out, "Llewm update checks are off") {
+			t.Fatalf("unconfigured notice missing: %s", out)
+		}
 	}
 	runCLI(t, "", "update", "configure", "--enabled", "--source-root", root, "--interval", "1h")
 	for _, client := range []string{"codex", "claude-code"} {
@@ -42,7 +44,29 @@ func TestSessionStartAutomaticUpdateFailureIsIsolatedAndConfigurable(t *testing.
 	if err := json.Unmarshal([]byte(runCLI(t, "", "update", "status")), &cfg); err != nil || cfg.Enabled || cfg.SourceRoot != root || cfg.Interval != "1h" {
 		t.Fatalf("disable discarded settings: %+v %v", cfg, err)
 	}
-	if out := hook("codex"); strings.Contains(out, "Llewm update check:") {
+	if out := hook("codex"); strings.Contains(out, "Llewm update check") {
 		t.Fatalf("disabled check: %s", out)
+	}
+}
+
+func TestOnboardingUpdateDefaultsPreserveExistingConfiguration(t *testing.T) {
+	root := testProject(t)
+	configure := []string{"update", "configure", "--if-unconfigured", "--enabled", "--fetch", "--source-root", root, "--remote", "upstream", "--branch", "stable"}
+	var cfg updatecheck.AutomaticConfig
+	if err := json.Unmarshal([]byte(runCLI(t, "", configure...)), &cfg); err != nil || !cfg.Enabled || !cfg.Fetch || cfg.SourceRoot != root || cfg.Remote != "upstream" || cfg.Branch != "stable" {
+		t.Fatalf("onboarding defaults: %+v %v", cfg, err)
+	}
+	runCLI(t, "", "update", "configure", "--enabled=false", "--fetch=false", "--interval", "2h")
+	path := filepath.Join(os.Getenv("CONTINUITY_GLOBAL_HOME"), "update-check.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(runCLI(t, "", configure...)), &cfg); err != nil || cfg.Enabled || cfg.Fetch || cfg.Interval != "2h" {
+		t.Fatalf("overrode opt-out: %+v %v", cfg, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(before) != string(after) {
+		t.Fatal("onboarding modified existing settings")
 	}
 }

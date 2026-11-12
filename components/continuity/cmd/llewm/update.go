@@ -58,6 +58,7 @@ func updateCommand() *cobra.Command {
 
 func updateConfigureCommand() *cobra.Command {
 	c := updatecheck.DefaultAutomaticConfig()
+	var ifUnconfigured bool
 	cmd := &cobra.Command{Use: "configure", Short: "Configure engineer-wide opt-in session-start update checks", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		dir, err := config.GlobalDir()
 		if err != nil {
@@ -88,12 +89,26 @@ func updateConfigureCommand() *cobra.Command {
 		if !cmd.Flags().Changed("timeout") {
 			c.Timeout = previous.Timeout
 		}
-		if err := updatecheck.SaveAutomaticConfig(dir, c); err != nil {
-			return err
+		if ifUnconfigured {
+			created, err := updatecheck.SaveAutomaticConfigIfAbsent(dir, c)
+			if err != nil {
+				return err
+			}
+			if !created {
+				c, err = updatecheck.LoadAutomaticConfig(dir)
+				if err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := updatecheck.SaveAutomaticConfig(dir, c); err != nil {
+				return err
+			}
 		}
 		return writeJSON(cmd.OutOrStdout(), c)
 	}}
 	cmd.Flags().BoolVar(&c.Enabled, "enabled", false, "enable session-start checks; false disables them")
+	cmd.Flags().BoolVar(&ifUnconfigured, "if-unconfigured", false, "set onboarding defaults only if no update-check configuration exists")
 	cmd.Flags().StringVar(&c.SourceRoot, "source-root", "", "absolute Llewm checkout, independent of active project")
 	cmd.Flags().BoolVar(&c.Fetch, "fetch", false, "contact the selected configured remote branch")
 	cmd.Flags().StringVar(&c.Remote, "remote", c.Remote, "configured source remote")

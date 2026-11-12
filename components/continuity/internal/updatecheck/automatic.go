@@ -67,12 +67,22 @@ func SaveAutomaticConfig(dir string, c AutomaticConfig) error {
 	return writeAutomaticJSON(dir, "update-check.json", c)
 }
 
+// SaveAutomaticConfigIfAbsent applies onboarding defaults without replacing an
+// engineer's existing settings, including an explicit opt-out.
+func SaveAutomaticConfigIfAbsent(dir string, c AutomaticConfig) (bool, error) {
+	if err := c.Validate(); err != nil {
+		return false, err
+	}
+	return publishAutomaticJSON(dir, "update-check.json", c, true)
+}
+
 type AutomaticResult struct {
-	CheckedAt time.Time       `json:"checked_at"`
-	Config    AutomaticConfig `json:"config"`
-	Installed buildinfo.Info  `json:"installed"`
-	Report    *Report         `json:"report,omitempty"`
-	Error     string          `json:"error,omitempty"`
+	Unconfigured bool            `json:"unconfigured,omitempty"`
+	CheckedAt    time.Time       `json:"checked_at"`
+	Config       AutomaticConfig `json:"config"`
+	Installed    buildinfo.Info  `json:"installed"`
+	Report       *Report         `json:"report,omitempty"`
+	Error        string          `json:"error,omitempty"`
 }
 
 // Automatic checks at most once per interval in sequential sessions. Failures
@@ -84,7 +94,8 @@ func Automatic(ctx context.Context, dir string, installed buildinfo.Info, now ti
 		return AutomaticResult{}, err
 	}
 	if !c.Enabled {
-		return AutomaticResult{}, nil
+		_, err := os.Stat(filepath.Join(dir, "update-check.json"))
+		return AutomaticResult{Unconfigured: os.IsNotExist(err)}, nil
 	}
 	interval, _ := time.ParseDuration(c.Interval)
 	var cached AutomaticResult
@@ -109,6 +120,9 @@ func Automatic(ctx context.Context, dir string, installed buildinfo.Info, now ti
 }
 
 func (r AutomaticResult) Line() string {
+	if r.Unconfigured {
+		return "Llewm update checks are off; enable with llewm update configure --enabled --source-root /absolute/path/to/llewm (add --fetch for upstream checks)."
+	}
 	if r.CheckedAt.IsZero() {
 		return ""
 	}
@@ -120,24 +134,42 @@ func (r AutomaticResult) Line() string {
 }
 
 func writeAutomaticJSON(dir, name string, value any) error {
+	_, err := publishAutomaticJSON(dir, name, value, false)
+	return err
+}
+
+func publishAutomaticJSON(dir, name string, value any, onlyIfAbsent bool) (bool, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
+		return false, err
 	}
 	b, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		return err
+		return false, err
 	}
 	f, err := os.CreateTemp(dir, ".update-check-*")
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer os.Remove(f.Name())
 	if _, err = f.Write(append(b, '\n')); err != nil {
 		f.Close()
-		return err
+		return false, err
 	}
 	if err = f.Close(); err != nil {
-		return err
+		return false, err
 	}
-	return os.Rename(f.Name(), filepath.Join(dir, name))
+	destination := filepath.Join(dir, name)
+	if onlyIfAbsent {
+		// Link publishes the complete file atomically without overwriting a
+		// configuration another onboarding process may just have created.
+		if err := os.Link(f.Name(), destination); err != nil {
+			if os.IsExist(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		return true, nil
+	}
+	err = os.Rename(f.Name(), destination)
+	return err == nil, err
 }

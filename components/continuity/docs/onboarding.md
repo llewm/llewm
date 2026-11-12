@@ -53,6 +53,22 @@ checkpoint. For an update affecting existing stores or active clients, retain th
 backup, compatibility, migration and restart checks in the update guide; absence
 of a project in the current folder does not prove no stores are affected.
 
+For a source install or an adopted source build, enable session-start availability
+checks using that installation's source checkout, remote and branch:
+
+```sh
+llewm update configure --if-unconfigured --enabled --fetch --source-root /absolute/path/to/llewm --remote origin --branch main
+```
+
+Replace the example values with the actual reviewed installation values; never
+use the active project's repository as the update source. `--if-unconfigured`
+preserves all existing settings, including an opt-out. Report the effective
+settings and the opt-out command `llewm update configure --enabled=false`.
+If the source is pinned to a revision without an update branch, leave checks
+off and explain the missing update target rather than inventing one. Binary
+installs remain off until an automatic release feed exists. These checks report
+availability only; they never install or migrate anything.
+
 The executable and client integration are separate. If explicitly requested,
 preview `llewm install --client CLIENT --dry-run` and have the user run
 `llewm install --client CLIENT` at a terminal. User-scoped plugin registration

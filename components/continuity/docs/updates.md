@@ -42,8 +42,15 @@ The check command itself needs no initialized project database or model.
 
 ## Automatic availability reports
 
-Checks are disabled by default. Opt in once per engineer installation, using an
-explicit Llewm source checkout (not the project currently using Llewm):
+Guided source-install onboarding enables checks against the installation's
+explicit source checkout, remote and branch, including fetch. It uses
+`--if-unconfigured` to preserve existing settings and opt-outs. Onboarding reports
+the opt-out command `llewm update configure --enabled=false`. Binary installations
+stay off until an automatic release feed is available.
+
+Outside guided source onboarding, checks remain disabled until configured. Enable
+them once per engineer installation, using an explicit Llewm source checkout (not
+the project currently using Llewm):
 
 ```sh
 llewm update configure --enabled --source-root /absolute/path/to/llewm --interval 24h
@@ -57,6 +64,8 @@ to fetching the selected configured remote branch. Settings not supplied to
 `configure` are preserved. Settings live in `update-check.json` under the global
 Continuity configuration directory, alongside engineer guidance; they are not
 synced project policy. `status` reads settings without performing a check.
+`configure --if-unconfigured` publishes defaults only when no configuration exists;
+it never replaces an existing file, including a disabled configuration.
 
 Full-mode Codex and Claude Code SessionStart hooks check when the interval has
 elapsed and append a timestamped result to the session context. Cached results,
@@ -65,6 +74,9 @@ Changing settings or installed build identity invalidates the cache. Simultaneou
 session starts may perform duplicate checks; results are published atomically.
 Nothing runs on a timer while no sessions start, in audit-only mode, or from
 read-only MCP/bootstrap calls. Hook/plugin adoption still needs its usual setup.
+When no configuration exists, full-mode SessionStart reports that update checks
+are off and names the enable command, without fetching or creating settings.
+An explicitly disabled configuration stays quiet.
 
 The interval accepts `1m` through `720h`; `--timeout` accepts `100ms` through `10s`
 and defaults to `3s`. Automatic Git checks disable interactive credential prompts;

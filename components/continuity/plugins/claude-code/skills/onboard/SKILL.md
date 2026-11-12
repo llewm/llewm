@@ -14,6 +14,14 @@ for existing installations, including affected-store backups/migrations and acti
 client checks. If no project is available, finish installation and leave project
 configuration pending. Do not create a repository or dummy project.
 
+For a source install/adoption with a reviewed update remote and branch, run
+`llewm update configure --if-unconfigured --enabled --fetch --source-root SOURCE --remote REMOTE --branch BRANCH`
+with the installation's actual values, independently of the active project.
+This preserves existing settings and opt-outs. Report the effective settings and
+`llewm update configure --enabled=false` as the opt-out. A revision-pinned source
+without an update branch and binary installs stay off; explain the missing update
+target/feed. Availability checks never apply updates or migrations.
+
 Client plugin registration is separate and optional:
 `llewm install --client CLIENT` can run without a project, but `--permissions`
 needs initialized project state. Preview with `--dry-run`; a person runs installation at a terminal. Do not
