@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
+	"github.com/llewm/llewm/components/privatestorage"
 
 	_ "modernc.org/sqlite"
 )

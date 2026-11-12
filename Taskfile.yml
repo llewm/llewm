@@ -3,7 +3,7 @@ version: '3'
 tasks:
   fmt:
     cmds:
-      - for: [components/continuity, components/action-control, components/orchestration]
+      - for: [components/continuity, components/action-control, components/orchestration, components/privatestorage]
         task: fmt-component
         vars: { COMPONENT: '{{.ITEM}}' }
   fmt-component:
@@ -12,7 +12,7 @@ tasks:
     cmds: [go fmt ./...]
   test:
     cmds:
-      - for: [components/continuity, components/action-control, components/orchestration]
+      - for: [components/continuity, components/action-control, components/orchestration, components/privatestorage]
         task: test-component
         vars: { COMPONENT: '{{.ITEM}}' }
   test-component:
@@ -21,7 +21,7 @@ tasks:
     cmds: [go test ./...]
   vet:
     cmds:
-      - for: [components/continuity, components/action-control, components/orchestration]
+      - for: [components/continuity, components/action-control, components/orchestration, components/privatestorage]
         task: vet-component
         vars: { COMPONENT: '{{.ITEM}}' }
   vet-component:

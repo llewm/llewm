@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
-	"github.com/llewm/llewm/components/orchestration/internal/privatestorage"
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
+	"github.com/llewm/llewm/components/privatestorage"
 )
 
 func TestCLIManualWorkflowAndPrivateCredentials(t *testing.T) {
