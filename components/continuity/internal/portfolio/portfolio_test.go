@@ -16,6 +16,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/gitenv"
 	"github.com/llewm/llewm/components/continuity/internal/memsync"
+	"github.com/llewm/llewm/components/continuity/internal/permtest"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
 )
@@ -511,11 +512,8 @@ func TestPortfolioFolderFailuresRemainIndependentAndRetained(t *testing.T) {
 	if os.Geteuid() == 0 {
 		return
 	}
-	// Use a real mode denial in this launching process; no alternate executable.
-	if err := os.Chmod(good.Directory, 0000); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(good.Directory, 0700)
+	// Use a real access denial in this launching process; no alternate executable.
+	defer permtest.Deny(t, good.Directory)()
 	r, err = Run(context.Background(), c, "p", false, false)
 	if err == nil || r[0].Destinations[1].Error == "" {
 		t.Fatal("permission denial was hidden")

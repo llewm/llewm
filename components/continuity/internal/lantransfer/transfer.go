@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/privatestorage"
 )
 
 const protocol = "llewm-lan-v1"
@@ -358,14 +359,15 @@ func readBundle(r io.Reader, optional bool) (*portable.Bundle, error) {
 	return &bundle, nil
 }
 
-// Pairing files use exclusive publication, restrictive permissions and bounded
-// reads. Callers remove the sender's credential when the temporary listener ends.
+// Pairing files use exclusive publication, owner-only permissions (a protected
+// DACL on Windows) and bounded reads. Callers remove the sender's credential
+// when the temporary listener ends.
 func WritePairing(path string, pairing Pairing) error {
 	body, err := json.Marshal(pairing)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := privatestorage.Create(path)
 	if err != nil {
 		return fmt.Errorf("create private pairing file: %w", err)
 	}
@@ -378,13 +380,15 @@ func WritePairing(path string, pairing Pairing) error {
 	return nil
 }
 
+var errPairingFile = errors.New("pairing file must be a private regular file of at most 4096 bytes")
+
 func ReadPairing(path string) (Pairing, error) {
 	var p Pairing
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 4096 || info.Mode().Perm()&0o077 != 0 {
-		return p, errors.New("pairing file must be a private regular file of at most 4096 bytes")
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 4096 {
+		return p, errPairingFile
 	}
-	f, err := os.Open(path)
+	f, err := privatestorage.Open(path)
 	if err != nil {
 		return p, errors.New("cannot open pairing file")
 	}
@@ -392,6 +396,10 @@ func ReadPairing(path string) (Pairing, error) {
 	actual, err := f.Stat()
 	if err != nil || !os.SameFile(info, actual) {
 		return p, errors.New("pairing file changed")
+	}
+	// Check the opened object's mode or Windows owner/DACL, not a second lookup.
+	if err := privatestorage.CheckFile(f); err != nil {
+		return p, errPairingFile
 	}
 	decoder := json.NewDecoder(io.LimitReader(f, 4097))
 	decoder.DisallowUnknownFields()

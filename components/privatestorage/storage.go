@@ -1,4 +1,4 @@
-// Package privatestorage creates and verifies coordinator-owned private storage.
+// Package privatestorage creates and verifies storage private to the current user.
 // It never repairs permissions on an existing object.
 package privatestorage
 

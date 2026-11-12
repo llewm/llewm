@@ -17,6 +17,8 @@ Each implemented component remains an independent Go module:
 | --- | --- | --- |
 | Continuity | `github.com/llewm/llewm/components/continuity` | `cmd/llewm` |
 | Action Control | `github.com/llewm/llewm/components/action-control` | `cmd/action-control` |
+| Orchestration | `github.com/llewm/llewm/components/orchestration` | `cmd/llewm-orchestrate` |
+| Private storage (library) | `github.com/llewm/llewm/components/privatestorage` | none |
 
 A module's semantic version tag includes its repository directory, such as
 `components/continuity/v0.1.0-preview.1`. The version suffix passed to Go is just
@@ -25,6 +27,14 @@ A module's semantic version tag includes its repository directory, such as
 [version-pinned installation](../components/continuity/docs/installation.md#version-pinned-developer-builds).
 Root `go.work` coordinates local development; each module also builds with
 `GOWORK=off`. There is no root module or compatibility import path.
+
+Continuity and orchestration depend on the private-storage library through
+`replace github.com/llewm/llewm/components/privatestorage => ../privatestorage`.
+That keeps repository builds self-contained, but Go rejects `go install
+module/cmd@version` for a module whose `go.mod` contains `replace` directives. To
+restore remote version-pinned installation, publish the library first (a tag such
+as `components/privatestorage/v0.1.0`, or a pushed commit's pseudo-version), then
+require that version in each consumer and drop the `replace` in a later commit.
 
 ## Review before the first push
 
@@ -122,4 +132,7 @@ python3 components/continuity/scripts/dependency-notices.py --check
 ```
 
 Run the check before packaging. Notice collection is deterministic preparation,
-not a claim that arbitrary future dependencies have been reviewed.
+not a claim that arbitrary future dependencies have been reviewed. The exact
+repository-local private-storage library is covered by the root MIT license;
+its external dependencies still contribute notices. Other module replacements
+remain refused until reviewed.
