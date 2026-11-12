@@ -208,3 +208,12 @@ recording a narrative, supply the known exact invocation with CLI
 `--creator-invocation ID` or MCP `creator_invocation_id` to retain that link.
 Existing Git notes are preserved;
 the explicit historical note importer can still read them when requested.
+
+Automatic session attribution requires both a Git-writing tool observation and a
+commit-creating HEAD reflog entry since the last observed HEAD. Fetch, pull and
+local branch fast-forwards do not attribute incoming history. A new merge commit
+or replayed rebase commit can be attributed without crediting its existing
+ancestors. Missing, expired or over-budget reflog history leaves attribution
+unknown; reachability alone is insufficient. This remains best-effort hook
+observation, not proof of authorship. Existing historical attribution rows are not
+rewritten by this correction.

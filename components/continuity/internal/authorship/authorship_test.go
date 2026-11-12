@@ -116,3 +116,90 @@ func TestObserveAttributesOnlyCommitsMadeByAGitToolCall(t *testing.T) {
 		t.Fatalf("task commits = %#v %v", commits, err)
 	}
 }
+
+func TestObserveSeparatesCreatedCommitsFromIncomingHistory(t *testing.T) {
+	for _, operation := range []string{"fetch-merge", "pull", "local-fast-forward", "merge", "pull-merge", "rebase", "cherry-pick", "amend", "missing-reflog"} {
+		t.Run(operation, func(t *testing.T) {
+			ctx := context.Background()
+			upstream, root := t.TempDir(), t.TempDir()
+			git(t, upstream, "init", "-q", "-b", "main")
+			git(t, upstream, "commit", "-q", "--allow-empty", "-m", "base")
+			git(t, root, "clone", "-q", upstream, ".")
+			db, err := database.Initialize(ctx, filepath.Join(t.TempDir(), "test.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if _, err := db.Exec(`INSERT INTO projects(id,root,name,created_at) VALUES ('p',?,'test','2026-01-01')`, root); err != nil {
+				t.Fatal(err)
+			}
+			observe := func(attribute bool) int {
+				t.Helper()
+				n, err := Observe(ctx, db, Observation{ProjectID: "p", Root: root, SessionID: "agent", Client: "codex", Attribute: attribute, At: time.Now()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			if operation == "merge" || operation == "pull-merge" || operation == "rebase" || operation == "cherry-pick" {
+				git(t, root, "commit", "-q", "--allow-empty", "-m", "local")
+			}
+			if operation == "local-fast-forward" {
+				git(t, root, "checkout", "-qb", "incoming")
+				git(t, root, "commit", "-q", "--allow-empty", "-m", "incoming-local")
+				git(t, root, "checkout", "-q", "main")
+			}
+			observe(false)
+			git(t, upstream, "commit", "-q", "--allow-empty", "-m", "incoming")
+			incoming := git(t, upstream, "rev-parse", "HEAD")
+			want := 0
+			switch operation {
+			case "fetch-merge":
+				git(t, root, "fetch", "-q", "origin")
+				git(t, root, "merge", "--ff-only", "origin/main")
+			case "pull":
+				git(t, root, "pull", "-q", "--ff-only", "origin", "main")
+			case "local-fast-forward":
+				git(t, root, "merge", "--ff-only", "incoming")
+			case "merge":
+				git(t, root, "fetch", "-q", "origin")
+				git(t, root, "merge", "--no-ff", "-m", "merge", "origin/main")
+				want = 1
+			case "pull-merge":
+				git(t, root, "pull", "--no-rebase", "--no-ff", "origin", "main")
+				want = 1
+			case "rebase":
+				git(t, root, "fetch", "-q", "origin")
+				git(t, root, "rebase", "--keep-empty", "origin/main")
+				want = 1
+			case "cherry-pick":
+				git(t, root, "fetch", "-q", "origin")
+				git(t, root, "cherry-pick", "--allow-empty", "origin/main")
+				want = 1
+			case "amend":
+				git(t, root, "commit", "--amend", "--allow-empty", "-m", "amended")
+				want = 1
+			case "missing-reflog":
+				git(t, root, "reflog", "expire", "--expire=all", "--all")
+				git(t, root, "commit", "-q", "--allow-empty", "-m", "new-without-baseline")
+			}
+			if got := observe(true); got != want {
+				t.Fatalf("attributed %d, want %d; reflog:\n%s", got, want, git(t, root, "reflog"))
+			}
+			head := git(t, root, "rev-parse", "HEAD")
+			authors, err := Authors(ctx, db, "p", "", []string{incoming, head})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := authors[incoming]; ok {
+				t.Fatal("incoming upstream commit attributed to this session")
+			}
+			if want == 1 && authors[head].SessionID != "agent" {
+				t.Fatal("newly created merge/rebase commit missing attribution")
+			}
+			if got := observe(true); got != 0 {
+				t.Fatalf("repeat attributed %d commits", got)
+			}
+		})
+	}
+}

@@ -135,10 +135,9 @@ type Observation struct {
 	At        time.Time
 }
 
-// Observe compares HEAD with the last HEAD any hook saw for this checkout. When
-// it moved during a tool call that ran Git, the new commits are attributed to
-// the observing session; otherwise the baseline just moves, so commits made
-// outside any agent's tool call are never attributed to one.
+// Observe compares HEAD with the last HEAD any hook saw for this checkout.
+// Attribution also requires a commit-creating HEAD reflog entry: reachability
+// alone cannot distinguish newly created commits from a pull or fast-forward.
 func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, error) {
 	head, err := Head(ctx, observation.Root)
 	if err != nil || head == "" {
@@ -155,11 +154,7 @@ func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, err
 	at := observation.At.UTC().Format(time.RFC3339Nano)
 	recorded := 0
 	if previous != "" && observation.Attribute && observation.SessionID != "" {
-		commits := []string{head}
-		output, err := gitenv.Command(ctx, "-C", observation.Root, "rev-list", "--max-count", strconv.Itoa(MaxCommitsPerObservation), previous+".."+head).Output()
-		if err == nil {
-			commits = strings.Fields(string(output))
-		}
+		commits := createdCommits(ctx, observation.Root, previous, head)
 		for _, commit := range commits {
 			result, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO commit_authors(project_id,member,commit_sha,session_id,client,task_id,tool_name,certainty,observed_at) VALUES (?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),'observed',?)`,
 				observation.ProjectID, observation.Member, commit, observation.SessionID, observation.Client, observation.TaskID, observation.ToolName, at)
@@ -174,6 +169,59 @@ func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, err
 	_, err = db.ExecContext(ctx, `INSERT INTO head_observations(project_id,member,head,observed_at) VALUES (?,?,?,?)
 		ON CONFLICT(project_id,member) DO UPDATE SET head=excluded.head, observed_at=excluded.observed_at`, observation.ProjectID, observation.Member, head, at)
 	return recorded, err
+}
+
+// createdCommits intersects newly reachable commits with creation operations in
+// HEAD's reflog since the observed baseline. Local branch fast-forwards need the
+// same exclusion as remote pulls; excluding only remote refs is insufficient.
+// Missing, expired or over-budget reflog history provides no attribution evidence.
+func createdCommits(ctx context.Context, root, previous, head string) []string {
+	output, err := gitenv.Command(ctx, "-C", root, "reflog", "show", "--format=%H%x00%gs", "-n", strconv.Itoa(MaxCommitsPerObservation+1), "HEAD").Output()
+	if err != nil {
+		return nil
+	}
+	created := map[string]bool{}
+	foundBaseline := false
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		hash, subject, ok := strings.Cut(line, "\x00")
+		if !ok {
+			return nil
+		}
+		if hash == previous {
+			foundBaseline = true
+			break
+		}
+		if createsCommit(subject) {
+			created[hash] = true
+		}
+	}
+	if !foundBaseline || len(created) == 0 {
+		return nil
+	}
+	output, err = gitenv.Command(ctx, "-C", root, "rev-list", "--max-count", strconv.Itoa(MaxCommitsPerObservation), previous+".."+head).Output()
+	if err != nil {
+		return nil
+	}
+	var commits []string
+	for _, hash := range strings.Fields(string(output)) {
+		if created[hash] {
+			commits = append(commits, hash)
+		}
+	}
+	return commits
+}
+
+func createsCommit(subject string) bool {
+	action, detail, ok := strings.Cut(subject, ": ")
+	if !ok {
+		return false
+	}
+	switch action {
+	case "commit", "commit (initial)", "commit (amend)", "cherry-pick", "revert", "am",
+		"rebase (pick)", "rebase (reword)", "rebase (squash)", "rebase (fixup)", "rebase (continue)":
+		return true
+	}
+	return (strings.HasPrefix(action, "merge ") || strings.HasPrefix(action, "pull ")) && strings.HasPrefix(detail, "Merge made by ")
 }
 
 // Author is the session (and its task) a hook saw create a commit.
