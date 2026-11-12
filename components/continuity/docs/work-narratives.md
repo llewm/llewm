@@ -194,5 +194,17 @@ notes. MCP API 142 removes those inputs and the note-write receipt; no database
 migration or writer-floor change is required.
 
 `llewm log` renders these canonical claims directly, grouping verification by
-observed, session-run, or inherited authority. Existing Git notes are preserved;
+observed, session-run, or inherited authority. Both normal and `--oneline` output
+summarize each commit's narrative creators, agent clients, providers, and models.
+Expanded narratives also show the exact narrative, invocation, and session IDs,
+and the invocation's identity source. Attribution comes only from the narrative's
+`creator_invocation_id` within the same project; missing values read `unknown`.
+The creator is caller asserted, and invocation identity retains its recorded
+source (for example, `client_hook_claim`). These are the linked narratives'
+creators, not proof that they authored every change in the commit. The Git author
+remains separate. Multiple contributors are retained; repeated summaries are
+collapsed. Historical records are not inferred from the current agent or model. When
+recording a narrative, supply the known exact invocation with CLI
+`--creator-invocation ID` or MCP `creator_invocation_id` to retain that link.
+Existing Git notes are preserved;
 the explicit historical note importer can still read them when requested.

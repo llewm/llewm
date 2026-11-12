@@ -88,19 +88,19 @@ func (s Service) Log(ctx context.Context, projectID string, options LogOptions) 
 		}
 		hash := fields[0]
 
-		rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT w.payload_json FROM work_narratives w JOIN work_narrative_anchors a ON a.project_id=w.project_id AND a.narrative_id=w.id WHERE w.project_id=? AND a.anchor_kind='commit' AND a.target=? AND COALESCE(a.region_locator,'')=? AND NOT EXISTS (SELECT 1 FROM superseded_records x WHERE x.project_id=w.project_id AND x.family='narrative' AND x.id=w.id) ORDER BY w.recorded_at, w.id`, projectID, hash, MemberLocator(repository.Member))
+		rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT w.payload_json, COALESCE(i.client,''), COALESCE(i.provider,''), COALESCE(i.model,''), COALESCE(i.session_id,''), COALESCE(i.identity_source,'') FROM work_narratives w LEFT JOIN actor_invocations i ON i.project_id=w.project_id AND i.id=w.creator_invocation_id JOIN work_narrative_anchors a ON a.project_id=w.project_id AND a.narrative_id=w.id WHERE w.project_id=? AND a.anchor_kind='commit' AND a.target=? AND COALESCE(a.region_locator,'')=? AND NOT EXISTS (SELECT 1 FROM superseded_records x WHERE x.project_id=w.project_id AND x.family='narrative' AND x.id=w.id) ORDER BY w.recorded_at, w.id`, projectID, hash, MemberLocator(repository.Member))
 		if err != nil {
 			return "", err
 		}
-		var records []Record
+		var records []logNarrative
 		for rows.Next() {
 			var raw string
-			if err = rows.Scan(&raw); err != nil {
+			var record logNarrative
+			if err = rows.Scan(&raw, &record.client, &record.provider, &record.model, &record.session, &record.source); err != nil {
 				rows.Close()
 				return "", err
 			}
-			var record Record
-			if err = json.Unmarshal([]byte(raw), &record); err != nil {
+			if err = json.Unmarshal([]byte(raw), &record.Record); err != nil {
 				rows.Close()
 				return "", err
 			}
@@ -124,9 +124,9 @@ func (s Service) Log(ctx context.Context, projectID string, options LogOptions) 
 			if options.Missing {
 				result.WriteString(" [no narrative]")
 			}
-			result.WriteString("\n")
+			fmt.Fprintf(&result, " [narrative agents: %s]\n", logAgents(records))
 		} else {
-			fmt.Fprintf(&result, "commit %s\nAuthor: %s\nDate:   %s\n\n", hash, fields[1], fields[2])
+			fmt.Fprintf(&result, "commit %s\nAuthor: %s\nDate:   %s\nNarrative agents: %s\n\n", hash, fields[1], fields[2], logAgents(records))
 			for _, line := range strings.Split(strings.TrimRight(fields[3], "\n"), "\n") {
 				fmt.Fprintf(&result, "    %s\n", line)
 			}
@@ -137,7 +137,8 @@ func (s Service) Log(ctx context.Context, projectID string, options LogOptions) 
 		if len(records) > 0 && (!options.Oneline || options.Expand) {
 			result.WriteString("\nNarratives:\n")
 			for _, record := range records {
-				for _, line := range strings.Split(strings.TrimRight(RenderCommitNarrative(hash, record), "\n"), "\n") {
+				fmt.Fprintf(&result, "    Narrative: %s\n    Creator: %q (caller asserted)\n    Agent: %q; provider: %q; model: %q\n    Invocation: %q; session: %q; identity source: %q\n", record.ID, logIdentity(record.Creator), logIdentity(record.client), logIdentity(record.provider), logIdentity(record.model), logIdentity(record.CreatorInvocationID), logIdentity(record.session), logIdentity(record.source))
+				for _, line := range strings.Split(strings.TrimRight(RenderCommitNarrative(hash, record.Record), "\n"), "\n") {
 					fmt.Fprintf(&result, "    %s\n", line)
 				}
 				result.WriteString("\n")
@@ -147,4 +148,34 @@ func (s Service) Log(ctx context.Context, projectID string, options LogOptions) 
 		}
 	}
 	return result.String(), nil
+}
+
+// Attribution describes the narrative's recorded creator invocation, not proof
+// that this invocation authored every change in the linked Git commit.
+type logNarrative struct {
+	Record
+	client, provider, model, session, source string
+}
+
+func logIdentity(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func logAgents(records []logNarrative) string {
+	if len(records) == 0 {
+		return "unknown (no current narrative)"
+	}
+	seen := map[string]bool{}
+	var agents []string
+	for _, record := range records {
+		label := fmt.Sprintf("creator=%q agent=%q provider=%q model=%q", logIdentity(record.Creator), logIdentity(record.client), logIdentity(record.provider), logIdentity(record.model))
+		if !seen[label] {
+			agents = append(agents, label)
+			seen[label] = true
+		}
+	}
+	return strings.Join(agents, "; ")
 }
