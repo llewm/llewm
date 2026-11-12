@@ -65,6 +65,13 @@ func TestWorktreesAndSubmodulesShareTheirProjectsStore(t *testing.T) {
 	t.Setenv("CONTINUITY_HOME", "")
 	runCLI(t, "", "init")
 	main := projectShow(t)
+	// A worktree reports the canonical root Git records while the main checkout
+	// and submodule keep the lexical one (macOS reaches t.TempDir through /var),
+	// so compare canonical forms of the same root.
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	lib := filepath.Join(filepath.Dir(root), "lib")
 	worktree := filepath.Join(filepath.Dir(root), "wt")
@@ -87,7 +94,11 @@ func TestWorktreesAndSubmodulesShareTheirProjectsStore(t *testing.T) {
 	for _, dir := range []struct{ path, kind string }{{worktree, "worktree"}, {filepath.Join(root, "lib"), "submodule"}} {
 		t.Chdir(dir.path)
 		view := projectShow(t)
-		if view.ProjectID != main.ProjectID || view.Root != root || view.Checkout.Kind != dir.kind || view.Checkout.Path != dir.path {
+		viewRoot, err := filepath.EvalSymlinks(view.Root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.ProjectID != main.ProjectID || viewRoot != canonical || view.Checkout.Kind != dir.kind || view.Checkout.Path != dir.path {
 			t.Fatalf("%s view: %#v", dir.kind, view)
 		}
 		if _, err := os.Stat(filepath.Join(dir.path, ".llewm/continuity")); !os.IsNotExist(err) {

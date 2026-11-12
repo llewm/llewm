@@ -20,7 +20,7 @@ func TestNativeClaudeUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := t.TempDir()
+	base := tempDir(t)
 	t.Chdir(base)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(base, "config"))
 	t.Setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", filepath.Join(base, "config", "plugins"))

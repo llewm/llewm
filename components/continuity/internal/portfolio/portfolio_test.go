@@ -48,7 +48,12 @@ func bare(t *testing.T) string {
 func source(t *testing.T, name, lineage string) Project {
 	t.Helper()
 	ctx := context.Background()
-	root := t.TempDir()
+	// Bindings record the canonical root that Inspect resolves; macOS reaches
+	// t.TempDir through /var.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	git(t, root, "init", "--quiet")
 	if _, err := config.WriteDefault(root); err != nil {
 		t.Fatal(err)

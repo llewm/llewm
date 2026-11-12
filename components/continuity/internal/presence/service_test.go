@@ -103,8 +103,13 @@ func TestPresenceAppliesDerivedStateBeforeLimit(t *testing.T) {
 
 func TestCleanupCandidatesRequireCleanIntegratedInactiveWorktree(t *testing.T) {
 	ctx, service, projectID := testService(t)
-	root := filepath.Join(t.TempDir(), "repo")
-	worktree := filepath.Join(t.TempDir(), "worktree")
+	// Git reports canonical worktree paths; macOS reaches t.TempDir through /var.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "repo")
+	worktree := filepath.Join(base, "worktree")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}

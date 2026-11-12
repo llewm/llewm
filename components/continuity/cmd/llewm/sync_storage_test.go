@@ -77,8 +77,13 @@ func TestStorageCommandsInitializeOnlyFreshIdentityAndAudit(t *testing.T) {
 	}
 	file := filepath.Join(t.TempDir(), "storage-plan.json")
 	var sealed historystorage.Seal
+	// The plan records the canonical root; macOS reaches t.TempDir through /var.
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	decodeCLI(t, runCLI(t, "", "sync", "storage", "plan", "--save", file), &sealed)
-	if sealed.Plan.Root != root || sealed.Plan.ArchiveMode != "initialize" {
+	if sealed.Plan.Root != canonical || sealed.Plan.ArchiveMode != "initialize" {
 		t.Fatalf("fresh plan: %+v", sealed)
 	}
 	for _, operation := range []string{"prepare", "complete", "complete", "audit"} {

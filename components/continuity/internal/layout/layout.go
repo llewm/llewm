@@ -49,21 +49,35 @@ type Receipt struct {
 }
 
 func exists(p string) bool { _, e := os.Lstat(p); return e == nil }
-func noSymlinks(p string) error {
-	p, err := filepath.Abs(p)
+
+// noSymlinksBelow refuses a symlink at p or at any existing component between
+// anchor and p. The anchor and its ancestors are the user's chosen location,
+// not state this package owns; macOS reaches temporary folders through the
+// system /var and /tmp symlinks, for example.
+func noSymlinksBelow(anchor, p string) error {
+	anchor, err := filepath.Abs(anchor)
 	if err != nil {
 		return err
 	}
-	for current := p; ; current = filepath.Dir(current) {
+	if p, err = filepath.Abs(p); err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(anchor, p)
+	if err != nil || !filepath.IsLocal(rel) {
+		return fmt.Errorf("path is outside %s: %s", anchor, p)
+	}
+	current := anchor
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
 		info, e := os.Lstat(current)
-		if e == nil && info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symlink refused: %s", current)
+		if errors.Is(e, os.ErrNotExist) {
+			return nil
 		}
-		if e != nil && !errors.Is(e, os.ErrNotExist) {
+		if e != nil {
 			return e
 		}
-		if filepath.Dir(current) == current {
-			break
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink refused: %s", current)
 		}
 	}
 	return nil
@@ -84,7 +98,7 @@ func Preview(ctx context.Context, root string) (Plan, error) {
 		return p, errors.New("layout migration requires default project storage; remove CONTINUITY_HOME only after reviewing its target")
 	}
 	for _, path := range []string{p.Source, filepath.Join(root, ".llewm")} {
-		if err := noSymlinks(path); err != nil {
+		if err := noSymlinksBelow(root, path); err != nil {
 			return p, err
 		}
 	}
@@ -216,7 +230,7 @@ func migrate(ctx context.Context, root, backup string, stopped bool, rename func
 			return receipt, errors.New("backup must be outside both state locations")
 		}
 	}
-	if err = noSymlinks(backup); err != nil {
+	if err = noSymlinksBelow(filepath.Dir(backup), backup); err != nil {
 		return receipt, err
 	}
 	if exists(backup) {
@@ -471,7 +485,7 @@ func Restore(root, backup string, stopped bool) error {
 	if !stopped {
 		return errors.New("restore requires --writers-stopped")
 	}
-	if err := noSymlinks(filepath.Join(backup, "receipt.json")); err != nil {
+	if err := noSymlinksBelow(filepath.Dir(backup), filepath.Join(backup, "receipt.json")); err != nil {
 		return err
 	}
 	body, err := os.ReadFile(filepath.Join(backup, "receipt.json"))
@@ -490,7 +504,7 @@ func Restore(root, backup string, stopped bool) error {
 		return errors.New("backup receipt does not match this project/layout")
 	}
 	for _, path := range []string{r.Plan.Source, r.Plan.Destination, r.Stage, filepath.Join(root, ".llewm")} {
-		if err = noSymlinks(path); err != nil {
+		if err = noSymlinksBelow(root, path); err != nil {
 			return err
 		}
 	}
@@ -608,7 +622,7 @@ func EnsureManifest(root string) error {
 		return nil
 	}
 	path := filepath.Join(root, ".llewm", "project.toml")
-	if err := noSymlinks(path); err != nil {
+	if err := noSymlinksBelow(root, path); err != nil {
 		return err
 	}
 	if exists(path) {

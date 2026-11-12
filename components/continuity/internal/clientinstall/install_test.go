@@ -114,7 +114,7 @@ func TestClientInstallPreviewApplyAndRepeat(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			root := filepath.Join(t.TempDir(), "installer", "marketplace")
+			root := filepath.Join(tempDir(t), "installer", "marketplace")
 			f := &fakeClient{client: client}
 			s := Service{Client: client, Root: root, Package: p, Run: f.run}
 			preview, err := s.Inspect(context.Background())
@@ -148,7 +148,7 @@ func TestClientInstallPreviewApplyAndRepeat(t *testing.T) {
 
 func TestClientInstallConflictAndPartialRecovery(t *testing.T) {
 	p, _ := Bundled()
-	root := filepath.Join(t.TempDir(), "installer", "marketplace")
+	root := filepath.Join(tempDir(t), "installer", "marketplace")
 	f := &fakeClient{client: "codex", registered: true, root: "/another/marketplace"}
 	s := Service{Client: "codex", Root: root, Package: p, Run: f.run}
 	if _, err := s.Apply(context.Background()); err == nil || len(f.writes) > 0 {
@@ -172,7 +172,7 @@ func TestClientInstallConflictAndPartialRecovery(t *testing.T) {
 
 func TestClientInstallRejectsUnknownClientProtocol(t *testing.T) {
 	p, _ := Bundled()
-	s := Service{Client: "codex", Root: filepath.Join(t.TempDir(), "marketplace"), Package: p, Run: func(_ context.Context, args ...string) ([]byte, error) { return []byte(`{}`), nil }}
+	s := Service{Client: "codex", Root: filepath.Join(tempDir(t), "marketplace"), Package: p, Run: func(_ context.Context, args ...string) ([]byte, error) { return []byte(`{}`), nil }}
 	if _, err := s.Inspect(context.Background()); err == nil {
 		t.Fatal("accepted unknown protocol")
 	}
@@ -180,7 +180,7 @@ func TestClientInstallRejectsUnknownClientProtocol(t *testing.T) {
 
 func TestClientInstallMissingClientWritesNothing(t *testing.T) {
 	p, _ := Bundled()
-	root := filepath.Join(t.TempDir(), "installer", "marketplace")
+	root := filepath.Join(tempDir(t), "installer", "marketplace")
 	s := Service{Client: "codex", Root: root, Package: p, Run: func(context.Context, ...string) ([]byte, error) { return nil, errors.New("client unavailable") }}
 	if _, err := s.Apply(context.Background()); err == nil {
 		t.Fatal("accepted missing client")
@@ -208,7 +208,7 @@ func TestBundledManifestsAndLicenses(t *testing.T) {
 
 func TestPackageOwnershipAndBackup(t *testing.T) {
 	p, _ := Bundled()
-	root := filepath.Join(t.TempDir(), "marketplace")
+	root := filepath.Join(tempDir(t), "marketplace")
 	if _, err := p.Stage(root); err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestPackageOwnershipAndBackup(t *testing.T) {
 
 func TestPackageRejectsSymlinkAndUnmanagedDirectory(t *testing.T) {
 	p, _ := Bundled()
-	base := t.TempDir()
+	base := tempDir(t)
 	root := filepath.Join(base, "marketplace")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestUpgradeAndEnableTransitions(t *testing.T) {
 			for _, enabled := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/stale=%t/enabled=%t", client, stale, enabled), func(t *testing.T) {
 					p, _ := Bundled()
-					root := filepath.Join(t.TempDir(), "marketplace")
+					root := filepath.Join(tempDir(t), "marketplace")
 					version := p.Version
 					if stale {
 						version = "0.1.0+installer.old"
@@ -299,7 +299,7 @@ func TestEveryPackageInputChangesCacheIdentity(t *testing.T) {
 			if changed.Digest == original.Digest || changed.Version == original.Version {
 				t.Fatal("input omitted from cache identity")
 			}
-			root := filepath.Join(t.TempDir(), "marketplace")
+			root := filepath.Join(tempDir(t), "marketplace")
 			if _, err := original.Stage(root); err != nil {
 				t.Fatal(err)
 			}
@@ -317,7 +317,7 @@ func TestEveryPackageInputChangesCacheIdentity(t *testing.T) {
 
 func TestCorrectVersionWithStaleCacheDoesNotPass(t *testing.T) {
 	p, _ := Bundled()
-	root := filepath.Join(t.TempDir(), "marketplace")
+	root := filepath.Join(tempDir(t), "marketplace")
 	f := &fakeClient{client: "claude-code"}
 	s := Service{Client: f.client, Root: root, Package: p, Run: f.run}
 	if _, err := s.Apply(context.Background()); err != nil {
@@ -335,4 +335,15 @@ func TestCorrectVersionWithStaleCacheDoesNotPass(t *testing.T) {
 	if receipt, err := s.Apply(context.Background()); err != nil || receipt.PluginCache.Status != "current" {
 		t.Fatal(receipt, err)
 	}
+}
+
+// tempDir returns a canonical temporary directory. Installer directories refuse
+// symlinked ancestors, and macOS reaches temporary folders through /var.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }

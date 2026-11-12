@@ -11,6 +11,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/symlinktest"
 )
 
 func legacyFixture(t *testing.T) (context.Context, string, string) {
@@ -210,5 +211,33 @@ func TestLayoutRejectsCollisionsOverridesAndUnsafePaths(t *testing.T) {
 	}
 	if _, err := Preview(ctx, root); err == nil {
 		t.Fatal("symlink accepted")
+	}
+}
+
+// A symlinked ancestor is the user's chosen location (macOS reaches temporary
+// folders through /var and /tmp); a symlink inside Llewm state is still refused.
+func TestManifestAllowsSymlinkedAncestorButRefusesSymlinkedState(t *testing.T) {
+	t.Setenv("CONTINUITY_HOME", "")
+	real := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	symlinktest.Create(t, real, alias)
+	root := filepath.Join(alias, "project")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureManifest(root); err != nil {
+		t.Fatalf("symlinked ancestor refused: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(real, "project", ".llewm", "project.toml")); err != nil || string(b) != Manifest {
+		t.Fatalf("manifest = %q, %v", b, err)
+	}
+
+	redirected := filepath.Join(t.TempDir(), "project")
+	if err := os.Mkdir(redirected, 0700); err != nil {
+		t.Fatal(err)
+	}
+	symlinktest.Create(t, t.TempDir(), filepath.Join(redirected, ".llewm"))
+	if err := EnsureManifest(redirected); err == nil || !strings.Contains(err.Error(), "symlink refused") {
+		t.Fatalf("symlinked state accepted: %v", err)
 	}
 }

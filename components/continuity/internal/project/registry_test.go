@@ -13,7 +13,12 @@ import (
 func TestRegistryRoutesFederatedMembersWithoutProjectBodies(t *testing.T) {
 	ctx := context.Background()
 	global := t.TempDir()
-	group := filepath.Join(t.TempDir(), "fleet")
+	// Registry routes record canonical roots; macOS reaches t.TempDir through /var.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := filepath.Join(base, "fleet")
 	for _, dir := range []string{"a", "b", "a-moved"} {
 		if err := os.MkdirAll(filepath.Join(group, dir), 0o700); err != nil {
 			t.Fatal(err)

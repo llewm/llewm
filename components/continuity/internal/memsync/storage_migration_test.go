@@ -406,7 +406,13 @@ func TestBareCloneStorageRefusesDirtyOrActiveSourceWithoutReceipt(t *testing.T) 
 				}
 			case "redirected-source":
 				other := bareRemote(t)
-				if _, err := repo.run(ctx, "config", "--local", "url."+other+".insteadOf", p.Root); err != nil {
+				// Redirect the exact source path the migration verifies; on macOS
+				// p.Root reaches it through the /var symlink, which Git would not match.
+				source, err := p.normalized()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := repo.run(ctx, "config", "--local", "url."+other+".insteadOf", source.Root); err != nil {
 					t.Fatal(err)
 				}
 			}
