@@ -131,7 +131,8 @@ comparison also works with locally generated preview bundles today.
    receipts and configuration. Back up each affected store using the supported
    command. Identify active writers and coordinate incompatible changes across
    machines. Do not terminate the agent's own MCP without a supported handoff.
-4. Stage and verify the candidate, replace only the identified installed file,
+4. Stage and verify the candidate, replace only the identified installed file
+   (see [replacing a running executable](#replacing-a-running-executable)),
    inspect each store with `database status`, then use the exact
    [backup-gated migration](installation.md#migration-bearing-updates) workflow
    where required. Never turn an update into `init` on replacement storage.
@@ -153,6 +154,44 @@ comparison also works with locally generated preview bundles today.
 7. Retain verified backups and receipts; remove scratch artifacts. After new
    writes or sync, restoring an old database is a separate reconciliation decision,
    not an automatic rollback. Sync uses its separately authorized destination/profile.
+
+### Replacing a running executable
+
+The client's MCP server and hooks keep the installed executable in use, so the
+default is an in-session swap, finished by the restart in step 6. Closing the
+client first is the exception.
+
+- **Linux and macOS:** install the staged candidate with an atomic rename onto
+  the installed path. A running process keeps its already-open image.
+- **Windows:** copying over a running `llewm.exe` fails because the file is in
+  use, but renaming it succeeds. Rename the installed file to its retained
+  backup name, for example `llewm.exe.before-COMMIT-TIMESTAMP.bak`, then copy
+  the verified candidate to the original path. Do both in one step: a hook that
+  starts between them finds no executable. Remove an old backup only once no
+  process still runs it. Deleting a running image fails, and a later cleanup can
+  retry.
+
+Until the restart, versions are mixed. Each hook and CLI call starts the new
+executable, while the client's MCP server keeps running the old image, and
+`continuity_info` reports `restart_required: true`. That is safe in both
+compatibility cases:
+
+- **Writer floor unchanged** (ordinary updates and additive migrations): both
+  versions keep writing. Migrations with one-time hook work, such as
+  revalidation markers, run on the next hook.
+- **Writer floor raised:** the old MCP server refuses record writes and keeps
+  serving reads. A checkpoint returns `deferred: true` with a device-local
+  recovery envelope instead of being lost. After the restart, run
+  `llewm checkpoint recovery apply ID` and require a verified readback. Do not
+  also save the checkpoint through the CLI, because that duplicates the staged
+  handoff. See [migration-bearing updates](installation.md#migration-bearing-updates).
+
+Use an offline maintenance handoff (a checkpoint with `resume_after_restart`,
+then closing the client and running a terminal procedure) only when a step
+cannot run while the client is open. Examples: a package or installer owner that
+replaces files it cannot rename, or a migration whose documented procedure
+requires stopping every writer. An "in use" copy failure on Windows is not
+such a reason; use the rename swap above.
 
 Invoking the update skill authorizes the requested update within the user's
 stated scope; it does not create a standing grant for future updates, change plan
