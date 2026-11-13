@@ -231,12 +231,13 @@ type Author struct {
 	TaskID    string `json:"task_id,omitempty"`
 }
 
-// Authors returns the recorded authors of commits in one checkout, by hash.
+// Authors returns the recorded, unrevoked authors of commits in one checkout,
+// by hash.
 func Authors(ctx context.Context, db *sql.DB, projectID, member string, commits []string) (map[string]Author, error) {
 	result := map[string]Author{}
 	for _, commit := range commits {
 		var author Author
-		err := db.QueryRowContext(ctx, `SELECT session_id,client,COALESCE(task_id,'') FROM commit_authors WHERE project_id=? AND member=? AND commit_sha=?`, projectID, member, commit).Scan(&author.SessionID, &author.Client, &author.TaskID)
+		err := db.QueryRowContext(ctx, `SELECT a.session_id,a.client,COALESCE(a.task_id,'') FROM commit_authors a WHERE a.project_id=? AND a.member=? AND a.commit_sha=? AND NOT EXISTS (`+revokedMatch+`)`, projectID, member, commit).Scan(&author.SessionID, &author.Client, &author.TaskID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -248,9 +249,10 @@ func Authors(ctx context.Context, db *sql.DB, projectID, member string, commits 
 	return result, nil
 }
 
-// TaskCommits lists the commits attributed to a task's sessions in a checkout.
+// TaskCommits lists the unrevoked commits attributed to a task's sessions in a
+// checkout.
 func TaskCommits(ctx context.Context, db *sql.DB, projectID, taskID string) (map[string]string, error) {
-	rows, err := db.QueryContext(ctx, `SELECT commit_sha,member FROM commit_authors WHERE project_id=? AND task_id=?`, projectID, taskID)
+	rows, err := db.QueryContext(ctx, `SELECT a.commit_sha,a.member FROM commit_authors a WHERE a.project_id=? AND a.task_id=? AND NOT EXISTS (`+revokedMatch+`)`, projectID, taskID)
 	if err != nil {
 		return nil, err
 	}

@@ -17,7 +17,7 @@ func TestRadixMigrationFencesHeldOldWriterAndRetainsBackupFloor(t *testing.T) {
 	if err := CheckWriter(ctx, old, 137); err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := Migrate(ctx, path, MigrateOptions{From: "094_history_recovery_selection.sql", To: "095_history_radix_writer.sql", BackupPath: backup})
+	receipt, err := Migrate(ctx, path, MigrateOptions{From: "094_history_recovery_selection.sql", To: latestMigration, BackupPath: backup})
 	if err != nil || receipt.BackupIntegrity != "ok" || receipt.DatabaseIntegrity != "ok" || receipt.ForeignKeyViolations != 0 {
 		t.Fatalf("migration: %+v %v", receipt, err)
 	}

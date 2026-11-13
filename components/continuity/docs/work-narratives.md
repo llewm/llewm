@@ -216,4 +216,10 @@ or replayed rebase commit can be attributed without crediting its existing
 ancestors. Missing, expired or over-budget reflog history leaves attribution
 unknown; reachability alone is insufficient. This remains best-effort hook
 observation, not proof of authorship. Existing historical attribution rows are not
-rewritten by this correction.
+rewritten by this correction. `llewm database authorship` previews whether each
+existing attribution has a commit-creating entry, in any of the checkout's
+reflogs, within 15 minutes before its observation; `--apply` appends a
+device-local revocation for each one that does not, so pre-fix credits for
+pulled history or for commits another session made earlier stop affecting
+narrative coverage and task overlap. The observation rows stay unchanged, and
+each device revalidates its own database.
