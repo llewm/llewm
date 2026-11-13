@@ -10,13 +10,13 @@ import (
 
 // lockFile takes an exclusive lock, waiting for other syncs on this machine.
 // Closing the file releases it.
-func lockFile(path string) (*os.File, error) {
+func lockFile(path string) (*fileLock, error) {
 	return lockFileMode(path, false)
 }
 
-func tryLockFile(path string) (*os.File, error) { return lockFileMode(path, true) }
+func tryLockFile(path string) (*fileLock, error) { return lockFileMode(path, true) }
 
-func lockFileMode(path string, immediate bool) (*os.File, error) {
+func lockFileMode(path string, immediate bool) (*fileLock, error) {
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func lockFileMode(path string, immediate bool) (*os.File, error) {
 		file.Close()
 		return nil, err
 	}
-	return file, nil
+	return &fileLock{file}, nil
 }
 
 // parentRenameKeepsOpenFiles is false: Windows refuses to rename a directory
