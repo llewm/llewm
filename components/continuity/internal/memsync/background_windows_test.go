@@ -19,6 +19,7 @@ var procGetConsoleWindow = windows.NewLazySystemDLL("kernel32.dll").NewProc("Get
 // TestBackgroundHelperProcess is not a test: started as a background command,
 // it records whether it has a console and whether that console has a window.
 func TestBackgroundHelperProcess(t *testing.T) {
+	t.Parallel()
 	report := os.Getenv(backgroundHelperEnv)
 	if report == "" {
 		return
@@ -42,6 +43,7 @@ func boolWord(value bool) string {
 // console programs it starts (git.exe and its helpers) inherit that console
 // instead of each opening a new visible one, as they did under DETACHED_PROCESS.
 func TestBackgroundCommandHasAWindowlessConsole(t *testing.T) {
+	t.Parallel()
 	report := filepath.Join(t.TempDir(), "state")
 	command := backgroundCommand(os.Args[0], "-test.run=^TestBackgroundHelperProcess$")
 	command.Env = append(os.Environ(), backgroundHelperEnv+"="+report)

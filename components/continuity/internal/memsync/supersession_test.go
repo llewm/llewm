@@ -55,6 +55,7 @@ func (m machine) narrativeState(t *testing.T, id string) string {
 // one-successor constraint, and kept failing, so it never imported or pushed
 // again.
 func TestConcurrentSupersessionsBecomeAForkInsteadOfAFailedSync(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	b := newMachine(t, "b", remote)

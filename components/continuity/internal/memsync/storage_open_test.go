@@ -10,6 +10,7 @@ import (
 )
 
 func TestBareStorageOpenRequiresCompletedCutover(t *testing.T) {
+	t.Parallel()
 	ctx, old, remote, access, _ := cloneStorageFixture(t)
 	p, err := defaultCloneStoragePaths(old.Root)
 	if err != nil {
@@ -54,6 +55,7 @@ func TestBareStorageOpenRequiresCompletedCutover(t *testing.T) {
 }
 
 func TestBareStorageOpenNativeAndParentDiscovery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	remote := bareRemote(t)
@@ -131,6 +133,7 @@ func TestNativeBareCloneDoesNotShareObjectFilesWithLocalRemote(t *testing.T) {
 }
 
 func TestBareStorageOpenPreservesWhitespaceInPhysicalPath(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not support this Unix path spelling")
 	}

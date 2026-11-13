@@ -30,6 +30,8 @@ func publicationCheckpoint(t *testing.T, m machine, task string) string {
 	return "checkpoint:" + r.Checkpoint.ID
 }
 
+// Serial: it changes the process-wide buildinfo.Commit, which binds every
+// concurrent test's observation route.
 func TestPublicationReceiptZeroExportAndExactRecordCheck(t *testing.T) {
 	oldCommit := buildinfo.Commit
 	buildinfo.Commit = strings.Repeat("a", 40)
@@ -104,6 +106,7 @@ func TestPublicationReceiptZeroExportAndExactRecordCheck(t *testing.T) {
 }
 
 func TestPublicationReceiptDeferredOfflineAndDeletedRemote(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	m := newMachine(t, "delivery-failures", remote)
@@ -139,6 +142,7 @@ func TestPublicationReceiptDeferredOfflineAndDeletedRemote(t *testing.T) {
 }
 
 func TestPublicationSnapshotExcludesWriteDuringPush(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var delay atomic.Int64
 	upstream := delayedHTTPRemote(t, bareRemote(t), &delay)
@@ -205,6 +209,7 @@ func TestPublicationSnapshotExcludesWriteDuringPush(t *testing.T) {
 }
 
 func TestPublicationCheckRejectsInvalidSelectorsBeforeGit(t *testing.T) {
+	t.Parallel()
 	for _, refs := range [][]string{nil, {"decision:example"}, {"checkpoint:"}, {"narrative:x\nsecret"}, {"checkpoint:x", "checkpoint:x"}} {
 		if _, err := (Syncer{}).CheckPublication(context.Background(), refs, ""); err == nil {
 			t.Fatalf("accepted %q", refs)
@@ -213,6 +218,7 @@ func TestPublicationCheckRejectsInvalidSelectorsBeforeGit(t *testing.T) {
 }
 
 func TestPublicationCheckRejectsDamagedRemoteInsteadOfCachedSuccess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	m := newMachine(t, "damaged-remote", remote)

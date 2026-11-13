@@ -7,6 +7,7 @@ import (
 )
 
 func TestHistorySyncWorkMetricsMeasureOnlySelectedCycle(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t, "measured-cycle", bareRemote(t))
 	archive := archiveMachine(t, &m)
 	m.syncer.Archive = &archive
@@ -43,6 +44,7 @@ func TestHistorySyncWorkMetricsMeasureOnlySelectedCycle(t *testing.T) {
 }
 
 func TestFreshValidationDoesFullWorkAndRetainsNormalReceipts(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t, "fresh-validation", bareRemote(t))
 	archive := archiveMachine(t, &m)
 	m.syncer.Archive = &archive

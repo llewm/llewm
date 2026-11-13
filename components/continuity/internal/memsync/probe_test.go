@@ -9,6 +9,7 @@ import (
 )
 
 func TestProbeAddress(t *testing.T) {
+	t.Parallel()
 	for remote, want := range map[string]string{
 		"https://user@git.example.com/owner/repo": "git.example.com:443",
 		"http://git.example.com/owner/repo":       "git.example.com:80",

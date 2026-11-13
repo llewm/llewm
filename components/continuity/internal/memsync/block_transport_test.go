@@ -14,6 +14,7 @@ import (
 )
 
 func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "tracked-blocks", bareRemote(t))
 	m.decide(t, "tracked", "Tracked history")
@@ -68,6 +69,7 @@ func TestBlockTransportUsesOnlyTrackedValidatedPaths(t *testing.T) {
 }
 
 func TestGitSyncRepairsStagedInventoryFromArchive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	source, peer := newMachine(t, "archive-repair-source", remote), newMachine(t, "archive-repair-peer", remote)
@@ -97,6 +99,7 @@ func TestGitSyncRepairsStagedInventoryFromArchive(t *testing.T) {
 }
 
 func TestTrackedV3ConversionPreservesAllObservations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "convert-blocks", bareRemote(t))
 	archive := archiveMachine(t, &m)
@@ -148,6 +151,7 @@ func TestTrackedV3ConversionPreservesAllObservations(t *testing.T) {
 }
 
 func TestTrackedV3ConversionRejectsCorruptionBeforeRemoval(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "corrupt-v3", bareRemote(t))
 	archive := archiveMachine(t, &m)
@@ -189,6 +193,7 @@ func TestTrackedV3ConversionRejectsCorruptionBeforeRemoval(t *testing.T) {
 }
 
 func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "block-source", remote), newMachine(t, "block-target", remote)
@@ -242,6 +247,7 @@ func TestBlockTransportPublishesAndImportsThroughGit(t *testing.T) {
 }
 
 func TestBlockCycleConvergesAcrossGitPeers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "block-cycle-a", remote), newMachine(t, "block-cycle-b", remote)
@@ -264,6 +270,7 @@ func TestBlockCycleConvergesAcrossGitPeers(t *testing.T) {
 }
 
 func TestRebuildInventoryUsesTrackedGitAndPreservesOtherIntent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a := newMachine(t, "coordinated-rebuild", remote)
@@ -302,6 +309,7 @@ func TestRebuildInventoryUsesTrackedGitAndPreservesOtherIntent(t *testing.T) {
 }
 
 func TestBlockCycleRepairsStaleTrackedInventoryBeforePublication(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "stale-cycle", bareRemote(t))
 	m.decide(t, "record", "Existing history")
@@ -329,6 +337,7 @@ func TestBlockCycleRepairsStaleTrackedInventoryBeforePublication(t *testing.T) {
 }
 
 func TestBlockCycleConvertsRemoteV3AndPreservesFork(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "v3-remote", remote), newMachine(t, "v4-converter", remote)
@@ -367,6 +376,7 @@ func TestBlockCycleConvertsRemoteV3AndPreservesFork(t *testing.T) {
 }
 
 func TestBlockCycleConvertsStalePeerAfterRemoteConversion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "old-peer", remote), newMachine(t, "converter", remote)

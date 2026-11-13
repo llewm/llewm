@@ -8,6 +8,7 @@ import (
 )
 
 func TestObjectTreeDiscoveryReusesIdentitiesAndFailsClosedAtBounds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	files := map[string]blockTreeEntry{

@@ -12,6 +12,7 @@ import (
 )
 
 func TestCredentialBusDiscovery(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)

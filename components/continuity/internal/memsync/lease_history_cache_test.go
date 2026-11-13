@@ -44,6 +44,7 @@ func leaseHistoryCommit(t testing.TB, transport *objectTransport, event lease.Re
 }
 
 func TestLeaseHistoryCacheExactTipAndSafeFallback(t *testing.T) {
+	t.Parallel()
 	refs, transport, event := leaseHistoryFixture(t)
 	first := leaseHistoryCommit(t, transport, event)
 	event.Sequence, event.Action = 2, "renew"
@@ -120,6 +121,7 @@ func TestLeaseHistoryCacheExactTipAndSafeFallback(t *testing.T) {
 }
 
 func TestLeaseHistoryCacheBoundsAndMalformedEvents(t *testing.T) {
+	t.Parallel()
 	refs, transport, event := leaseHistoryFixture(t)
 	var tip string
 	for i := 1; i <= leaseHistory+2; i++ {

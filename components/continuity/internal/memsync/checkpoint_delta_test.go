@@ -9,6 +9,7 @@ import (
 )
 
 func TestConsecutiveCheckpointArrivalsUseDeltaCapture(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "checkpoint-delta", bareRemote(t))
 	m.decide(t, "baseline", "Existing history")

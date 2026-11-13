@@ -10,6 +10,7 @@ import (
 )
 
 func TestConversionRetainsRejectedRemoteHeadAndResolution(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "old-writer", remote)
 	b := newMachine(t, "converter", remote)
@@ -53,6 +54,7 @@ func TestConversionRetainsRejectedRemoteHeadAndResolution(t *testing.T) {
 }
 
 func TestCorruptPreviousObservationRefusesConversionWithoutRemovalOrPush(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "old-writer", remote)
 	b := newMachine(t, "converter", remote)

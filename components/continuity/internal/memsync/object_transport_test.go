@@ -16,6 +16,7 @@ import (
 )
 
 func TestGitOutputBuffersBoundCopy(t *testing.T) {
+	t.Parallel()
 	for _, output := range []io.Writer{&boundedTreeBuffer{}, &boundedObjectBuffer{limit: maxCachedTreeBytes}} {
 		// Hide the source's WriterTo, as the subprocess pipe reader can do.
 		reader := struct{ io.Reader }{strings.NewReader(strings.Repeat("x", maxCachedTreeBytes+1))}
@@ -57,6 +58,7 @@ func objectTree(t testing.TB, transport *objectTransport, entries []blockTreeEnt
 }
 
 func TestObjectTransportBareExactBytesAndTreeOrder(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"sha1", "sha256"} {
 		t.Run(format, func(t *testing.T) {
 			ctx := context.Background()
@@ -110,6 +112,7 @@ func TestObjectTransportBareExactBytesAndTreeOrder(t *testing.T) {
 }
 
 func TestObjectTransportMergeChangedBranchesAndConflicts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	baseLeaf := objectBlob(t, transport, "immutable", "base", 40)
@@ -162,6 +165,7 @@ func TestObjectTransportMergeChangedBranchesAndConflicts(t *testing.T) {
 }
 
 func TestObjectTransportFixedDeltaSkipsRetainedHistory(t *testing.T) {
+	t.Parallel()
 	for _, size := range []int{500, 5669, 20000} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			ctx := context.Background()
@@ -202,6 +206,7 @@ func TestObjectTransportFixedDeltaSkipsRetainedHistory(t *testing.T) {
 }
 
 func TestObjectTransportRejectsReplacedBlobAndUnsafeDelta(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	a := objectBlob(t, transport, "record", "original", 40)
@@ -238,6 +243,7 @@ func TestObjectTransportRejectsReplacedBlobAndUnsafeDelta(t *testing.T) {
 }
 
 func TestObjectTransportRejectsCorruptLooseBlob(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	object := objectBlob(t, transport, "record", "original", 40)

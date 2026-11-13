@@ -12,6 +12,7 @@ import (
 )
 
 func TestCrossMachineLeasesThroughGitRefs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	laptop, box := newMachine(t, "laptop", remote), newMachine(t, "box", remote)

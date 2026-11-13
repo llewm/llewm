@@ -20,6 +20,7 @@ func observedMachine(t *testing.T, name string) machine {
 }
 
 func TestObservedGitCycleReadsOnlyNewBlocksAndRepairsDamagedInventory(t *testing.T) {
+	t.Parallel()
 	m := observedMachine(t, "observed-delta")
 	measure := func() map[string]int64 {
 		t.Helper()
@@ -56,6 +57,7 @@ func TestObservedGitCycleReadsOnlyNewBlocksAndRepairsDamagedInventory(t *testing
 }
 
 func TestObservedGitMissingGenerationAndModifiedTriggerRequireFullValidation(t *testing.T) {
+	t.Parallel()
 	m := observedMachine(t, "observed-tracking")
 	if _, err := m.db.Exec(`DELETE FROM history_index_inventory_generation WHERE project_id=?`, m.project); err != nil {
 		t.Fatal(err)
@@ -91,6 +93,7 @@ func TestObservedGitMissingGenerationAndModifiedTriggerRequireFullValidation(t *
 }
 
 func TestObservedPublicationIntentSurvivesBeforeGitCommit(t *testing.T) {
+	t.Parallel()
 	m := observedMachine(t, "observed-pending")
 	ctx := context.Background()
 	repo, err := m.syncer.repository(ctx)
@@ -136,6 +139,7 @@ func TestObservedPublicationIntentSurvivesBeforeGitCommit(t *testing.T) {
 }
 
 func TestObservedOldGitBytesRemainCoveredByExplicitFullAudit(t *testing.T) {
+	t.Parallel()
 	m := observedMachine(t, "observed-audit")
 	ctx := context.Background()
 	repo, err := m.syncer.repository(ctx)

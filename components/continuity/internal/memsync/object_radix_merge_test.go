@@ -9,6 +9,7 @@ import (
 )
 
 func TestObjectRadixNormalizesConcurrentBucketSplits(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                string
 		base, local, remote int
@@ -88,6 +89,7 @@ func TestObjectRadixNormalizesConcurrentBucketSplits(t *testing.T) {
 }
 
 func TestObjectRadixNormalizationSkipsUnchangedInputTrees(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	leaves := radixFixtureLeaves(t, transport, 10000, 40, false)
@@ -127,6 +129,7 @@ func TestObjectRadixNormalizationSkipsUnchangedInputTrees(t *testing.T) {
 }
 
 func TestObjectRadixMixedDuplicateMustRetainExactIdentity(t *testing.T) {
+	t.Parallel()
 	for _, conflict := range []bool{false, true} {
 		t.Run(fmt.Sprint(conflict), func(t *testing.T) {
 			ctx := context.Background()

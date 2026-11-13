@@ -6,6 +6,7 @@ import (
 )
 
 func TestCloneStorageMigrationAPIInspectionAndFullAudit(t *testing.T) {
+	t.Parallel()
 	ctx, old, remote, access, before := cloneStorageFixture(t)
 	inspection, err := InspectStorage(ctx, old.Root, remote, access)
 	if err != nil || inspection.State != "working" || inspection.References != len(before.Refs) || inspection.RefsSHA256 != before.refsHash() {

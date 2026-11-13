@@ -8,6 +8,7 @@ import (
 )
 
 func TestFetchTaskOverlapsLocalWorkAndKeepsResult(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -46,6 +47,7 @@ func TestFetchTaskOverlapsLocalWorkAndKeepsResult(t *testing.T) {
 }
 
 func TestFetchTaskCloseCancelsAndJoins(t *testing.T) {
+	t.Parallel()
 	for _, parentCancel := range []bool{false, true} {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		finished := make(chan struct{})

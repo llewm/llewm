@@ -63,6 +63,7 @@ func cloneStorageFixture(t testing.TB) (context.Context, cloneStoragePaths, stri
 }
 
 func TestBareCloneStorageRetainsUnpublishedRefsSymbolicsAndPrivateConfig(t *testing.T) {
+	t.Parallel()
 	ctx, paths, remote, access, before := cloneStorageFixture(t)
 	receipt, err := prepareBareClone(ctx, paths, remote, access)
 	if err != nil {
@@ -126,6 +127,7 @@ func TestBareCloneStorageRetainsUnpublishedRefsSymbolicsAndPrivateConfig(t *test
 }
 
 func TestBareCloneStorageResumesNamespaceBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"prepared", "retired", "switched"} {
 		t.Run(phase, func(t *testing.T) {
 			ctx, p, remote, access, before := cloneStorageFixture(t)
@@ -157,6 +159,7 @@ func TestBareCloneStorageResumesNamespaceBoundaries(t *testing.T) {
 }
 
 func TestBareCloneStorageResumesPrivateConfigRewrite(t *testing.T) {
+	t.Parallel()
 	ctx, p, remote, access, before := cloneStorageFixture(t)
 	if _, err := prepareBareClone(ctx, p, remote, access); err != nil {
 		t.Fatal(err)
@@ -182,6 +185,7 @@ func TestBareCloneStorageResumesPrivateConfigRewrite(t *testing.T) {
 }
 
 func TestBareCloneStorageRetiresExplicitWorktreeWithoutChangingOriginalConfig(t *testing.T) {
+	t.Parallel()
 	ctx, p, remote, access, _ := cloneStorageFixture(t)
 	if _, err := access.git(p.Root).run(ctx, "config", "--local", "core.worktree", p.Root); err != nil {
 		t.Fatal(err)
@@ -221,6 +225,7 @@ func TestBareCloneStorageRetiresExplicitWorktreeWithoutChangingOriginalConfig(t 
 }
 
 func TestCloneStorageLockRemainsHeldAcrossRetirement(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	source := filepath.Join(parent, "source")
 	retained := filepath.Join(parent, "retained")
@@ -255,6 +260,7 @@ func TestCloneStorageLockRemainsHeldAcrossRetirement(t *testing.T) {
 }
 
 func TestRetireOriginalCloneVerifiesWhereLockCannotBeHeld(t *testing.T) {
+	t.Parallel()
 	ctx, p, remote, access, source := cloneStorageFixture(t)
 	r := receiptForClone(p, remote, source)
 	parent, err := recordsync.OpenRoot(filepath.Dir(p.Root))
@@ -307,6 +313,7 @@ func TestRetireOriginalCloneVerifiesWhereLockCannotBeHeld(t *testing.T) {
 }
 
 func TestBareCloneStorageResumesEarlyOwnedStages(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"receipt-only", "empty-stage", "partial-owner", "owner-only", "initialized"} {
 		t.Run(phase, func(t *testing.T) {
 			ctx, p, remote, access, source := cloneStorageFixture(t)
@@ -370,6 +377,7 @@ func TestBareCloneStorageResumesEarlyOwnedStages(t *testing.T) {
 }
 
 func TestBareCloneStorageRefusesDirtyOrActiveSourceWithoutReceipt(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"dirty", "active", "includes", "extra-push-url", "redirected-source", "dangling-symbolic-ref", "ref-lock"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, p, remote, access, before := cloneStorageFixture(t)
@@ -434,6 +442,7 @@ func TestBareCloneStorageRefusesDirtyOrActiveSourceWithoutReceipt(t *testing.T) 
 }
 
 func TestBareCloneStorageRefusesChangedRecoveryInputs(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"source-config", "stage-config", "stage-owner", "stage-ref", "stage-object", "stage-alternates", "receipt", "competing-root"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, p, remote, access, _ := cloneStorageFixture(t)

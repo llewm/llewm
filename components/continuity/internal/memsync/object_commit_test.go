@@ -12,6 +12,7 @@ import (
 )
 
 func TestObjectCommitPreservesDivergentParentsWithoutMovingRefs(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"sha1", "sha256"} {
 		t.Run(format, func(t *testing.T) {
 			ctx := context.Background()
@@ -162,6 +163,7 @@ func TestObjectCommitPreservesDivergentParentsWithoutMovingRefs(t *testing.T) {
 }
 
 func TestObjectCommitValidatesHeadersAndExactIdentity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	tree := objectTree(t, transport, nil, 40)

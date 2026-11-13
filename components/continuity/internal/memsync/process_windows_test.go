@@ -33,6 +33,7 @@ const (
 //     writes its ID to "grandchild", and exits, orphaning the sleeper.
 //   - sleep writes its ID to the file named by its argument and sleeps.
 func TestProcessTreeHelperProcess(t *testing.T) {
+	t.Parallel()
 	role := os.Getenv(memsyncProcessHelperEnv)
 	if role == "" {
 		return
@@ -129,6 +130,7 @@ func startTree(t *testing.T, ctx context.Context, dir string) *gitCommand {
 // A helper whose parent has exited is still a descendant of Git and must end
 // with it; its stale parent ID cannot lead an ID walk back to Git.
 func TestStopGentlyTerminatesOrphanedDescendant(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -153,6 +155,7 @@ func TestStopGentlyTerminatesOrphanedDescendant(t *testing.T) {
 // Git and reuses the ID of a descendant that already exited, the replacement a
 // process-ID walk would have terminated.
 func TestStopGentlyLeavesUnrelatedProcessesRunning(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -193,6 +196,7 @@ func TestStopGentlyLeavesUnrelatedProcessesRunning(t *testing.T) {
 
 // Without cancellation the tree is only released, as a process group is.
 func TestStopGentlyNormalExitReleasesTree(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	command := &gitCommand{Cmd: helperCommand(context.Background(), dir, "sleep", "self")}
 	command.tree = stopGently(command.Cmd)

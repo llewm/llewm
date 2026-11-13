@@ -69,6 +69,7 @@ func folderCycle(t *testing.T, m machine, archive recordsync.Archive, endpoint f
 }
 
 func TestHybridIdleFolderCycleKeepsGitJournalReady(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	bridge, peer := newMachine(t, "bridge", remote), newMachine(t, "git-peer", remote)
@@ -109,6 +110,7 @@ func TestHybridIdleFolderCycleKeepsGitJournalReady(t *testing.T) {
 }
 
 func TestHybridThreeMachinesConvergeWithExplicitDestinationRelays(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a := localHistoryMachine(t, "folder-only")
@@ -258,6 +260,7 @@ func TestHybridThreeMachinesConvergeWithExplicitDestinationRelays(t *testing.T) 
 // A new schema can remain opaque to a bridge while its current wire envelope
 // integrity is still verifiable. It must never be silently dropped or applied.
 func TestHybridRelaysOpaqueEnvelopeBytesWithoutSemanticApplication(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	producer, bridge := newMachine(t, "newer", remote), newMachine(t, "bridge", remote)
@@ -336,6 +339,7 @@ func TestHybridRelaysOpaqueEnvelopeBytesWithoutSemanticApplication(t *testing.T)
 }
 
 func TestHybridRetainsAndRelaysHistoryBeforeMissingDependencyArrives(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	source := localHistoryMachine(t, "source")

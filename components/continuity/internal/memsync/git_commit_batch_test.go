@@ -13,6 +13,7 @@ import (
 )
 
 func TestLeaseRefreshBatchesMissesAndReusesExactTips(t *testing.T) {
+	t.Parallel()
 	refs, _, event := leaseHistoryFixture(t)
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
@@ -53,6 +54,7 @@ func TestLeaseRefreshBatchesMissesAndReusesExactTips(t *testing.T) {
 }
 
 func TestGitCommitBatchValidationAndCleanup(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"sha1", "sha256"} {
 		t.Run(format, func(t *testing.T) {
 			ctx := context.Background()

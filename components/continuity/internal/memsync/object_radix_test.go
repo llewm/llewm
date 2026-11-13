@@ -30,6 +30,7 @@ func radixFixtureLeaves(t testing.TB, transport *objectTransport, size, width in
 }
 
 func TestObjectRadixSplitPreservesExactBlocks(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"sha1", "sha256"} {
 		t.Run(format, func(t *testing.T) {
 			ctx := context.Background()
@@ -82,6 +83,7 @@ func TestObjectRadixSplitPreservesExactBlocks(t *testing.T) {
 }
 
 func TestObjectRadixBoundedDiscoveryAndDeepPrefixes(t *testing.T) {
+	t.Parallel()
 	for _, size := range []int{500, 5669, 10000} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			ctx := context.Background()
@@ -126,6 +128,7 @@ func TestObjectRadixBoundedDiscoveryAndDeepPrefixes(t *testing.T) {
 }
 
 func TestObjectRadixRejectsNoncanonicalAndDestructiveChanges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	leaves := radixFixtureLeaves(t, transport, 65, 40, false)

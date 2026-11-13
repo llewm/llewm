@@ -29,6 +29,7 @@ import (
 const testLineage = "lineage:5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
 
 func TestRecordedSyncModeAndCountersSurviveStatusRead(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "recorded-mode", bareRemote(t))
 	start := time.Now().Add(-2 * time.Second)
@@ -58,6 +59,7 @@ func TestRecordedSyncModeAndCountersSurviveStatusRead(t *testing.T) {
 }
 
 func TestSyncWatermarkAndStatusAreScopedToDestination(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "two-destinations", bareRemote(t))
 	m.decide(t, "scoped", "Scoped endpoint watermark")
@@ -143,9 +145,7 @@ func (m machine) decisions(t *testing.T) string {
 
 func bareRemote(t testing.TB) string {
 	t.Helper()
-	// No global identity: memory commits must still work.
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	// TestMain already removed the global identity: memory commits must still work.
 	remote := filepath.Join(t.TempDir(), "memory.git")
 	if output, err := exec.Command("git", "init", "--quiet", "--bare", remote).CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v %s", err, output)
@@ -154,6 +154,7 @@ func bareRemote(t testing.TB) string {
 }
 
 func TestTwoMachinesSyncThroughOneRemote(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	b := newMachine(t, "b", remote)
@@ -220,6 +221,7 @@ func TestIdleSyncSkipsThePush(t *testing.T) {
 }
 
 func TestSyncKeepsLocalCommitsWhileOffline(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	a.decide(t, "first", "First")
@@ -258,6 +260,7 @@ func TestSyncKeepsLocalCommitsWhileOffline(t *testing.T) {
 }
 
 func TestSyncRefusesCollidingRecords(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	b := newMachine(t, "b", remote)
@@ -323,6 +326,7 @@ func (m machine) forks(t *testing.T) []fork.RevisionFork {
 }
 
 func TestConcurrentRevisionsBecomeAForkInsteadOfACollision(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	b := newMachine(t, "b", remote)
@@ -400,6 +404,7 @@ func TestConcurrentRevisionsBecomeAForkInsteadOfACollision(t *testing.T) {
 }
 
 func TestInitRefusesACloneOfAnotherRemote(t *testing.T) {
+	t.Parallel()
 	first, second := bareRemote(t), bareRemote(t)
 	clone := filepath.Join(t.TempDir(), "clone")
 	if err := Init(context.Background(), first, clone, Access{}, Setup{}); err != nil {
@@ -431,6 +436,7 @@ func TestDefaultCloneIsStablePerRemote(t *testing.T) {
 }
 
 func TestTimedOutSyncIsRecorded(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -446,6 +452,7 @@ func TestTimedOutSyncIsRecorded(t *testing.T) {
 }
 
 func TestNothingToSyncIntoAnEmptyRemote(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t, "a", bareRemote(t))
 	if result := m.sync(t, OutcomeSynced); result.ExportedRecords != 0 || result.UnpushedCommits != 0 {
 		t.Fatalf("empty sync: %#v", result)
@@ -513,6 +520,7 @@ func TestRewrittenRemoteIsRefused(t *testing.T) {
 }
 
 func TestStatusLineShowsSettings(t *testing.T) {
+	t.Parallel()
 	status := Status{Configured: true, Settings: []string{"automatic sync off (manual = true)", "SSH key /k"}}
 	if line := status.Line(time.Now().UTC()); line != "Sync: configured, never run (llewm sync) · settings: automatic sync off (manual = true), SSH key /k" {
 		t.Fatalf("never-run line: %q", line)
@@ -528,6 +536,7 @@ func TestStatusLineShowsSettings(t *testing.T) {
 // record type this build cannot read: the rest still imports, the unknown record
 // is counted, and the watermark holds so an upgraded build imports it later.
 func TestUnknownRecordTypesAreDeferred(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "a", remote), newMachine(t, "b", remote)
 	a.decide(t, "decision-a", "Known record")
@@ -592,6 +601,7 @@ func TestUnknownRecordTypesAreDeferred(t *testing.T) {
 }
 
 func TestSessionSyncImportsAndLeavesThePushToTheBackground(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "a", remote), newMachine(t, "b", remote)
 	a.decide(t, "first", "First")
@@ -629,6 +639,7 @@ func TestSessionSyncImportsAndLeavesThePushToTheBackground(t *testing.T) {
 }
 
 func TestSpentSessionBudgetStillFinishesLocalWork(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	a.decide(t, "first", "First")
@@ -646,6 +657,7 @@ func TestSpentSessionBudgetStillFinishesLocalWork(t *testing.T) {
 }
 
 func TestCanceledSyncStopsBetweenStepsWithACleanClone(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	a.decide(t, "first", "First")
@@ -755,6 +767,7 @@ func plantFormerFormat(t *testing.T, m machine) {
 }
 
 func TestFormatTwoConversionPreservesRemoteOnlyHistory(t *testing.T) {
+	t.Parallel()
 	remote := bareRemote(t)
 	a := newMachine(t, "a", remote)
 	b := newMachine(t, "b", remote)

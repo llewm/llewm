@@ -15,6 +15,7 @@ import (
 // Exercise actual Git and folder delivery into a shared archive, then compare
 // the experimental block importer with the reference importer at each step.
 func TestBlockImportMatchesFullScanAcrossTransports(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	folderSource := localHistoryMachine(t, "block-folder-source")

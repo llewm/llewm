@@ -13,6 +13,7 @@ import (
 // Exercise publication, provenance and semantic import through a disposable
 // Git remote using committed objects and no index or checked-out records.
 func TestBareBlockPublicationFlowThroughGit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "block-git-a", remote), newMachine(t, "block-git-b", remote)

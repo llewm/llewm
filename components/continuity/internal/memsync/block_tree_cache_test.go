@@ -15,6 +15,7 @@ import (
 )
 
 func TestBlockTreeCacheAcrossCyclesAndCorruption(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	repo := transport.repo
@@ -105,6 +106,7 @@ func TestBlockTreeCacheAcrossCyclesAndCorruption(t *testing.T) {
 }
 
 func TestGitTreeCacheBoundsAndIdentity(t *testing.T) {
+	t.Parallel()
 	raw := append([]byte("100644 file\x00"), make([]byte, 32)...)
 	framed := append([]byte(fmt.Sprintf("tree %d\x00", len(raw))), raw...)
 	sum := sha256.Sum256(framed)

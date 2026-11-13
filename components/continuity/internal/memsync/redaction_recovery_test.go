@@ -22,6 +22,7 @@ import (
 )
 
 func TestBlockRedactionRepairUsesTrackedObservations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "block-repair", bareRemote(t))
 	projectRoot, peerProject := "/different/peer/root", "project-0123456789abcdef"
@@ -64,6 +65,7 @@ func TestBlockRedactionRepairUsesTrackedObservations(t *testing.T) {
 }
 
 func TestRedactionRecoveryConvergesWithoutRewritingObservations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a := newMachine(t, "source", remote)

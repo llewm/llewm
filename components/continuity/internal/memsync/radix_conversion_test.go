@@ -11,6 +11,7 @@ import (
 )
 
 func TestRadixConversionPreservesFormat4BlobsParentsAndStalePeers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	source := newMachine(t, "format4-source", remote)
@@ -107,6 +108,7 @@ func TestRadixConversionPreservesFormat4BlobsParentsAndStalePeers(t *testing.T) 
 }
 
 func TestRadixConversionRefusesCorruptFormat4BeforeRetirement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	source := newMachine(t, "corrupt-format4-source", remote)
@@ -137,6 +139,7 @@ func TestRadixConversionRefusesCorruptFormat4BeforeRetirement(t *testing.T) {
 }
 
 func TestRadixConversionLogicalDeltaRefusesLostOldBlocks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	block := transportBlockFixture(t, testLineage, "old-identity")
@@ -160,6 +163,7 @@ func TestRadixConversionLogicalDeltaRefusesLostOldBlocks(t *testing.T) {
 }
 
 func TestRadixConversionResumesMixedNamespaces(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	source := newMachine(t, "partial-conversion-source", remote)

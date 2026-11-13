@@ -33,6 +33,7 @@ func transportBlockTree(t testing.TB, transport *objectTransport, version, linea
 }
 
 func TestObjectBlocksAppendDeltaAndOpaqueLineages(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"sha1", "sha256"} {
 		t.Run(format, func(t *testing.T) {
 			ctx := context.Background()
@@ -89,6 +90,7 @@ func TestObjectBlocksAppendDeltaAndOpaqueLineages(t *testing.T) {
 }
 
 func TestObjectBlocksRejectMutationModesPathsAndUnknownSelectedFormats(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	block := transportBlockFixture(t, testLineage, "retained")
@@ -137,6 +139,7 @@ func TestObjectBlocksRejectMutationModesPathsAndUnknownSelectedFormats(t *testin
 }
 
 func TestObjectBlocksMergeValidatesArrivalsBeforeJoiningHistories(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := objectTransportFixture(t, "sha1")
 	transport.repo.Identity = []string{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"}

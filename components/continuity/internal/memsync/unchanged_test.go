@@ -16,6 +16,7 @@ import (
 )
 
 func TestUnchangedSyncIgnoresCoordinationButTracksLeaseStamps(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "lease-coordination", bareRemote(t))
 	m.decide(t, "first", "Observation")
@@ -57,6 +58,7 @@ func TestUnchangedSyncIgnoresCoordinationButTracksLeaseStamps(t *testing.T) {
 }
 
 func TestUnchangedSyncStillMirrorsRemoteLeaseChanges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "lease-mirror-a", remote), newMachine(t, "lease-mirror-b", remote)
@@ -80,6 +82,7 @@ func TestUnchangedSyncStillMirrorsRemoteLeaseChanges(t *testing.T) {
 }
 
 func TestUnchangedSyncIgnoresOtherProjectHistory(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t, "project-isolation", bareRemote(t))
 	m.decide(t, "first", "Observation")
 	warmUnchanged(t, m)
@@ -102,6 +105,7 @@ func TestUnchangedSyncIgnoresOtherProjectHistory(t *testing.T) {
 }
 
 func TestUnchangedSyncIgnoresReplayProofRefresh(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t, "replay-proofs", bareRemote(t))
 	m.decide(t, "first", "Observation")
 	warmUnchanged(t, m)
@@ -164,6 +168,7 @@ func TestUnchangedSyncIgnoresReplayProofRefresh(t *testing.T) {
 }
 
 func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := bareRemote(t)
 	a, b := newMachine(t, "unchanged-a", remote), newMachine(t, "unchanged-b", remote)
@@ -261,6 +266,7 @@ func TestUnchangedSyncInvalidationAndRecovery(t *testing.T) {
 }
 
 func TestUnchangedSyncDetectsArchiveEditsAndRouteChanges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "archive-change", bareRemote(t))
 	archive := archiveMachine(t, &m)
@@ -289,6 +295,7 @@ func TestUnchangedSyncDetectsArchiveEditsAndRouteChanges(t *testing.T) {
 }
 
 func TestUnchangedSyncIgnoresUnreferencedAttribution(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := newMachine(t, "raw-attribution", bareRemote(t))
 	m.decide(t, "first", "Observation")
