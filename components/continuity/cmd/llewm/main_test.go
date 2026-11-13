@@ -451,8 +451,8 @@ func TestScaffoldLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 16 {
-		t.Fatalf("expected 16 lifecycle fixtures, got %d", len(paths))
+	if len(paths) != 17 {
+		t.Fatalf("expected 17 lifecycle fixtures, got %d", len(paths))
 	}
 	for _, path := range paths {
 		body, err := os.ReadFile(path)

@@ -15,6 +15,18 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "llewm hook codex",
+            "timeout": 5,
+            "additionalContextLimit": 4000
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [

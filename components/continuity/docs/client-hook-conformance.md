@@ -80,7 +80,7 @@ separate from the machine-observed event ledger.
 | Concurrency | Concurrent qualifying events produce one atomic request for the selected checkpoint. |
 | Age edge | An explicit age threshold produces `age_threshold` without requiring an event threshold. |
 | Trust/package refresh | A fresh installed client loads the intended plugin hash and runs PostToolUse under its normal trust workflow. |
-| Subagent rules (Claude Code) | Each subagent spawn records one `subagentstart` event for the parent session. Without being shown the rule, the subagent can state one built-in rule's text (for example `task-identity`), and it cannot state the parent's checkpoint task or next action. |
+| Subagent rules (both clients) | Each subagent spawn records one `subagentstart` event for the parent session. Without being shown the rule, the subagent can state one built-in rule's text (for example `task-identity`), and it cannot state the parent's checkpoint task or next action. Record the context inheritance mode separately; a full-history fork cannot establish parent-task isolation. |
 
 For Codex, test active-turn background delivery, idle completion followed by the
 next user turn, and the normal trust flow as separate cases. During an active

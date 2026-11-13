@@ -1,0 +1,9 @@
+{
+  "session_id": "fixture-codex-session",
+  "cwd": "/tmp/example",
+  "hook_event_name": "SubagentStart",
+  "turn_id": "fixture-turn",
+  "agent_id": "fixture-agent",
+  "agent_type": "default",
+  "permission_mode": "default"
+}

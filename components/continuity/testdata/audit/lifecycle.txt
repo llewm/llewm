@@ -1,4 +1,4 @@
-Events: 16
+Events: 17
 Sessions: 3
 Tool calls: 3
 Failed actions: 1
