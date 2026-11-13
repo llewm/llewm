@@ -94,7 +94,7 @@ func (a *App) AcceptPlan(ctx context.Context, id, status, reviewer string, claim
 // checkpoints and at session start; a failure reports nothing rather than
 // displacing the caller's result.
 func (a *App) UnnarratedCommits(ctx context.Context) []worknarrative.UnnarratedCommit {
-	a.revalidateAuthorship(ctx)
+	a.repairAuthorship(ctx)
 	commits, err := a.Narratives.UnnarratedCommits(ctx, a.ProjectID)
 	if err != nil {
 		return nil
@@ -105,7 +105,7 @@ func (a *App) UnnarratedCommits(ctx context.Context) []worknarrative.UnnarratedC
 			continue
 		}
 		if author, ok := authors[commits[i].Commit]; ok {
-			commits[i].AuthorTask, commits[i].AuthorSession = author.TaskID, author.SessionID
+			commits[i].AuthorTask, commits[i].AuthorSession, commits[i].AuthorTaskInferred = author.TaskID, author.SessionID, author.TaskInferred
 		}
 	}
 	return commits
@@ -245,7 +245,8 @@ func (a *App) saveCheckpointWithReconciliation(ctx context.Context, candidate ch
 }
 
 // createBoundCheckpoint commits the checkpoint, actions and pending explicit
-// plan bindings together. A binding failure leaves all of them unchanged.
+// plan bindings together, with the session's commit retasks. A binding failure
+// leaves all of them unchanged.
 func (a *App) createBoundCheckpoint(ctx context.Context, candidate checkpoint.Checkpoint, reconciliation checkpoint.ActionReconciliation) (checkpoint.CreateResult, error) {
 	tx, err := a.Checkpoints.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -259,6 +260,7 @@ func (a *App) createBoundCheckpoint(ctx context.Context, candidate checkpoint.Ch
 	if err := a.Roadmap.BindPlannedTaskTx(ctx, tx, created.Checkpoint.ProjectID, created.Checkpoint.TaskID); err != nil {
 		return checkpoint.CreateResult{}, err
 	}
+	retaskSessionCommitsTx(ctx, tx, created.Checkpoint)
 	if err := tx.Commit(); err != nil {
 		return checkpoint.CreateResult{}, err
 	}

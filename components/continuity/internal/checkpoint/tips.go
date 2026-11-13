@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -94,4 +95,94 @@ func TaskFinished(ctx context.Context, db rowQueryer, projectID, taskID string) 
 		return true, nil
 	}
 	return TaskClosed(ctx, db, projectID, taskID)
+}
+
+// TaskFinishedAt reports whether a task was finished at a past instant: its
+// newest checkpoint at or before then was completed, or its lineage had ended.
+// Times are compared parsed, since stored RFC 3339 text does not sort by time.
+func TaskFinishedAt(ctx context.Context, db queryer, projectID, taskID string, at time.Time) (bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id,status,created_at FROM checkpoints WHERE project_id=? AND task_id=?`, projectID, taskID)
+	if err != nil {
+		return false, err
+	}
+	var tipID, tipStatus string
+	var tipAt time.Time
+	for rows.Next() {
+		var id, status, created string
+		if err := rows.Scan(&id, &status, &created); err != nil {
+			rows.Close()
+			return false, err
+		}
+		createdAt, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			rows.Close()
+			return false, fmt.Errorf("decode checkpoint time %s: %w", id, err)
+		}
+		if createdAt.After(at) {
+			continue
+		}
+		if tipID == "" || createdAt.After(tipAt) || (createdAt.Equal(tipAt) && id > tipID) {
+			tipID, tipStatus, tipAt = id, status, createdAt
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if tipStatus == "completed" {
+		return true, nil
+	}
+	ended, err := db.QueryContext(ctx, `SELECT id,created_at FROM task_lineage_events WHERE project_id=? AND task_id=? AND operation IN ('rekey','supersede','abandon')`, projectID, taskID)
+	if err != nil {
+		return false, err
+	}
+	defer ended.Close()
+	for ended.Next() {
+		var id, created string
+		if err := ended.Scan(&id, &created); err != nil {
+			return false, err
+		}
+		createdAt, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return false, fmt.Errorf("decode lineage event time %s: %w", id, err)
+		}
+		if !createdAt.After(at) {
+			return true, nil
+		}
+	}
+	return false, ended.Err()
+}
+
+// SessionCheckpoint is one task checkpoint a session saved.
+type SessionCheckpoint struct {
+	ID, TaskID string
+	CreatedAt  time.Time
+}
+
+// SessionCheckpoints lists a session's task checkpoints oldest first, ordered
+// by parsed time then ID.
+func SessionCheckpoints(ctx context.Context, db queryer, projectID, sessionID string) ([]SessionCheckpoint, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id,task_id,created_at FROM checkpoints WHERE project_id=? AND session_id=? AND task_id IS NOT NULL AND task_id<>''`, projectID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []SessionCheckpoint
+	for rows.Next() {
+		var value SessionCheckpoint
+		var created string
+		if err := rows.Scan(&value.ID, &value.TaskID, &created); err != nil {
+			return nil, err
+		}
+		if value.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
+			return nil, fmt.Errorf("decode checkpoint time %s: %w", value.ID, err)
+		}
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].CreatedAt.Before(result[j].CreatedAt)
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result, rows.Err()
 }

@@ -41,7 +41,7 @@ func TestSyncGenerationCoversSchema(t *testing.T) {
 	// Selector generation is checked by semantic replay, and deliberately does
 	// not invalidate completed transport proofs when only a cache is refreshed.
 	excluded["history_index_dependency_generation"] = true
-	for _, name := range strings.Fields(`bootstrap_deliveries contract_index_entries events head_observations commit_authors commit_author_revocations commit_author_revalidations_pending presence_events sessions sync_attempts usage_requests usage_sources usage_tool_calls usage_tool_results roadmap_sync_files roadmap_sync_runs portable_import_receipts history_sync_changes history_sync_generation history_sync_proofs history_sync_cursors schema_migrations`) {
+	for _, name := range strings.Fields(`bootstrap_deliveries contract_index_entries events head_observations commit_authors commit_author_amendments commit_author_repairs_pending presence_events sessions sync_attempts usage_requests usage_sources usage_tool_calls usage_tool_results roadmap_sync_files roadmap_sync_runs portable_import_receipts history_sync_changes history_sync_generation history_sync_proofs history_sync_cursors schema_migrations`) {
 		excluded[name] = true
 	}
 	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)

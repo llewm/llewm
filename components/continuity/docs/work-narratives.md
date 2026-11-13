@@ -223,13 +223,26 @@ An attributed commit also names the session's current task: its live presence
 task, else the task it last checkpointed. A task whose newest checkpoint is
 completed, or whose lineage ended, is never current, so a commit made before a
 new task's first checkpoint records the session alone instead of crediting the
-finished task. The same rule keeps hook presence off a finished task.
+finished task. The same rule keeps hook presence off a finished task. The
+session's next checkpoint then names the task of its task-less commits observed
+since its previous checkpoint. That task is inferred, not observed: readers and
+the narrative coverage line mark it `inferred` (`author_task_inferred`).
 
-Builds before commit 922c22f recorded attributions without that evidence.
-Migration 097 asks the next hook on each device to revalidate, once, the
-attributions observed before the migration against the checkout's reflogs
-(branches and every worktree HEAD) under the same rule. It appends a device-local
-revocation for each one that fails; narrative coverage and task overlap skip
-revoked attributions, and the observation rows stay unchanged. Later
-observations are never revalidated, so reflog expiry cannot revoke them. The
-one-time repair is removed once every device has migrated past 097.
+Corrections never rewrite an observation. Each is an append-only, device-local
+amendment: `revoke` withdraws a session's attribution, and `retask` keeps the
+session and names a different task (or none). Readers hide revoked rows and
+apply the newest retask; narrative coverage and task overlap read the result.
+
+Two one-time repairs run on the next hook of each device. Builds before commit
+922c22f recorded attributions without reflog evidence: migration 097 asks the
+hook to revalidate, once, the attributions observed before the migration
+against the checkout's reflogs (branches and every worktree HEAD) under the
+same rule, and to revoke each one that fails. Later observations are never
+revalidated, so reflog expiry cannot revoke them. Builds before commit 286dbb1
+credited a session's finished task, or no task to a commit made before the
+session's first checkpoint: migration 098 asks the hook to give each such
+attribution observed before the migration the session's next checkpointed task.
+A finished task with no later checkpoint gives way to no task, a task the
+session reopened next keeps the commit, and a task-less commit with no later
+checkpoint stays task-less. Both repairs are removed once every device has migrated past
+098.

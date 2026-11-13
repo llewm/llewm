@@ -10,7 +10,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/database"
 )
 
-func TestRevalidatePendingRevokesPreFixAttributionsOnce(t *testing.T) {
+func TestRepairPendingRevokesPreFixAttributionsOnce(t *testing.T) {
 	ctx := context.Background()
 	upstream, root := t.TempDir(), t.TempDir()
 	git(t, upstream, "init", "-q", "-b", "main")
@@ -71,13 +71,13 @@ func TestRevalidatePendingRevokesPreFixAttributionsOnce(t *testing.T) {
 	attribute(after, "fixed", cutoff.Add(time.Minute))
 
 	checkouts := []Checkout{{Root: root}}
-	if items, err := RevalidatePending(ctx, db, "p", checkouts, time.Now()); err != nil || items != nil {
+	if items, err := RepairPending(ctx, db, "p", checkouts, time.Now()); err != nil || items != nil {
 		t.Fatalf("revalidated without a pending request: %#v %v", items, err)
 	}
-	if _, err := db.Exec(`INSERT INTO commit_author_revalidations_pending(project_id,cutoff) VALUES ('p',?)`, cutoff.Format(time.RFC3339Nano)); err != nil {
+	if _, err := db.Exec(`INSERT INTO commit_author_repairs_pending(project_id,repair,cutoff) VALUES ('p','revalidate',?)`, cutoff.Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
-	items, err := RevalidatePending(ctx, db, "p", checkouts, time.Now())
+	items, err := RepairPending(ctx, db, "p", checkouts, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,29 +102,29 @@ func TestRevalidatePendingRevokesPreFixAttributionsOnce(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM commit_authors`).Scan(&observations); err != nil || observations != 5 {
 		t.Fatalf("observations = %d %v; revocation must not rewrite them", observations, err)
 	}
-	if err := db.QueryRow(`SELECT count(*) FROM commit_author_revalidations_pending`).Scan(&pending); err != nil || pending != 0 {
+	if err := db.QueryRow(`SELECT count(*) FROM commit_author_repairs_pending`).Scan(&pending); err != nil || pending != 0 {
 		t.Fatalf("pending requests = %d %v; want cleared", pending, err)
 	}
-	if again, err := RevalidatePending(ctx, db, "p", checkouts, time.Now()); err != nil || again != nil {
+	if again, err := RepairPending(ctx, db, "p", checkouts, time.Now()); err != nil || again != nil {
 		t.Fatalf("second pass = %#v %v; the repair runs once", again, err)
 	}
 }
 
-func TestRevalidatePendingKeepsRequestWhenGitFails(t *testing.T) {
+func TestRepairPendingKeepsRequestWhenGitFails(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Initialize(ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`INSERT INTO projects(id,root,name,created_at) VALUES ('p','x','test','2026-01-01'); INSERT INTO commit_author_revalidations_pending(project_id,cutoff) VALUES ('p','2026-01-02T00:00:00Z')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO projects(id,root,name,created_at) VALUES ('p','x','test','2026-01-01'); INSERT INTO commit_author_repairs_pending(project_id,repair,cutoff) VALUES ('p','revalidate','2026-01-02T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RevalidatePending(ctx, db, "p", []Checkout{{Root: filepath.Join(t.TempDir(), "not-a-repo")}}, time.Now()); err == nil {
+	if _, err := RepairPending(ctx, db, "p", []Checkout{{Root: filepath.Join(t.TempDir(), "not-a-repo")}}, time.Now()); err == nil {
 		t.Fatal("revalidation without readable reflogs succeeded")
 	}
 	var pending int
-	if err := db.QueryRow(`SELECT count(*) FROM commit_author_revalidations_pending`).Scan(&pending); err != nil || pending != 1 {
+	if err := db.QueryRow(`SELECT count(*) FROM commit_author_repairs_pending`).Scan(&pending); err != nil || pending != 1 {
 		t.Fatalf("pending = %d %v; a failed repair must be retried", pending, err)
 	}
 }

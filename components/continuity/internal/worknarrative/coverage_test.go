@@ -82,3 +82,13 @@ func TestUnnarratedLineIsBounded(t *testing.T) {
 		t.Fatalf("subject not truncated on a rune boundary: %q", line)
 	}
 }
+
+func TestUnnarratedLineLabelsInferredTasks(t *testing.T) {
+	line := UnnarratedLine([]UnnarratedCommit{
+		{Commit: strings.Repeat("a", 40), Subject: "seen", AuthorTask: "t", AuthorSession: "s"},
+		{Commit: strings.Repeat("b", 40), Subject: "later", AuthorTask: "u", AuthorSession: "s", AuthorTaskInferred: true},
+	})
+	if !strings.Contains(line, "seen (task t)") || !strings.Contains(line, "later (task u, inferred)") {
+		t.Fatalf("line = %q", line)
+	}
+}

@@ -232,20 +232,22 @@ func createsCommit(subject string) bool {
 	return (strings.HasPrefix(action, "merge ") || strings.HasPrefix(action, "pull ")) && strings.HasPrefix(detail, "Merge made by ")
 }
 
-// Author is the session (and its task) a hook saw create a commit.
+// Author is the session a hook saw create a commit, and its task. TaskInferred
+// marks a task named afterwards by a retask amendment rather than observed.
 type Author struct {
-	SessionID string `json:"session_id"`
-	Client    string `json:"client"`
-	TaskID    string `json:"task_id,omitempty"`
+	SessionID    string `json:"session_id"`
+	Client       string `json:"client"`
+	TaskID       string `json:"task_id,omitempty"`
+	TaskInferred bool   `json:"task_inferred,omitempty"`
 }
 
 // Authors returns the recorded, unrevoked authors of commits in one checkout,
-// by hash.
+// by hash, with amendments applied.
 func Authors(ctx context.Context, db *sql.DB, projectID, member string, commits []string) (map[string]Author, error) {
 	result := map[string]Author{}
 	for _, commit := range commits {
 		var author Author
-		err := db.QueryRowContext(ctx, `SELECT a.session_id,a.client,COALESCE(a.task_id,'') FROM commit_authors a WHERE a.project_id=? AND a.member=? AND a.commit_sha=? AND NOT EXISTS (`+revokedMatch+`)`, projectID, member, commit).Scan(&author.SessionID, &author.Client, &author.TaskID)
+		err := db.QueryRowContext(ctx, `SELECT session_id,client,task_id,certainty='inferred'`+attributionsFrom+`WHERE project_id=? AND member=? AND commit_sha=?`, projectID, member, commit).Scan(&author.SessionID, &author.Client, &author.TaskID, &author.TaskInferred)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -257,10 +259,10 @@ func Authors(ctx context.Context, db *sql.DB, projectID, member string, commits 
 	return result, nil
 }
 
-// TaskCommits lists the unrevoked commits attributed to a task's sessions in a
-// checkout.
+// TaskCommits lists the unrevoked commits currently attributed to a task, by
+// hash with their checkout member, including inferred ones.
 func TaskCommits(ctx context.Context, db *sql.DB, projectID, taskID string) (map[string]string, error) {
-	rows, err := db.QueryContext(ctx, `SELECT a.commit_sha,a.member FROM commit_authors a WHERE a.project_id=? AND a.task_id=? AND NOT EXISTS (`+revokedMatch+`)`, projectID, taskID)
+	rows, err := db.QueryContext(ctx, `SELECT commit_sha,member`+attributionsFrom+`WHERE project_id=? AND task_id=?`, projectID, taskID)
 	if err != nil {
 		return nil, err
 	}

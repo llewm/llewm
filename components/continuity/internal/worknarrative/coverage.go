@@ -24,9 +24,11 @@ type UnnarratedCommit struct {
 	Subject     string    `json:"subject"`
 	CommittedAt time.Time `json:"committed_at"`
 	// AuthorTask and AuthorSession name the task and session a hook saw create
-	// the commit; empty when no attribution was recorded.
-	AuthorTask    string `json:"author_task,omitempty"`
-	AuthorSession string `json:"author_session,omitempty"`
+	// the commit; empty when no attribution was recorded. AuthorTaskInferred
+	// marks a task inferred from the session's checkpoints, not observed.
+	AuthorTask         string `json:"author_task,omitempty"`
+	AuthorSession      string `json:"author_session,omitempty"`
+	AuthorTaskInferred bool   `json:"author_task_inferred,omitempty"`
 }
 
 // UnnarratedCommits lists the engineer's recent commits that no narrative
@@ -101,6 +103,9 @@ func UnnarratedLine(commits []UnnarratedCommit) string {
 		}
 		entry := name + " " + subject
 		switch {
+		case commit.AuthorTask != "" && commit.AuthorTaskInferred:
+			entry += " (task " + commit.AuthorTask + ", inferred)"
+			attributed = true
 		case commit.AuthorTask != "":
 			entry += " (task " + commit.AuthorTask + ")"
 			attributed = true

@@ -3,7 +3,6 @@ package authorship
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -37,51 +36,80 @@ type Checkout struct {
 	Member, Root string
 }
 
-// RevalidatePending runs the one-time repair that migration 097 requests for a
-// project: it revalidates the attributions observed before the migration's
-// cutoff in every checkout, then clears the request. Builds before commit
-// 922c22f recorded attributions without creation evidence. On any error the
-// request stays for the next hook to retry; revocations are idempotent.
+// RepairPending runs the one-time repairs that migrations 097 and 098 request
+// for a project, each once: 'revalidate' checks attributions observed before
+// its cutoff against reflogs in every checkout and revokes unsupported ones;
+// 'retask' then gives attributions observed before its cutoff the session's
+// next checkpointed task when they credit a finished task or none (see
+// RetaskFinished). Builds before commit 922c22f
+// attributed without creation evidence, and builds before 286dbb1 credited a
+// session's finished task. A failed repair keeps its request for the next
+// hook; amendments are idempotent.
 //
-// Remove once every device has migrated past 097; the revocation table and the
-// readers' filter stay.
-func RevalidatePending(ctx context.Context, db *sql.DB, projectID string, checkouts []Checkout, now time.Time) ([]Revalidation, error) {
-	var cutoffText string
-	err := db.QueryRowContext(ctx, `SELECT cutoff FROM commit_author_revalidations_pending WHERE project_id=?`, projectID).Scan(&cutoffText)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+// Remove once every device has migrated past 098; the amendments table,
+// attributionsSQL and RetaskSession stay.
+func RepairPending(ctx context.Context, db *sql.DB, projectID string, checkouts []Checkout, now time.Time) ([]Revalidation, error) {
+	pending := map[string]time.Time{}
+	rows, err := db.QueryContext(ctx, `SELECT repair,cutoff FROM commit_author_repairs_pending WHERE project_id=?`, projectID)
 	if err != nil {
 		return nil, err
 	}
-	cutoff, err := time.Parse(time.RFC3339Nano, cutoffText)
-	if err != nil {
-		return nil, fmt.Errorf("revalidation cutoff %q: %w", cutoffText, err)
+	for rows.Next() {
+		var repair, cutoffText string
+		if err := rows.Scan(&repair, &cutoffText); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		cutoff, err := time.Parse(time.RFC3339Nano, cutoffText)
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("%s repair cutoff %q: %w", repair, cutoffText, err)
+		}
+		pending[repair] = cutoff
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	done := func(repair string) error {
+		_, err := db.ExecContext(ctx, `DELETE FROM commit_author_repairs_pending WHERE project_id=? AND repair=?`, projectID, repair)
+		return err
 	}
 	var all []Revalidation
-	for _, checkout := range checkouts {
-		items, err := revalidate(ctx, db, projectID, checkout, cutoff, now)
-		if err != nil {
+	if cutoff, ok := pending["revalidate"]; ok {
+		for _, checkout := range checkouts {
+			items, err := revalidate(ctx, db, projectID, checkout, cutoff, now)
+			if err != nil {
+				return all, err
+			}
+			all = append(all, items...)
+		}
+		if err := done("revalidate"); err != nil {
 			return all, err
 		}
-		all = append(all, items...)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM commit_author_revalidations_pending WHERE project_id=?`, projectID)
-	return all, err
+	if cutoff, ok := pending["retask"]; ok {
+		if _, err := RetaskFinished(ctx, db, projectID, cutoff, now); err != nil {
+			return all, err
+		}
+		if err := done("retask"); err != nil {
+			return all, err
+		}
+	}
+	return all, nil
 }
 
 // revalidate checks each unrevoked observation made before cutoff against
 // commit-creating entries in all of the checkout's reflogs (branches and every
 // worktree HEAD), keeping it only when such an entry falls within
-// RevalidationWindow before it, and appends a revocation for each failure.
+// RevalidationWindow before it, and appends a revoke amendment for each failure.
 // Observation rows are never changed. Expired reflog history is no evidence.
 func revalidate(ctx context.Context, db *sql.DB, projectID string, checkout Checkout, cutoff, now time.Time) ([]Revalidation, error) {
 	created, err := creationTimes(ctx, checkout.Root)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT a.commit_sha,a.session_id,a.observed_at FROM commit_authors a
-		WHERE a.project_id=? AND a.member=? AND NOT EXISTS (`+revokedMatch+`) ORDER BY a.observed_at,a.commit_sha`, projectID, checkout.Member)
+	rows, err := db.QueryContext(ctx, `SELECT commit_sha,session_id,observed_at`+attributionsFrom+`
+		WHERE project_id=? AND member=? ORDER BY observed_at,commit_sha`, projectID, checkout.Member)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +145,7 @@ func revalidate(ctx context.Context, db *sql.DB, projectID string, checkout Chec
 		if item.Keep {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO commit_author_revocations(project_id,member,commit_sha,session_id,reason,revoked_at) VALUES (?,?,?,?,?,?)`,
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO commit_author_amendments(project_id,member,commit_sha,session_id,kind,reason,amended_at) VALUES (?,?,?,?,'revoke',?,?)`,
 			projectID, checkout.Member, item.Commit, item.SessionID, item.Reason, at); err != nil {
 			return nil, err
 		}
@@ -184,7 +212,3 @@ func reflogTime(selector string) (time.Time, bool) {
 	}
 	return time.Unix(seconds, 0).UTC(), true
 }
-
-// revokedMatch is the correlated subquery matching a revocation of the
-// commit_authors row aliased a.
-const revokedMatch = `SELECT 1 FROM commit_author_revocations r WHERE r.project_id=a.project_id AND r.member=a.member AND r.commit_sha=a.commit_sha AND r.session_id=a.session_id`
