@@ -2,7 +2,9 @@ package checkpoint
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -74,4 +76,22 @@ func TaskClosed(ctx context.Context, db rowQueryer, projectID, taskID string) (b
 		return false, err
 	}
 	return state.TerminalEventID != "", nil
+}
+
+// TaskFinished reports whether a task's newest checkpoint is completed or its
+// lineage ended. A finished task is no longer anyone's current work, so new
+// activity must not be credited to it. A task with no checkpoint is unfinished.
+func TaskFinished(ctx context.Context, db rowQueryer, projectID, taskID string) (bool, error) {
+	var status string
+	err := db.QueryRowContext(ctx, `SELECT status FROM checkpoints WHERE project_id=? AND task_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, projectID, taskID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if status == "completed" {
+		return true, nil
+	}
+	return TaskClosed(ctx, db, projectID, taskID)
 }

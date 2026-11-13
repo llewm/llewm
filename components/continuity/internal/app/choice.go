@@ -12,8 +12,10 @@ import (
 )
 
 // SessionTask is the task this session works on: its newest live presence task,
-// else the task it last checkpointed, else "". Four-hour coordination leases
-// deliberately do not claim that a session is alive.
+// else the task it last checkpointed, else "". A finished (completed or closed)
+// task is never current work: a session that starts new work before its first
+// checkpoint must not credit commits or presence to the task it finished.
+// Four-hour coordination leases deliberately do not claim that a session is alive.
 func (a *App) SessionTask(ctx context.Context, sessionID string) (string, error) {
 	report, err := a.Presence.List(ctx, a.ProjectID, presence.Query{SessionID: sessionID, LiveOnly: true, Limit: presence.MaxLimit, Now: time.Now().UTC()})
 	if err != nil {
@@ -26,10 +28,22 @@ func (a *App) SessionTask(ctx context.Context, sessionID string) (string, error)
 		if latest, err := a.Checkpoints.LatestSelected(ctx, a.ProjectID, checkpoint.Selection{TaskID: value.TaskID}); err != nil {
 			return "", err
 		} else if latest != nil {
-			return value.TaskID, nil
+			return a.unfinishedTask(ctx, value.TaskID)
 		}
 	}
-	return checkpoint.SessionTask(ctx, a.DB, a.ProjectID, sessionID)
+	taskID, err := checkpoint.SessionTask(ctx, a.DB, a.ProjectID, sessionID)
+	if err != nil || taskID == "" {
+		return "", err
+	}
+	return a.unfinishedTask(ctx, taskID)
+}
+
+func (a *App) unfinishedTask(ctx context.Context, taskID string) (string, error) {
+	finished, err := checkpoint.TaskFinished(ctx, a.DB, a.ProjectID, taskID)
+	if err != nil || finished {
+		return "", err
+	}
+	return taskID, nil
 }
 
 // chooseTask picks the bootstrap's task: an explicit selection as given; else

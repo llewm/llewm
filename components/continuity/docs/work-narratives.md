@@ -219,6 +219,12 @@ can be attributed without crediting its existing ancestors. Missing, expired or
 over-budget reflog history leaves attribution unknown; reachability alone is
 insufficient. This remains best-effort hook observation, not proof of authorship.
 
+An attributed commit also names the session's current task: its live presence
+task, else the task it last checkpointed. A task whose newest checkpoint is
+completed, or whose lineage ended, is never current, so a commit made before a
+new task's first checkpoint records the session alone instead of crediting the
+finished task. The same rule keeps hook presence off a finished task.
+
 Builds before commit 922c22f recorded attributions without that evidence.
 Migration 097 asks the next hook on each device to revalidate, once, the
 attributions observed before the migration against the checkout's reflogs
