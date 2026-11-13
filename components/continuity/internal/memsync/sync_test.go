@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -702,13 +704,31 @@ func TestSessionSyncStopsWaitingOnAHungRemoteAtItsBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	// The transport helper holds each connection, so its close shows when Git
+	// and the helper stopped, apart from the local steps around the fetch,
+	// whose Git starts are slow on a loaded Windows host.
+	var connections sync.WaitGroup
+	var mu sync.Mutex
+	var accepted int
+	var lastClosed time.Time
 	go func() {
 		for {
 			connection, err := listener.Accept()
 			if err != nil {
 				return
 			}
-			defer connection.Close()
+			mu.Lock()
+			accepted++
+			mu.Unlock()
+			connections.Add(1)
+			go func() {
+				defer connections.Done()
+				defer connection.Close()
+				_, _ = io.Copy(io.Discard, connection) // never answers; returns once the peer is gone
+				mu.Lock()
+				lastClosed = time.Now()
+				mu.Unlock()
+			}()
 		}
 	}()
 	hung := "http://" + listener.Addr().String() + "/memory"
@@ -718,11 +738,29 @@ func TestSessionSyncStopsWaitingOnAHungRemoteAtItsBudget(t *testing.T) {
 	a.syncer.Remote = hung
 	a.decide(t, "first", "First")
 
+	const budget = 1500 * time.Millisecond
 	started := time.Now()
-	result, err := a.syncer.Session(context.Background(), 1500*time.Millisecond)
-	// Well under budget plus WaitDelay: Git and its transport helper both stop.
-	if elapsed := time.Since(started); elapsed > 3500*time.Millisecond {
-		t.Fatalf("session sync took %s with a 1.5s budget", elapsed)
+	result, err := a.syncer.Session(context.Background(), budget)
+	// Without the budget a hung fetch waits out NetworkTimeout; this bound only
+	// rules that out, leaving room for slow local steps.
+	if elapsed := time.Since(started); elapsed > NetworkTimeout/4 {
+		t.Fatalf("session sync took %s with a %s budget", elapsed, budget)
+	}
+	closed := make(chan struct{})
+	go func() { connections.Wait(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a connection to the hung remote stayed open after the session sync returned; a transport helper outlived Git")
+	}
+	mu.Lock()
+	count, stoppedAt := accepted, lastClosed.Sub(started)
+	mu.Unlock()
+	t.Logf("%d connections to the hung remote; last closed %s after start; session returned after %s", count, stoppedAt, time.Since(started))
+	// The deadline is fixed when Session starts, so Git and its helper stop at
+	// the budget however long the local steps took, and well before WaitDelay.
+	if count == 0 || stoppedAt > budget+time.Second {
+		t.Fatalf("hung remote: %d connections, last closed %s after start with a %s budget", count, stoppedAt, budget)
 	}
 	if err != nil || result.Outcome != OutcomeDeferred || result.ExportedRecords != 1 || result.UnpushedCommits != 1 || !strings.Contains(result.Detail, "fetch did not finish within 1.5s") {
 		t.Fatalf("hung remote: %#v %v", result, err)
