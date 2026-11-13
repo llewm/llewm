@@ -71,7 +71,10 @@ func openBareRepository(ctx context.Context, clone, remote string, access Access
 	repo := access.git(p.Root)
 	repo.Durable = true
 	bare, err := repo.run(ctx, "rev-parse", "--is-bare-repository")
-	if err != nil || bare != "true" {
+	if err != nil {
+		return empty, fmt.Errorf("check selected memory repository storage: %w", err)
+	}
+	if bare != "true" {
 		return empty, fmt.Errorf("selected memory repository is not bare")
 	}
 	gitDir, err := readGitBytes(ctx, repo, 32<<10, "rev-parse", "--absolute-git-dir")

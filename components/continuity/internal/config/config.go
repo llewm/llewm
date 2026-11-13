@@ -133,9 +133,11 @@ func DefaultMemoryClone(remote string) (string, error) {
 		base = filepath.Join(home, ".local", "share")
 	}
 	sum := sha256.Sum256([]byte(remote))
-	// The repository name follows the last "/" or, for scp-like remotes, ":".
-	trimmed := strings.TrimRight(remote, "/")
-	name := strings.TrimSuffix(trimmed[strings.LastIndexAny(trimmed, "/:")+1:], ".git")
+	// The repository name follows the last "/", "\" for Windows path remotes,
+	// or ":" for scp-like remotes. Without "\", a Windows path remote names
+	// the clone after its whole path and can exceed Windows path limits.
+	trimmed := strings.TrimRight(remote, `/\`)
+	name := strings.TrimSuffix(trimmed[strings.LastIndexAny(trimmed, `/\:`)+1:], ".git")
 	name = unsafeCloneName.ReplaceAllString(name, "-")
 	if name == "" || name == "." || name == ".." {
 		name = "memory"

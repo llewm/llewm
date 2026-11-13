@@ -433,6 +433,11 @@ func TestDefaultCloneIsStablePerRemote(t *testing.T) {
 	if scp, _ := DefaultClone("flux@host:llewm-memory.git"); !strings.HasPrefix(scp, prefix) {
 		t.Fatalf("scp-like remote clone: %s", scp)
 	}
+	for _, remote := range []string{`C:\Users\me\remotes\llewm-memory.git`, `\\server\share\llewm-memory.git\`} {
+		if path, _ := DefaultClone(remote); !strings.HasPrefix(path, prefix) || len(filepath.Base(path)) != len("llewm-memory-")+8 {
+			t.Fatalf("Windows path remote clone: %s", path)
+		}
+	}
 }
 
 func TestTimedOutSyncIsRecorded(t *testing.T) {

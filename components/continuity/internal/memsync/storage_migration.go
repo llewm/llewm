@@ -101,7 +101,10 @@ func completedCloneStorage(ctx context.Context, p cloneStoragePaths, r cloneStor
 	}
 	repo := access.git(p.Root)
 	bare, err := repo.run(ctx, "rev-parse", "--is-bare-repository")
-	if err != nil || bare != "true" {
+	if err != nil {
+		return false, fmt.Errorf("check completed memory clone storage: %w", err)
+	}
+	if bare != "true" {
 		return false, fmt.Errorf("completed memory clone is no longer bare")
 	}
 	if err := verifyRemote(ctx, repo, remote); err != nil {
