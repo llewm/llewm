@@ -217,7 +217,7 @@ func createsCommit(subject string) bool {
 		return false
 	}
 	switch action {
-	case "commit", "commit (initial)", "commit (amend)", "cherry-pick", "revert", "am",
+	case "commit", "commit (initial)", "commit (amend)", "commit (merge)", "cherry-pick", "revert", "am",
 		"rebase (pick)", "rebase (reword)", "rebase (squash)", "rebase (fixup)", "rebase (continue)":
 		return true
 	}

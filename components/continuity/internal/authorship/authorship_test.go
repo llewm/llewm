@@ -118,7 +118,7 @@ func TestObserveAttributesOnlyCommitsMadeByAGitToolCall(t *testing.T) {
 }
 
 func TestObserveSeparatesCreatedCommitsFromIncomingHistory(t *testing.T) {
-	for _, operation := range []string{"fetch-merge", "pull", "local-fast-forward", "merge", "pull-merge", "rebase", "cherry-pick", "amend", "missing-reflog"} {
+	for _, operation := range []string{"fetch-merge", "pull", "local-fast-forward", "merge", "merge-commit", "pull-merge", "rebase", "cherry-pick", "amend", "missing-reflog"} {
 		t.Run(operation, func(t *testing.T) {
 			ctx := context.Background()
 			upstream, root := t.TempDir(), t.TempDir()
@@ -141,7 +141,7 @@ func TestObserveSeparatesCreatedCommitsFromIncomingHistory(t *testing.T) {
 				}
 				return n
 			}
-			if operation == "merge" || operation == "pull-merge" || operation == "rebase" || operation == "cherry-pick" {
+			if operation == "merge" || operation == "merge-commit" || operation == "pull-merge" || operation == "rebase" || operation == "cherry-pick" {
 				git(t, root, "commit", "-q", "--allow-empty", "-m", "local")
 			}
 			if operation == "local-fast-forward" {
@@ -164,6 +164,12 @@ func TestObserveSeparatesCreatedCommitsFromIncomingHistory(t *testing.T) {
 			case "merge":
 				git(t, root, "fetch", "-q", "origin")
 				git(t, root, "merge", "--no-ff", "-m", "merge", "origin/main")
+				want = 1
+			case "merge-commit":
+				// A merge finished by git commit, as after resolving conflicts.
+				git(t, root, "fetch", "-q", "origin")
+				git(t, root, "merge", "--no-ff", "--no-commit", "origin/main")
+				git(t, root, "commit", "-q", "-m", "merge")
 				want = 1
 			case "pull-merge":
 				git(t, root, "pull", "--no-rebase", "--no-ff", "origin", "main")
@@ -201,5 +207,23 @@ func TestObserveSeparatesCreatedCommitsFromIncomingHistory(t *testing.T) {
 				t.Fatalf("repeat attributed %d commits", got)
 			}
 		})
+	}
+}
+
+func TestCreatesCommitRecognizesReflogSubjects(t *testing.T) {
+	for subject, want := range map[string]bool{
+		"commit: Add x":                                        true,
+		"commit (initial): base":                               true,
+		"commit (amend): Add x":                                true,
+		"commit (merge): Merge origin/main":                    true,
+		"merge origin/main: Merge made by the 'ort' strategy.": true,
+		"merge origin/main: Fast-forward":                      false,
+		"pull --ff-only: Fast-forward":                         false,
+		"checkout: moving from main to side":                   false,
+		"reset: moving to HEAD":                                false,
+	} {
+		if got := createsCommit(subject); got != want {
+			t.Errorf("%q: %v, want %v", subject, got, want)
+		}
 	}
 }
