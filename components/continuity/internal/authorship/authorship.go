@@ -138,6 +138,9 @@ type Observation struct {
 // Observe compares HEAD with the last HEAD any hook saw for this checkout.
 // Attribution also requires a commit-creating HEAD reflog entry: reachability
 // alone cannot distinguish newly created commits from a pull or fast-forward.
+// The entry must also fall within RevalidationWindow before the observation, so
+// a commit made earlier where no hook saw it is not credited to the next
+// session that runs Git.
 func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, error) {
 	head, err := Head(ctx, observation.Root)
 	if err != nil || head == "" {
@@ -154,7 +157,7 @@ func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, err
 	at := observation.At.UTC().Format(time.RFC3339Nano)
 	recorded := 0
 	if previous != "" && observation.Attribute && observation.SessionID != "" {
-		commits := createdCommits(ctx, observation.Root, previous, head)
+		commits := createdCommits(ctx, observation.Root, previous, head, observation.At)
 		for _, commit := range commits {
 			result, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO commit_authors(project_id,member,commit_sha,session_id,client,task_id,tool_name,certainty,observed_at) VALUES (?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),'observed',?)`,
 				observation.ProjectID, observation.Member, commit, observation.SessionID, observation.Client, observation.TaskID, observation.ToolName, at)
@@ -174,24 +177,29 @@ func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, err
 // createdCommits intersects newly reachable commits with creation operations in
 // HEAD's reflog since the observed baseline. Local branch fast-forwards need the
 // same exclusion as remote pulls; excluding only remote refs is insufficient.
-// Missing, expired or over-budget reflog history provides no attribution evidence.
-func createdCommits(ctx context.Context, root, previous, head string) []string {
-	output, err := gitenv.Command(ctx, "-C", root, "reflog", "show", "--format=%H%x00%gs", "-n", strconv.Itoa(MaxCommitsPerObservation+1), "HEAD").Output()
+// Missing, expired or over-budget reflog history provides no attribution evidence,
+// and neither does a creation entry outside RevalidationWindow before at.
+func createdCommits(ctx context.Context, root, previous, head string, at time.Time) []string {
+	output, err := gitenv.Command(ctx, "-C", root, "reflog", "show", "--date=unix", "--format=%H%x00%gd%x00%gs", "-n", strconv.Itoa(MaxCommitsPerObservation+1), "HEAD").Output()
 	if err != nil {
 		return nil
 	}
 	created := map[string]bool{}
 	foundBaseline := false
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		hash, subject, ok := strings.Cut(line, "\x00")
-		if !ok {
+		fields := strings.SplitN(line, "\x00", 3)
+		if len(fields) != 3 {
 			return nil
 		}
+		hash, selector, subject := fields[0], fields[1], fields[2]
 		if hash == previous {
 			foundBaseline = true
 			break
 		}
-		if createsCommit(subject) {
+		if !createsCommit(subject) {
+			continue
+		}
+		if when, ok := reflogTime(selector); ok && withinWindow(when, at.UTC()) {
 			created[hash] = true
 		}
 	}

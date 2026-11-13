@@ -262,10 +262,10 @@ func TestReadyArchiveSchemaUpgradeAuditsSQLiteBeforeMigration(t *testing.T) {
 		db.Close()
 		t.Fatal(err)
 	}
-	// Migration 095 changes only the floor and 096 adds one device-local table.
-	// Removing both fixture markers, that table, and restoring 137 produces the
-	// exact predecessor schema, without rebuilding it.
-	if _, err := db.Exec(`DROP TABLE commit_author_revocations; DELETE FROM schema_migrations WHERE version IN ('095_history_radix_writer.sql','096_commit_author_revocations.sql'); UPDATE writer_floor SET mcp_api=137 WHERE singleton=1`); err != nil {
+	// Migration 095 changes only the floor; 096 and 097 add device-local tables.
+	// Removing their markers and tables, and restoring 137, produces the exact
+	// predecessor schema without rebuilding it.
+	if _, err := db.Exec(`DROP TABLE commit_author_revalidations_pending; DROP TABLE commit_author_revocations; DELETE FROM schema_migrations WHERE version IN ('095_history_radix_writer.sql','096_commit_author_revocations.sql','097_commit_author_revalidation_pending.sql'); UPDATE writer_floor SET mcp_api=137 WHERE singleton=1`); err != nil {
 		db.Close()
 		t.Fatal(err)
 	}

@@ -210,16 +210,20 @@ Existing Git notes are preserved;
 the explicit historical note importer can still read them when requested.
 
 Automatic session attribution requires both a Git-writing tool observation and a
-commit-creating HEAD reflog entry since the last observed HEAD. Fetch, pull and
-local branch fast-forwards do not attribute incoming history. A new merge commit
-or replayed rebase commit can be attributed without crediting its existing
-ancestors. Missing, expired or over-budget reflog history leaves attribution
-unknown; reachability alone is insufficient. This remains best-effort hook
-observation, not proof of authorship. Existing historical attribution rows are not
-rewritten by this correction. `llewm database authorship` previews whether each
-existing attribution has a commit-creating entry, in any of the checkout's
-reflogs, within 15 minutes before its observation; `--apply` appends a
-device-local revocation for each one that does not, so pre-fix credits for
-pulled history or for commits another session made earlier stop affecting
-narrative coverage and task overlap. The observation rows stay unchanged, and
-each device revalidates its own database.
+commit-creating HEAD reflog entry since the last observed HEAD, no more than 15
+minutes before the observation. Fetch, pull and local branch fast-forwards do
+not attribute incoming history, and a commit made earlier where no hook saw it is
+not credited to the next session that runs Git. A new merge commit, including one
+finished by `git commit` after conflict resolution, or a replayed rebase commit
+can be attributed without crediting its existing ancestors. Missing, expired or
+over-budget reflog history leaves attribution unknown; reachability alone is
+insufficient. This remains best-effort hook observation, not proof of authorship.
+
+Builds before commit 922c22f recorded attributions without that evidence.
+Migration 097 asks the next hook on each device to revalidate, once, the
+attributions observed before the migration against the checkout's reflogs
+(branches and every worktree HEAD) under the same rule. It appends a device-local
+revocation for each one that fails; narrative coverage and task overlap skip
+revoked attributions, and the observation rows stay unchanged. Later
+observations are never revalidated, so reflog expiry cannot revoke them. The
+one-time repair is removed once every device has migrated past 097.

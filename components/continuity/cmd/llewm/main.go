@@ -20,7 +20,6 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/audit"
-	"github.com/llewm/llewm/components/continuity/internal/authorship"
 	"github.com/llewm/llewm/components/continuity/internal/bootstrap"
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
@@ -1231,41 +1230,7 @@ older than the writer floor refuses writes until restarted. Lower the floor with
 		},
 	}
 	writerFloor.Flags().IntVar(&floorSet, "set", 0, "set the floor to this writer API (only to roll back)")
-	var applyAuthorship bool
-	authorshipCommand := &cobra.Command{
-		Use:   "authorship",
-		Short: "Preview, or with --apply revoke, commit attributions that reflog evidence does not support",
-		Long: `Hooks record which session they saw create a commit. Builds before commit
-922c22f also credited pulled and fast-forwarded history, or commits another
-session made earlier, to whichever session next ran Git. This revalidates every
-unrevoked attribution in this device's database: it keeps one only when a
-commit-creating entry in the checkout's reflogs falls within 15 minutes before
-the observation. With --apply, failing attributions get an append-only
-revocation and stop affecting narrative coverage and task overlap; the
-observations themselves are kept. Expired reflog history counts as no evidence.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withApp(cmd, func(application *app.App) error {
-				var all []authorship.Revalidation
-				for _, repository := range application.Repositories.All() {
-					items, err := authorship.Revalidate(cmd.Context(), application.DB, application.ProjectID, repository.Member, repository.Root, applyAuthorship, time.Now())
-					if err != nil {
-						return err
-					}
-					all = append(all, items...)
-				}
-				kept := 0
-				for _, item := range all {
-					if item.Keep {
-						kept++
-					}
-				}
-				return writeJSON(cmd.OutOrStdout(), map[string]any{"applied": applyAuthorship, "kept": kept, "revoked": len(all) - kept, "attributions": all})
-			})
-		},
-	}
-	authorshipCommand.Flags().BoolVar(&applyAuthorship, "apply", false, "append revocations for the attributions the preview rejects")
-	parent.AddCommand(migrate, writerFloor, authorshipCommand)
+	parent.AddCommand(migrate, writerFloor)
 	return parent
 }
 

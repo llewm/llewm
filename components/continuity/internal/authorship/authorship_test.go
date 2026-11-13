@@ -227,3 +227,36 @@ func TestCreatesCommitRecognizesReflogSubjects(t *testing.T) {
 		}
 	}
 }
+
+func TestObserveIgnoresCreationOutsideTheWindow(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db, err := database.Initialize(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO projects(id,root,name,created_at) VALUES ('p',?,'test','2026-01-01')`, root); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "init", "-q", "-b", "main")
+	git(t, root, "commit", "-q", "--allow-empty", "-m", "base")
+	observe := func(at time.Time) int {
+		t.Helper()
+		n, err := Observe(ctx, db, Observation{ProjectID: "p", Root: root, SessionID: "agent", Client: "codex", Attribute: true, At: at})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	observe(time.Now())
+	// Made where no hook saw it; the next Git-writing tool call is much later.
+	git(t, root, "commit", "-q", "--allow-empty", "-m", "unseen")
+	if got := observe(time.Now().Add(RevalidationWindow + time.Hour)); got != 0 {
+		t.Fatalf("stale creation attributed %d commits", got)
+	}
+	git(t, root, "commit", "-q", "--allow-empty", "-m", "seen")
+	if got := observe(time.Now()); got != 1 {
+		t.Fatalf("timely creation attributed %d commits, want 1", got)
+	}
+}

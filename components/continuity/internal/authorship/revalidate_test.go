@@ -10,7 +10,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/database"
 )
 
-func TestRevalidateRevokesAttributionsWithoutTimelyCreationEvidence(t *testing.T) {
+func TestRevalidatePendingRevokesPreFixAttributionsOnce(t *testing.T) {
 	ctx := context.Background()
 	upstream, root := t.TempDir(), t.TempDir()
 	git(t, upstream, "init", "-q", "-b", "main")
@@ -63,40 +63,68 @@ func TestRevalidateRevokesAttributionsWithoutTimelyCreationEvidence(t *testing.T
 	late := git(t, root, "rev-parse", "HEAD")
 	attribute(late, "puller", unix(late).Add(2*time.Hour))
 
-	preview, err := Revalidate(ctx, db, "p", "", root, false, time.Now())
+	// A fixed build's later observation, after the migration's cutoff, is never
+	// revalidated even when its evidence has since expired.
+	cutoff := time.Now().UTC().Add(3 * time.Hour)
+	git(t, root, "commit", "-q", "--allow-empty", "-m", "after cutoff")
+	after := git(t, root, "rev-parse", "HEAD")
+	attribute(after, "fixed", cutoff.Add(time.Minute))
+
+	checkouts := []Checkout{{Root: root}}
+	if items, err := RevalidatePending(ctx, db, "p", checkouts, time.Now()); err != nil || items != nil {
+		t.Fatalf("revalidated without a pending request: %#v %v", items, err)
+	}
+	if _, err := db.Exec(`INSERT INTO commit_author_revalidations_pending(project_id,cutoff) VALUES ('p',?)`, cutoff.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	items, err := RevalidatePending(ctx, db, "p", checkouts, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	keep := map[string]bool{}
-	for _, item := range preview {
+	for _, item := range items {
 		keep[item.Commit] = item.Keep
 	}
-	if len(preview) != 4 || !keep[local] || !keep[side] || keep[incoming] || keep[late] {
-		t.Fatalf("preview = %#v", preview)
+	if _, seen := keep[after]; len(items) != 4 || seen || !keep[local] || !keep[side] || keep[incoming] || keep[late] {
+		t.Fatalf("revalidation = %#v", items)
 	}
-	if authors, _ := Authors(ctx, db, "p", "", []string{incoming}); len(authors) != 1 {
-		t.Fatal("preview revoked an attribution")
-	}
-
-	if _, err := Revalidate(ctx, db, "p", "", root, true, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	authors, err := Authors(ctx, db, "p", "", []string{local, side, incoming, late})
+	authors, err := Authors(ctx, db, "p", "", []string{local, side, incoming, late, after})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(authors) != 2 || authors[local].SessionID != "maker" || authors[side].SessionID != "maker" {
-		t.Fatalf("authors after apply = %#v", authors)
+	if len(authors) != 3 || authors[local].SessionID != "maker" || authors[side].SessionID != "maker" || authors[after].SessionID != "fixed" {
+		t.Fatalf("authors after revalidation = %#v", authors)
 	}
 	if commits, err := TaskCommits(ctx, db, "p", "task-puller"); err != nil || len(commits) != 0 {
 		t.Fatalf("revoked task commits = %#v %v", commits, err)
 	}
-	var observations int
-	if err := db.QueryRow(`SELECT count(*) FROM commit_authors`).Scan(&observations); err != nil || observations != 4 {
+	var observations, pending int
+	if err := db.QueryRow(`SELECT count(*) FROM commit_authors`).Scan(&observations); err != nil || observations != 5 {
 		t.Fatalf("observations = %d %v; revocation must not rewrite them", observations, err)
 	}
-	again, err := Revalidate(ctx, db, "p", "", root, true, time.Now())
-	if err != nil || len(again) != 2 {
-		t.Fatalf("second pass = %#v %v; want only the kept attributions", again, err)
+	if err := db.QueryRow(`SELECT count(*) FROM commit_author_revalidations_pending`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("pending requests = %d %v; want cleared", pending, err)
+	}
+	if again, err := RevalidatePending(ctx, db, "p", checkouts, time.Now()); err != nil || again != nil {
+		t.Fatalf("second pass = %#v %v; the repair runs once", again, err)
+	}
+}
+
+func TestRevalidatePendingKeepsRequestWhenGitFails(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Initialize(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO projects(id,root,name,created_at) VALUES ('p','x','test','2026-01-01'); INSERT INTO commit_author_revalidations_pending(project_id,cutoff) VALUES ('p','2026-01-02T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RevalidatePending(ctx, db, "p", []Checkout{{Root: filepath.Join(t.TempDir(), "not-a-repo")}}, time.Now()); err == nil {
+		t.Fatal("revalidation without readable reflogs succeeded")
+	}
+	var pending int
+	if err := db.QueryRow(`SELECT count(*) FROM commit_author_revalidations_pending`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("pending = %d %v; a failed repair must be retried", pending, err)
 	}
 }

@@ -14,7 +14,7 @@ import (
 )
 
 // latestMigration is the newest migration this build embeds.
-const latestMigration = "096_commit_author_revocations.sql"
+const latestMigration = "097_commit_author_revalidation_pending.sql"
 
 func migrationsBefore(to string) []string {
 	names := []string{}
