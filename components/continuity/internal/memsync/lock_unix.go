@@ -3,6 +3,7 @@
 package memsync
 
 import (
+	"errors"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -10,13 +11,13 @@ import (
 
 // lockFile takes an exclusive advisory lock, waiting for other syncs on this
 // machine. Closing the file releases it.
-func lockFile(path string) (*os.File, error) {
+func lockFile(path string) (*fileLock, error) {
 	return lockFileMode(path, false)
 }
 
-func tryLockFile(path string) (*os.File, error) { return lockFileMode(path, true) }
+func tryLockFile(path string) (*fileLock, error) { return lockFileMode(path, true) }
 
-func lockFileMode(path string, immediate bool) (*os.File, error) {
+func lockFileMode(path string, immediate bool) (*fileLock, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -29,7 +30,14 @@ func lockFileMode(path string, immediate bool) (*os.File, error) {
 		file.Close()
 		return nil, err
 	}
-	return file, nil
+	return &fileLock{file}, nil
+}
+
+func (file *fileLock) Close() error {
+	// Closing alone leaves flock held while another process retains a copy
+	// of this description, including a concurrent fork before close-on-exec.
+	err := unix.Flock(int(file.Fd()), unix.LOCK_UN)
+	return errors.Join(err, file.File.Close())
 }
 
 // parentRenameKeepsOpenFiles is true: POSIX renames a directory while files

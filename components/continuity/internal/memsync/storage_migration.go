@@ -32,7 +32,7 @@ func readCloneReceipt(p cloneStoragePaths, remote string) (cloneStorageReceipt, 
 	return r, err == nil, err
 }
 
-func cloneMigrationLock(p cloneStoragePaths) (*os.File, error) {
+func cloneMigrationLock(p cloneStoragePaths) (*fileLock, error) {
 	file, err := tryLockFile(filepath.Join(filepath.Dir(p.Root), ".llewm-storage-migrate-"+recordsync.Hash(p.Root)+".lock"))
 	if err != nil {
 		return nil, fmt.Errorf("another storage operation is active: %w", err)
@@ -472,7 +472,7 @@ func completeBareClone(ctx context.Context, paths cloneStoragePaths, remote stri
 // legacy writer holds a file inside the clone, and the retained clone is
 // verified against the preparation receipt afterwards and moved back if it
 // changed in between.
-func retireOriginalClone(ctx context.Context, parent *os.Root, p cloneStoragePaths, legacyLock *os.File, r cloneStorageReceipt, remote string, access Access) error {
+func retireOriginalClone(ctx context.Context, parent *os.Root, p cloneStoragePaths, legacyLock *fileLock, r cloneStorageReceipt, remote string, access Access) error {
 	released := !parentRenameKeepsOpenFiles
 	if released {
 		if err := legacyLock.Close(); err != nil {
