@@ -41,6 +41,12 @@ now provides a manual shared work pool, reviewed assignments and context-preserv
 reassignment. Automatic agent launching and approved execution remain future
 directions. See [parallel tracks](docs/parallel-tracks.md).
 
+For messages between already-running agents on one machine, choose the
+[local broker](components/orchestration/docs/agent-broker.md) or the
+[manual Markdown mailbox](components/orchestration/docs/file-mailbox.md), which
+needs no Llewm install. These local channels are separate from cross-machine
+leases and History sync; no cross-machine message bridge is implemented.
+
 **Continuity is Llewm’s current MVP, not its full scope.** It preserves attributable
 project guidance, tasks, plans, decisions, research, and verification across
 coding-agent sessions, retrieving bounded context when work resumes. It also records

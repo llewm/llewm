@@ -6,6 +6,12 @@ for **one project on one machine**, independently of the shared work coordinator
 It has a distinct database identity and only listens on literal loopback IPs.
 Continuity remains independently usable without either service.
 
+For agents that cannot use the broker, a [manual file mailbox](file-mailbox.md)
+provides a machine-local option without installing an executable or hooks. Select
+one channel explicitly; broker failure never silently switches delivery to files.
+The mailbox has a separate protocol and weaker delivery guarantees. Neither local
+option implements cross-machine messaging; see the boundary below.
+
 The local broker reuses private storage and engineer authentication, not shared
 plan state. An enrolled engineer's `work` permission permits local publishing;
 read-only members can inspect broker identity. Session inbox reads require the

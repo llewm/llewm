@@ -25,6 +25,12 @@ for durable project messages, advisory session state, hook-cycle checks and boun
 pull/wait delivery. It uses a distinct local-only database and grants no shared
 work claims. No cross-machine message bridge or client hooks are installed automatically.
 
+Already-running agents can alternatively use the [manual file mailbox](docs/file-mailbox.md)
+on one machine without a Llewm install or broker configuration. It uses immutable
+Markdown messages, explicit acknowledgments, and manual polling in one agreed local
+folder. It is a separate, explicitly chosen local channel, not an automatic broker
+fallback or a cross-machine transport.
+
 ## Build and start a coordinator
 
 From this component:

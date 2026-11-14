@@ -108,6 +108,13 @@ receipt provenance; it must not replicate active databases or manufacture shared
 claim authority offline. No bridge, automatic host configuration or agent launcher
 is implemented. See [the local broker contract](../components/orchestration/docs/agent-broker.md).
 
+A separate [manual file mailbox](../components/orchestration/docs/file-mailbox.md)
+lets cooperating agents on one machine use immutable Markdown messages in an
+agreed local folder without a broker install. It has no automatic notification,
+authentication, redaction, or broker durability guarantees. Selection and any
+cutover are explicit. It does not share leases, become canonical Continuity state,
+or deliver messages between machines; syncing the folder is not a supported bridge.
+
 ## Agent host and execution-control boundary
 
 The manual orchestration coordinator authenticates engineers and serializes
