@@ -92,6 +92,12 @@ and SHA-256 content hashes. Continuity describes precedence to the receiving
 agent; it does not infer textual conflicts, merge matching headings, or enforce
 compliance. Client/system instructions still govern the agent.
 
+These are the product's default source priorities. An engineer can write a more
+specific precedence or commit policy in their personal global files; that policy
+then appears in every adopting project's bootstrap for that account. It is not a
+Llewm development policy shipped to other users. Inspect the actual source text
+as well as its numeric priority when explaining effective guidance.
+
 One replacement is made visible: when a project `AGENTS.override.md` section has
 exactly the same heading as a global section, the Markdown bootstrap prints the
 global section's source and hash with a "Project override" notice naming the
@@ -136,12 +142,12 @@ rules (built in)":
 - `task-identity`: checkpoint under your own `task_id` from its current tip;
   review or repair another agent's task under a new task with `reviews_task_id`.
 - `own-commits`: narrate only commits your session or task made.
-- `checkout-lifecycle`: new and resumed tasks default to the current checkout
-  and branch for sequential single-session work. Require confirmed concurrency,
-  explicit isolation, or a project workflow before creating a task branch/worktree.
-  Unfinished task and expiring presence records alone do not establish another
-  writer. Clean up both the integrated task worktree and its local branch only
-  after checking cleanliness, unique commits, and live writers.
+- `resume-completion`: verify remaining acceptance checks on resumption and
+  reconcile completed work under its own task; a restart alone is not completion.
+- `checkout-lifecycle`: follow the adopting project's branch, worktree, and cleanup
+  workflow and the user's instructions. Continuity records alone neither establish
+  another live writer nor authorize Git changes. Before authorized cleanup, check
+  integration, cleanliness, unique commits, and live writers; preserve uncertain work.
 - `memory-repository` (only when `[sync]` names a memory repository): never edit,
   commit to, rebase, reset, or force-push the memory clone, which the rule names
   by path; its automatic commits need no work narrative.
@@ -156,6 +162,13 @@ first checkpoint and when task selection is ambiguous; no `continue` skill or
 edit to the user's `AGENTS.md` is required. Both client hooks, CLI bootstrap, and
 MCP use the same core rules. This change requires no schema migration or plugin
 refresh by itself; it is guidance, not automatic Git cleanup or enforcement.
+
+Llewm's own development repository separately requires its chosen commit,
+branch/worktree, and release practices. Those practices are not installed into
+other projects. The built-in checkout rule retains its configurable ID but defers
+workflow choices to the adopting project; it does not require using the current
+branch, creating a task branch, or deleting one. Historical rule experiments under
+`scripts/rules_ab_arms/` are test inputs, not installed defaults.
 
 Configuration can turn a rule off or reword it, engineer-wide in
 `config.toml` in the global guidance directory and per project in

@@ -30,26 +30,23 @@ the bootstrap with that `task_id`. Do not pick one yourself.
 task's files after its checkpoint: read those commits before acting, because the
 saved state predates them. "Shared files" means another in-progress task works on
 the same files; coordinate through the user before editing them.
-Use a separate Git worktree only when another writing agent is actually active at
-the same time, overlapping uncommitted work already exists, or the user explicitly
-requests isolation. Multiple open tasks, checkpoints, branches, or unexpired
-leases do not by themselves prove concurrent writers; one agent working through
-several tasks sequentially stays in the current checkout. Presence expiry is a recency filter, not a process-liveness check: a missing
-Stop/SessionEnd can leave an ended session listed for its full TTL. An unexpired
-record alone does not establish a concurrent writer or require a worktree. When
-liveness is uncertain, inspect `llewm presence --live` (or MCP
-`continuity_presence`) and Git state; respect the user's report that this is the
-only session instead of asking again because a record remains unexpired. For genuine concurrency, use a task branch in a sibling
-worktree (`git worktree add ../<repo>-<task> -b <task>`; Continuity resolves it to
-the same project). In a shared checkout, stage explicit paths, never `git add -A`
-or `git add .`, so another agent's uncommitted edits stay out of commits. Resolve
-a mismatch or ambiguous task before acting; do not repair it by overwriting a
-checkpoint or changing configuration.
+Follow the adopting project's branch, worktree, and cleanup workflow and the
+user's instructions. Continuity does not choose that workflow. Open tasks,
+checkpoints, branches, leases, and presence observations alone do not establish
+another active writer or authorize creating or removing a branch or worktree.
+Presence expiry is a recency filter, not a process-liveness check. If concurrency
+is uncertain, inspect `llewm presence --live` (or MCP `continuity_presence`) and
+Git state; respect the user's report of which sessions are active. Coordinate
+confirmed concurrent writes and preserve other people's uncommitted work. Stage
+explicit paths in a shared checkout so another writer's edits stay out of commits.
+Resolve a project mismatch or ambiguous task before acting; do not repair it by
+overwriting a checkpoint or changing configuration.
 
-At completion, inspect any dedicated task worktree created for the work. Remove
-the worktree and its local branch only when the task is integrated, the worktree
-is clean, the branch has no unique commits, and no live writer uses it. Otherwise
-report exactly why it remains. Never leave a completed worktree in `/tmp`.
+At completion, account for any dedicated task branch/worktree created for this
+work under the project's workflow. Before authorized cleanup, verify integration,
+a clean worktree, no unique commits, and no live writer. Otherwise retain the
+work and report why. Continuity records do not themselves authorize Git cleanup.
+Do not leave scratch worktrees in `/tmp`.
 
 If the packet reports deferred checkpoint detail, retrieve that exact checkpoint
 with `continuity_checkpoint_get` before acting. If bootstrap itself exceeds its

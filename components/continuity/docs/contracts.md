@@ -8,7 +8,7 @@ A contract states one **project shape** so it can be found and quoted exactly:
 | Kind | Meaning | Example |
 | --- | --- | --- |
 | `axiom` | A truth the project builds on | Transcripts are not canonical state |
-| `directive` | How to work | Prefer redesign over compatibility until release |
+| `directive` | How to work | Preserve supported interfaces across releases |
 | `promise` | What the product guarantees | The memory repository never holds a secret |
 | `constraint` | A boundary that must hold | Hook qualification is current only for its exact version |
 
@@ -18,14 +18,14 @@ and any client that reads the file sees the statement without Continuity.
 Decision records keep the *why*; the marked section is the *what*.
 
 ```markdown
-<!-- continuity:contract pre-release-breaking-changes -->
-## Pre-release changes
+<!-- continuity:contract release-compatibility -->
+## Release compatibility
 
 kind: directive
-scope: every component, until Llewm's first public release
-expiry: the first public release
+scope: development of Llewm and its components; not projects using Llewm
+review: before a release or a change to a supported interface or persisted format
 
-Until public release, prefer correctness and redesign over backward compatibility...
+Preserve supported interfaces and persisted data across updates...
 ```
 
 - The marker names a stable ID (letters, digits, `.`, `_`, `-`).
@@ -78,6 +78,24 @@ matrix](coverage.md).
 
 | ID | Kind | File |
 | --- | --- | --- |
-| `pre-release-breaking-changes` | directive | `AGENTS.md` |
+| `release-compatibility` | directive | `AGENTS.md` |
 | `memory-repository` | promise | `components/continuity/docs/memory-repository.md` |
 | `client-hooks` | constraint | `components/continuity/docs/client-hook-conformance.md` |
+
+## Scope of development and installed guidance
+
+The release directive governs work on Llewm itself. Installing a binary or plugin
+does not copy this repository's `AGENTS.md` into an adopting project. Its marked
+contracts are discovered under its own project root, not as a global policy pack.
+
+Installed bootstraps carry Continuity's built-in usage rules, the adopting
+project's guidance, and the engineer's optional global guidance. Built-in rules
+must not select a commit, release, or branch policy for that project. Personal
+global guidance can intentionally affect every project on that engineer's account;
+`llewm global init` creates heading-only files, not Llewm's development policies.
+See [global guidance](global-guidance.md) for sources and override behavior.
+
+The other marked contracts retain their product scope: `memory-repository`
+protects Continuity-owned sync storage, and `client-hooks` requires exact-version
+qualification of hook delivery. Neither authorizes changes to an adopting project's
+code, workflow, or Git history.

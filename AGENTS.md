@@ -37,18 +37,27 @@ not broaden its capabilities merely because the overall Llewm roadmap includes t
   binaries, as soon as they have served their purpose, and before ending the
   task. Never keep a copy of a live database in `/tmp` longer than one check.
 
-<!-- continuity:contract pre-release-breaking-changes -->
-## Pre-release changes
+<!-- continuity:contract release-compatibility -->
+## Release compatibility
 
 kind: directive
-scope: every component, until Llewm's first public release
-expiry: the first public release
+scope: development of Llewm and its components; not projects using Llewm
+review: before a release or a change to a supported interface or persisted format
 
-Until public release, prefer correctness and redesign over backward compatibility:
-make breaking changes that improve the product, and merge or replace overlapping
-record types, commands, and tools instead of adding alongside them. Do not add
-compatibility aliases or shims. Still back up and verify live databases before
-migrating them.
+Preserve supported CLI commands, MCP tools, configuration, plugin integrations,
+and persisted data across updates. Correctness and simplification remain goals,
+but release preparation is not blanket permission to remove or break behavior.
+
+- Identify affected callers, users, documentation, and stored data before changing
+  a supported interface. Prefer a compatible transition or documented deprecation.
+- Make a breaking change only as an explicit, reviewed release decision with its
+  rationale, affected versions, upgrade instructions, and recovery path. Do not
+  silently remove commands, tools, record types, or configuration keys.
+- Back up and verify live databases before migration. Test supported upgrades and
+  recovery; never imply that an older binary can read a newer format unless verified.
+- Keep Llewm development policies in this repository. Shipped guidance must concern
+  using Llewm and respect the adopting project's workflow and user instructions;
+  it must not impose Llewm's release, commit, or branch policy on other projects.
 
 ## Continuation
 

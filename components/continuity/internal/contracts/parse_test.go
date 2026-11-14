@@ -39,7 +39,7 @@ func TestParseIgnoresFencedExamples(t *testing.T) {
 func TestRepositoryContractsParse(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..")
 	for path, id := range map[string]string{
-		"AGENTS.md": "pre-release-breaking-changes",
+		"AGENTS.md": "release-compatibility",
 		"components/continuity/docs/memory-repository.md":       "memory-repository",
 		"components/continuity/docs/client-hook-conformance.md": "client-hooks",
 		"components/continuity/docs/contracts.md":               "",
