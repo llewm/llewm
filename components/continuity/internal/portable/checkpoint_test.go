@@ -24,7 +24,7 @@ func TestCheckpointFamilyRoundTripsWithImmutableActionHistory(t *testing.T) {
 	first, err := service.CreateWithActions(ctx, checkpoint.Checkpoint{
 		ID: "checkpoint-first", ProjectID: sourceProject, SessionID: "session-checkpoint", TaskID: "portable-checkpoints",
 		RestartResume: &checkpoint.RestartResume{InstanceID: identity.InstanceID, Client: "codex"},
-		Task:          "Portable checkpoints", Status: "in_progress", Summary: "Root " + root + " project " + sourceProject + " token=checkpoint-secret",
+		Task:          "Portable checkpoints", Status: "in_progress", Summary: "Root " + root + " project " + sourceProject + " token=checkpoint-secret\nmytool --password 'command-credential with spaces'\nhttps://userinfo-credential@example.test\nAuthorization: Basic header-credential",
 		NextAction: "Recover the checkpoint graph", Completed: []string{"Mapped checkpoint fields"},
 		Attempts: []checkpoint.Attempt{{Description: "Use mutable state", Outcome: "Rejected", Reason: "History must remain immutable"}},
 		Changes:  []string{"components/continuity/internal/portable/checkpoint.go"}, Verified: []string{"Fixture created"},
@@ -74,7 +74,7 @@ func TestCheckpointFamilyRoundTripsWithImmutableActionHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, leaked := range []string{root, sourceProject, "checkpoint-secret", "metadata-secret", "transition-secret", "restart_resume"} {
+	for _, leaked := range []string{root, sourceProject, "checkpoint-secret", "metadata-secret", "transition-secret", "restart_resume", "command-credential", "userinfo-credential", "header-credential"} {
 		if bytes.Contains(bundle.RecordsBytes, []byte(leaked)) {
 			t.Fatalf("checkpoint bundle leaked %q", leaked)
 		}

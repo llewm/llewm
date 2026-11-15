@@ -68,6 +68,27 @@ project-local identifiers with explicit markers. Pattern redaction is bounded
 protection, not proof that arbitrary free text is safe to share. Keep export
 destinations private and review the selected data.
 
+The default redaction profile is version 2. It additionally covers Authorization
+header credentials (including Basic and token schemes), quoted or space-separated
+secret flags, URL userinfo (preserving `@`), curl `-u`/`--user`, AWS credential
+setters, and recognizable GitHub, OpenAI-style, AWS and Slack key prefixes.
+These are conservative text patterns, not a shell parser or a complete secret
+detector. Arbitrary unlabelled secrets and encoded or constructed values may
+remain. Hook raw payloads are decoded before structural redaction; raw capture
+remains opt-in, and command capture defaults are unchanged.
+
+This does not rewrite existing events, stores, backups or published envelopes.
+Backups preserve the data already in their source store. Version 1 manifests
+remain readable and record identities/codec schemas are unchanged; already-safe
+assignment and Bearer markers retain their spelling. Newly recognized secrets
+can cause historical curated records to fail current import validation or differ
+when first exported under the stronger rules. Such failures must be reviewed
+using the existing collision/recovery workflow, never resolved by replacing
+immutable observations or editing the memory repository. Upgrading alone does
+not sanitize historical data or independently retained backups.
+See the [activity retention proposal](activity-retention.md) for the separate
+contract decision and reference/aggregate safeguards required before pruning.
+
 Current codec limits are:
 
 | Item | Maximum |

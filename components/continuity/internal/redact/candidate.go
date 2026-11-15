@@ -1,12 +1,36 @@
 package redact
 
-import "unicode/utf8"
+import (
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
+
+var commandCandidate = regexp.MustCompile(`(?i:--(?:api[_-]?key|token|password|secret)|-u|--user|\baws_(?:secret_access_key|access_key_id|session_token))|\b(?:gh[pousr]_|github_pat_|sk-|AKIA|xox[bp]-)`)
+var userinfoCandidate = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^\s/"'@]+@`)
 
 // candidateStart finds the first prefix needed by any replacement rule. Search
 // delimiters instead of asking the regexp engine to try every prose position.
 // Replacement, capture and rule ordering still belong to the original regexps.
 // Keep this recognizer and its differential fixtures aligned with patterns.
 func candidateStart(value string) int {
+	start := assignmentCandidateStart(value)
+	// Most historical prose has none of these markers. Avoid a regexp scan of
+	// every character on that common path, while recognizing colon-free secrets.
+	if strings.ContainsAny(value, "-_") || strings.Contains(value, "AKIA") {
+		if match := commandCandidate.FindStringIndex(value); match != nil && (start < 0 || match[0] < start) {
+			start = match[0]
+		}
+	}
+	if strings.Contains(value, "@") {
+		if match := userinfoCandidate.FindStringIndex(value); match != nil && (start < 0 || match[0] < start) {
+			start = match[0]
+		}
+	}
+	return start
+}
+
+func assignmentCandidateStart(value string) int {
 	for i := 0; i < len(value); i++ {
 		if value[i] != ':' && value[i] != '=' {
 			continue
@@ -27,14 +51,7 @@ func candidateStart(value string) int {
 			continue
 		}
 		if start := foldedSuffix(value[:i], "authorization"); start >= 0 {
-			end := i + 1
-			for end < len(value) && regexSpace(value[end]) {
-				end++
-			}
-			// Bearer has only ASCII simple-fold equivalents.
-			if end+6 < len(value) && foldedSuffix(value[end:end+6], "bearer") == 0 && regexSpace(value[end+6]) {
-				return start
-			}
+			return start
 		}
 		if i+2 >= len(value) || value[i+1] != '/' || value[i+2] != '/' {
 			continue

@@ -89,12 +89,11 @@ func Decode(client, projectID string, body []byte, storeRaw bool) (activity.Even
 	}
 	if storeRaw {
 		var value any
-		redacted := redact.String(string(body))
-		if json.Unmarshal([]byte(redacted), &value) == nil {
+		if json.Unmarshal(body, &value) == nil {
 			if event.Payload == nil {
 				event.Payload = map[string]any{}
 			}
-			event.Payload["client_event"] = value
+			event.Payload["client_event"] = redact.Value(value)
 		}
 	}
 	return event, nil

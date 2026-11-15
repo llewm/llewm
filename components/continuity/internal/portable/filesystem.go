@@ -16,7 +16,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/dirsync"
 )
 
-const redactionProfileDefinition = "llewm-portable-redaction/default/v1:project-root-and-secret-patterns"
+const redactionProfileDefinition = "llewm-portable-redaction/default/v2:project-root-and-command-secret-patterns"
 
 const LocalDirectoryTransportKind = "local_directory"
 
@@ -52,7 +52,7 @@ type ExportResult struct {
 
 func DefaultRedactionProfile() RedactionProfile {
 	sum := sha256.Sum256([]byte(redactionProfileDefinition))
-	return RedactionProfile{ID: "default", Version: 1, SHA256: hex.EncodeToString(sum[:])}
+	return RedactionProfile{ID: "default", Version: 2, SHA256: hex.EncodeToString(sum[:])}
 }
 
 // ExportOperationalDirectory takes one operational read snapshot and publishes a

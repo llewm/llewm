@@ -19,19 +19,27 @@ func TestStringRemovesCommonSecrets(t *testing.T) {
 }
 
 func referenceString(value string) string {
+	for _, rule := range commandPatterns {
+		value = rule.pattern.ReplaceAllString(value, rule.with)
+	}
 	for _, pattern := range patterns {
 		value = pattern.ReplaceAllString(value, `${1}[REDACTED]`)
 	}
 	return value
 }
 
-var candidateReference = regexp.MustCompile(`(?i)(?:(?:api[_-]?key|token|password|secret)["']?\s*[=:]|authorization:\s*bearer\s+|https?://[^:/\s]+:)`)
+var candidateReference = regexp.MustCompile(`(?i)(?:(?:api[_-]?key|token|password|secret)["']?\s*[=:]|authorization:|https?://[^:/\s]+:)`)
 
 func checkCandidate(t *testing.T, value string) {
 	t.Helper()
 	want := -1
 	if match := candidateReference.FindStringIndex(value); match != nil {
 		want = match[0]
+	}
+	for _, pattern := range []*regexp.Regexp{commandCandidate, userinfoCandidate} {
+		if match := pattern.FindStringIndex(value); match != nil && (want < 0 || match[0] < want) {
+			want = match[0]
+		}
 	}
 	if got := candidateStart(value); got != want {
 		t.Fatalf("candidate %q: got%d want%d", value, got, want)
@@ -89,6 +97,11 @@ func FuzzStringMatchesReplacementRules(f *testing.F) {
 		"AUTHORIZATION:\tBEARER\tx\nsecret=next",
 		"https://user:pass@example.test token=\"quoted\"",
 		"token= secret='\npassword=\rkey=x",
+		`mytool --password "one two" --token=three`,
+		`aws configure set aws_secret_access_key sample`,
+		`https://fixture@example.test curl -u admin:fixture`,
+		`echo sk-proj-abcdefghijklmnopqrstuv | tool login`,
+		`Authorization: Basic ZmFrZTpmYWtl`,
 	} {
 		f.Add(value)
 	}
