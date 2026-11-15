@@ -33,12 +33,25 @@ func TestSourceCheckPreservesDirtyWorkAndClassifiesAncestry(t *testing.T) {
 	if err := os.WriteFile(mod, []byte("module github.com/llewm/llewm/components/continuity\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	info := filepath.Join(root, "components/continuity/internal/buildinfo/info.go")
+	migration := filepath.Join(root, "components/continuity/internal/database/migrations/001_initial.sql")
+	for path, body := range map[string]string{info: "package buildinfo\nconst WriterAPIVersion=138\n", migration: "-- fixture"} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	git("add", ".")
 	git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "one")
 	first := git("rev-parse", "HEAD")
 	git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "two")
 	second := git("rev-parse", "HEAD")
 	r, err := Source(ctx, buildinfo.Info{GitCommit: first}, root, "origin", "main", false)
+	if r.TargetWriterAPI == nil || *r.TargetWriterAPI != 138 || r.TargetMigration != "001_initial.sql" || r.CompatibilityBasis != "exact_source_commit" {
+		t.Fatalf("compatibility=%+v", r)
+	}
 	if err != nil || r.State != "update_available" || r.TargetCommit != second || r.Fetched {
 		t.Fatalf("check %+v %v", r, err)
 	}
@@ -46,9 +59,16 @@ func TestSourceCheckPreservesDirtyWorkAndClassifiesAncestry(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := git("status", "--porcelain")
+	if err := os.WriteFile(info, []byte("package buildinfo\nconst WriterAPIVersion=999\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before = git("status", "--porcelain")
 	r, err = Source(ctx, buildinfo.Info{GitCommit: second}, root, "origin", "main", false)
 	if err != nil || !r.SourceDirty || git("status", "--porcelain") != before || git("rev-parse", "HEAD") != second {
 		t.Fatalf("dirty check modified work %+v %v", r, err)
+	}
+	if r.TargetWriterAPI == nil || *r.TargetWriterAPI != 138 {
+		t.Fatal("read dirty worktree as target identity")
 	}
 	r, err = Source(ctx, buildinfo.Info{GitCommit: "unknown"}, root, "origin", "main", false)
 	if err != nil || r.State != "unknown" {

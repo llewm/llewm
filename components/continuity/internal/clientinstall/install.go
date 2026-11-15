@@ -61,25 +61,36 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 type Receipt struct {
-	PluginCache     pluginidentity.Snapshot `json:"plugin_cache"`
-	Executable      buildinfo.Info          `json:"executable"`
-	Client          string                  `json:"client"`
-	Scope           string                  `json:"scope"`
-	ClientVersion   string                  `json:"client_version,omitempty"`
-	PluginVersion   string                  `json:"plugin_version"`
-	BundleSHA256    string                  `json:"bundle_sha256"`
-	Directory       string                  `json:"directory"`
-	Backup          string                  `json:"backup,omitempty"`
-	State           string                  `json:"state"`
-	PluginInstalled bool                    `json:"plugin_installed"`
-	Permissions     string                  `json:"permissions"`
-	HookTrust       string                  `json:"hook_trust"`
-	RestartRequired bool                    `json:"restart_required"`
-	LiveVerified    bool                    `json:"live_verified"`
-	Steps           [][]string              `json:"steps"`
-	CompletedSteps  int                     `json:"completed_steps"`
-	Next            []string                `json:"next"`
-	Problem         string                  `json:"problem,omitempty"`
+	MarketplaceOwner string                  `json:"marketplace_owner,omitempty"`
+	InstalledState   string                  `json:"installed_state"`
+	Installations    []Installation          `json:"installations"`
+	PluginCache      pluginidentity.Snapshot `json:"plugin_cache"`
+	Executable       buildinfo.Info          `json:"executable"`
+	Client           string                  `json:"client"`
+	Scope            string                  `json:"scope"`
+	ClientVersion    string                  `json:"client_version,omitempty"`
+	PluginVersion    string                  `json:"plugin_version"`
+	BundleSHA256     string                  `json:"bundle_sha256"`
+	Directory        string                  `json:"directory"`
+	Backup           string                  `json:"backup,omitempty"`
+	State            string                  `json:"state"`
+	PluginInstalled  bool                    `json:"plugin_installed"`
+	Permissions      string                  `json:"permissions"`
+	HookTrust        string                  `json:"hook_trust"`
+	RestartRequired  bool                    `json:"restart_required"`
+	LiveVerified     bool                    `json:"live_verified"`
+	Steps            [][]string              `json:"steps"`
+	CompletedSteps   int                     `json:"completed_steps"`
+	Next             []string                `json:"next"`
+	Problem          string                  `json:"problem,omitempty"`
+}
+
+type Installation struct {
+	Scope   string                  `json:"scope"`
+	Version string                  `json:"version"`
+	Enabled bool                    `json:"enabled"`
+	Cache   pluginidentity.Snapshot `json:"cache"`
+	Refresh []string                `json:"refresh_argv"`
 }
 
 type Service struct {
@@ -126,7 +137,7 @@ func (s Service) marketplaces(ctx context.Context) ([]marketplace, error) {
 	return items, nil
 }
 
-func (s Service) installed(ctx context.Context) (*installedPlugin, error) {
+func (s Service) installedPlugins(ctx context.Context) ([]installedPlugin, error) {
 	data, err := s.Run(ctx, "plugin", "list", "--json")
 	if err != nil {
 		return nil, err
@@ -143,18 +154,64 @@ func (s Service) installed(ctx context.Context) (*installedPlugin, error) {
 	} else if err := json.Unmarshal(data, &items); err != nil || items == nil {
 		return nil, fmt.Errorf("unsupported Claude plugin response")
 	}
+	result := []installedPlugin{}
 	for _, item := range items {
 		if item.ID != Selector && item.PluginID != Selector {
 			continue
 		}
+		if s.Client != "codex" || item.Installed {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+func (s Service) installed(ctx context.Context) (*installedPlugin, error) {
+	items, err := s.installedPlugins(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
 		if s.Client == "claude-code" && item.Scope != "user" {
 			return nil, fmt.Errorf("Llewm already has a %s-scope Claude installation; review it before user-scope setup", item.Scope)
 		}
-		if s.Client != "codex" || item.Installed {
-			return &item, nil
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return &items[0], nil
+}
+
+// Observe inventories native client registrations and caches without modifying
+// ownership, staging a package, or requiring installer-owned source folders.
+func (s Service) Observe(ctx context.Context) (Receipt, error) {
+	r := Receipt{Client: s.Client, State: "observation", PluginVersion: s.Package.Version, BundleSHA256: s.Package.Digest, InstalledState: "unknown", Installations: []Installation{}, PluginCache: pluginidentity.Snapshot{Status: "unknown"}}
+	markets, marketErr := s.marketplaces(ctx)
+	for _, m := range markets {
+		if m.Name == "llewm" {
+			r.MarketplaceOwner = m.Root
+			if s.Client == "claude-code" {
+				r.MarketplaceOwner = m.Path
+			}
 		}
 	}
-	return nil, nil
+	items, err := s.installedPlugins(ctx)
+	if err != nil {
+		return r, err
+	}
+	r.InstalledState = "observed"
+	r.PluginInstalled = len(items) > 0
+	for _, item := range items {
+		refresh := []string{"plugin", "add", Selector, "--json"}
+		if s.Client == "claude-code" {
+			refresh = []string{"plugin", "update", Selector, "--scope", item.Scope, "--json"}
+		}
+		r.Installations = append(r.Installations, Installation{Scope: item.Scope, Version: item.Version, Enabled: item.Enabled, Cache: s.cache(&item), Refresh: refresh})
+	}
+	if len(r.Installations) > 0 {
+		r.PluginCache = r.Installations[0].Cache
+	}
+	return r, marketErr
 }
 
 // cache inspects the registered cache, not just the marketplace source. Claude
@@ -185,7 +242,7 @@ func (s Service) cache(item *installedPlugin) pluginidentity.Snapshot {
 }
 
 func (s Service) Inspect(ctx context.Context) (Receipt, error) {
-	r := Receipt{PluginCache: pluginidentity.Snapshot{Status: "unknown", Reason: "plugin is not installed"}, Client: s.Client, Scope: "user", PluginVersion: s.Package.Version, BundleSHA256: s.Package.Digest, Directory: s.Root, State: "preview", Permissions: "needs_review", HookTrust: "needs_client_review", RestartRequired: true, Steps: [][]string{}, Next: []string{"Run llewm init separately in each Git project.", "Review permissions with llewm client permissions --client " + s.Client + " --write --scope user (or install --permissions after init).", "Review hooks in the client; restart the client/parent IDE and start a fresh session.", "Compare MCP continuity_info with llewm version and verify bootstrap/checkpoint recovery in the fresh client."}}
+	r := Receipt{InstalledState: "unknown", Installations: []Installation{}, PluginCache: pluginidentity.Snapshot{Status: "unknown", Reason: "plugin installation has not been observed"}, Client: s.Client, Scope: "user", PluginVersion: s.Package.Version, BundleSHA256: s.Package.Digest, Directory: s.Root, State: "preview", Permissions: "needs_review", HookTrust: "needs_client_review", RestartRequired: true, Steps: [][]string{}, Next: []string{"Run llewm init separately in each Git project.", "Review permissions with llewm client permissions --client " + s.Client + " --write --scope user (or install --permissions after init).", "Review hooks in the client; restart the client/parent IDE and start a fresh session.", "Compare MCP continuity_info with llewm version and verify bootstrap/checkpoint recovery in the fresh client."}}
 	r.Executable = buildinfo.Current()
 	if s.Client != "codex" && s.Client != "claude-code" {
 		return r, fmt.Errorf("client must be codex or claude-code")
@@ -239,6 +296,11 @@ func (s Service) Inspect(ctx context.Context) (Receipt, error) {
 	if err != nil {
 		return r, err
 	}
+	observed, observeErr := s.Observe(ctx)
+	r.MarketplaceOwner, r.InstalledState, r.Installations, r.PluginInstalled, r.PluginCache = observed.MarketplaceOwner, observed.InstalledState, observed.Installations, observed.PluginInstalled, observed.PluginCache
+	if observeErr != nil {
+		return r, observeErr
+	}
 	found := false
 	for _, market := range markets {
 		if market.Name != "llewm" {
@@ -250,7 +312,9 @@ func (s Service) Inspect(ctx context.Context) (Receipt, error) {
 			path = market.Path
 		}
 		if filepath.Clean(path) != filepath.Clean(s.Root) {
-			return r, fmt.Errorf("marketplace llewm points elsewhere (%s); review/remove that client marketplace before installer setup", path)
+			r.Steps = [][]string{}
+			r.Next = []string{"Keep the existing marketplace owner. Refresh its source using its established update workflow, then use each observed installation's refresh_argv.", "A switch to installer ownership requires an explicit ownership decision; no removal, permissions or hook trust changes were made."}
+			return r, fmt.Errorf("marketplace llewm points elsewhere (%s); preserve that owner or explicitly review an ownership transition before installer setup", redact.String(path))
 		}
 	}
 	if !found {
@@ -262,9 +326,11 @@ func (s Service) Inspect(ctx context.Context) (Receipt, error) {
 	}
 	item, err := s.installed(ctx)
 	if err != nil {
+		r.Steps = [][]string{}
+		r.Next = []string{"Preserve the observed scopes; update each existing scope with its refresh_argv. Review any ownership or scope transition explicitly."}
 		return r, err
 	}
-	r.PluginInstalled = item != nil && item.Version == s.Package.Version && item.Enabled
+	r.PluginInstalled = item != nil
 	if item != nil {
 		r.PluginCache = s.cache(item)
 	}

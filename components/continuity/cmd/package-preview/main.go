@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/buildinfo"
+	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/gitenv"
 )
 
@@ -43,6 +44,8 @@ type manifest struct {
 	Commit               string  `json:"commit"`
 	BuildTime            string  `json:"build_time"`
 	MCPAPIVersion        int     `json:"mcp_api_version"`
+	WriterAPIVersion     int     `json:"writer_api_version"`
+	DatabaseMigration    string  `json:"database_migration"`
 	RuntimeQualification string  `json:"runtime_qualification"`
 	Assets               []asset `json:"assets"`
 }
@@ -148,6 +151,10 @@ func packagePreview(ctx context.Context, version, targetList, output string) err
 	defer os.RemoveAll(stage)
 	builtAt := time.Now().UTC()
 	m := manifest{SchemaVersion: 1, Version: version, Channel: "preview", Commit: commit, BuildTime: builtAt.Format(time.RFC3339), MCPAPIVersion: buildinfo.MCPAPIVersion, RuntimeQualification: "Cross-compilation is not runtime or client-integration qualification. See the coverage matrix and installation guide."}
+	m.WriterAPIVersion = buildinfo.WriterAPIVersion
+	if m.DatabaseMigration, err = database.CompiledLatestMigration(); err != nil {
+		return err
+	}
 	addAsset := func(name, kind, target string, files map[string][]byte, modes map[string]fs.FileMode) error {
 		path := filepath.Join(stage, name)
 		if err := writeArchive(path, files, modes, builtAt); err != nil {

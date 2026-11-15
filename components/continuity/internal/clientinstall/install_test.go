@@ -178,6 +178,24 @@ func TestClientInstallRejectsUnknownClientProtocol(t *testing.T) {
 	}
 }
 
+func TestClientInstallConflictStillReportsEveryInstalledScope(t *testing.T) {
+	p, _ := Bundled()
+	f := &fakeClient{client: "claude-code", registered: true, root: filepath.Join(tempDir(t), "source")}
+	s := Service{Client: "claude-code", Root: filepath.Join(tempDir(t), "installer"), Package: p, Run: func(ctx context.Context, args ...string) ([]byte, error) {
+		if strings.Join(args, " ") == "plugin list --json" {
+			return json.Marshal([]installedPlugin{{ID: Selector, Scope: "user", Version: p.Version, Enabled: true}, {ID: Selector, Scope: "local", Version: "older", Enabled: false}})
+		}
+		return f.run(ctx, args...)
+	}}
+	r, err := s.Inspect(context.Background())
+	if err == nil || !r.PluginInstalled || r.InstalledState != "observed" || len(r.Installations) != 2 || len(r.Steps) != 0 || len(f.writes) != 0 || r.MarketplaceOwner != f.root {
+		t.Fatalf("conflict=%+v %v", r, err)
+	}
+	if r.Installations[1].Scope != "local" || !strings.Contains(strings.Join(r.Next, " "), "existing marketplace owner") {
+		t.Fatalf("misleading scope/next=%+v", r)
+	}
+}
+
 func TestClientInstallMissingClientWritesNothing(t *testing.T) {
 	p, _ := Bundled()
 	root := filepath.Join(tempDir(t), "installer", "marketplace")

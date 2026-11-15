@@ -33,10 +33,15 @@ type Manifest struct {
 	Commit               string  `json:"commit"`
 	BuildTime            string  `json:"build_time"`
 	MCPAPIVersion        int     `json:"mcp_api_version"`
+	WriterAPIVersion     int     `json:"writer_api_version,omitempty"`
+	DatabaseMigration    string  `json:"database_migration,omitempty"`
 	RuntimeQualification string  `json:"runtime_qualification"`
 	Assets               []Asset `json:"assets"`
 }
 type Report struct {
+	TargetWriterAPI         *int           `json:"target_writer_api,omitempty"`
+	TargetMigration         string         `json:"target_migration,omitempty"`
+	CompatibilityBasis      string         `json:"compatibility_basis"`
 	Method                  string         `json:"method"`
 	State                   string         `json:"state"`
 	Installed               buildinfo.Info `json:"installed"`
@@ -124,6 +129,20 @@ func source(ctx context.Context, installed buildinfo.Info, root, remote, branch 
 	if err != nil {
 		return r, err
 	}
+	r.CompatibilityBasis = "unknown"
+	if body, e := run("show", r.TargetCommit+":components/continuity/internal/buildinfo/info.go"); e == nil {
+		if api := writerAPI(body); api > 0 {
+			r.TargetWriterAPI = &api
+			r.CompatibilityBasis = "exact_source_commit"
+		}
+	}
+	if files, e := run("ls-tree", "--name-only", r.TargetCommit+":components/continuity/internal/database/migrations"); e == nil {
+		for _, file := range strings.Fields(files) {
+			if migrationPattern.MatchString(file) && file > r.TargetMigration {
+				r.TargetMigration = file
+			}
+		}
+	}
 	r.State = "unknown"
 	if installed.BuildDirty || !commitPattern.MatchString(installed.GitCommit) {
 		r.NextAction = "Identify the dirty or unstamped installed build before selecting an update."
@@ -191,6 +210,13 @@ func Release(installed buildinfo.Info, manifestPath, target, artifact string) (R
 	}
 	r.TargetCommit = m.Commit
 	r.TargetVersion = m.Version
+	r.CompatibilityBasis = "manifest_claim"
+	if m.WriterAPIVersion > 0 {
+		r.TargetWriterAPI = &m.WriterAPIVersion
+	}
+	if migrationPattern.MatchString(m.DatabaseMigration) {
+		r.TargetMigration = m.DatabaseMigration
+	}
 	r.State = "different_target"
 	if installed.GitCommit == m.Commit && !installed.BuildDirty {
 		r.State = "current"
