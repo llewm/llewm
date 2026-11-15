@@ -26,11 +26,25 @@ var commandPatterns = []replacement{
 	{regexp.MustCompile(`(?i)(authorization:\s*(?:bearer[ \t]+)?)[^\r\n"']+`), `${1}[REDACTED]`},
 	{regexp.MustCompile(`(?i)((?:--(?:api[_-]?key|token|password|secret)|-u|--user)(?:\s+|=))` + shellValue), `${1}[REDACTED]`},
 	{regexp.MustCompile(`(?i)(\baws_(?:secret_access_key|access_key_id|session_token)(?:\s+|\s*=\s*))` + shellValue), `${1}[REDACTED]`},
-	{regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^\s/"'@]+@`), `${1}[REDACTED]@`},
 	{regexp.MustCompile(`(^|[^A-Za-z0-9_-])(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|xox[bp]-[A-Za-z0-9-]{10,})\b`), `${1}[REDACTED]`},
 }
 
+var userinfoPattern = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^\s/"'@]+@`)
+
+func redactUserinfo(value string) string {
+	return userinfoPattern.ReplaceAllStringFunc(value, func(match string) string {
+		scheme, user, _ := strings.Cut(match, "://")
+		// SSH usernames select a remote account and are part of supported Git
+		// destinations. A password, including an encoded separator, is not.
+		if (strings.EqualFold(scheme, "ssh") || strings.EqualFold(scheme, "git+ssh")) && !strings.Contains(user, ":") && !strings.Contains(strings.ToLower(user), "%3a") {
+			return match
+		}
+		return scheme + "://[REDACTED]@"
+	})
+}
+
 func replaceSecrets(value string) string {
+	value = redactUserinfo(value)
 	// Process URL userinfo before the legacy rule, which historically consumed @.
 	// All command replacements are idempotent, including already-redacted URLs.
 	for _, rule := range commandPatterns {

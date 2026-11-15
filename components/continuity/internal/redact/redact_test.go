@@ -19,6 +19,7 @@ func TestStringRemovesCommonSecrets(t *testing.T) {
 }
 
 func referenceString(value string) string {
+	value = redactUserinfo(value)
 	for _, rule := range commandPatterns {
 		value = rule.pattern.ReplaceAllString(value, rule.with)
 	}

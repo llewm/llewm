@@ -1,6 +1,6 @@
 # Activity retention proposal
 
-Status: design for [issue 24](https://github.com/llewm/llewm/issues/24).
+Status: deferred design for [issue 24](https://github.com/llewm/llewm/issues/24).
 No activity deletion, retention configuration, or automatic compaction is
 implemented by this proposal. The component's append-only observation contract
 still applies. Enabling destructive retention requires an explicit reviewed

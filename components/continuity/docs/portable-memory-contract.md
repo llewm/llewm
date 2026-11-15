@@ -70,7 +70,7 @@ destinations private and review the selected data.
 
 The default redaction profile is version 2. It additionally covers Authorization
 header credentials (including Basic and token schemes), quoted or space-separated
-secret flags, URL userinfo (preserving `@`), curl `-u`/`--user`, AWS credential
+secret flags, URL userinfo (preserving `@` and password-free SSH account names), curl `-u`/`--user`, AWS credential
 setters, and recognizable GitHub, OpenAI-style, AWS and Slack key prefixes.
 These are conservative text patterns, not a shell parser or a complete secret
 detector. Arbitrary unlabelled secrets and encoded or constructed values may
