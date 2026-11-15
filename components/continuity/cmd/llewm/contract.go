@@ -18,15 +18,28 @@ func writeContractLine(out io.Writer, entry contracts.Entry) {
 	fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", entry.ID, entry.Kind, entry.State, where, singleLineText(entry.Title))
 }
 
-func writeContractReport(cmd *cobra.Command, report contracts.Report) {
-	out := cmd.OutOrStdout()
-	for _, entry := range report.Contracts {
+func writeContractEntries(out io.Writer, entries []contracts.Entry, problems []string) {
+	for _, entry := range entries {
 		writeContractLine(out, entry)
 	}
-	for _, problem := range report.Problems {
+	for _, problem := range problems {
 		fmt.Fprintf(out, "problem: %s\n", problem)
 	}
+}
+
+func writeContractReport(cmd *cobra.Command, report contracts.Report) {
+	out := cmd.OutOrStdout()
+	writeContractEntries(out, report.Contracts, report.Problems)
 	fmt.Fprintf(out, "Contracts: %d, drifted: %d. %s\n", len(report.Contracts), len(report.Drifted()), report.Disclaimer)
+}
+
+// writeContractDrift lists only drifted contracts but counts them against the
+// whole index, so a clean check does not read as an empty index.
+func writeContractDrift(cmd *cobra.Command, report contracts.Report) {
+	out := cmd.OutOrStdout()
+	drifted := report.Drifted()
+	writeContractEntries(out, drifted, report.Problems)
+	fmt.Fprintf(out, "Drifted: %d of %d contracts. %s\n", len(drifted), len(report.Contracts), report.Disclaimer)
 }
 
 func contractCommand() *cobra.Command {
@@ -118,11 +131,11 @@ func contractCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				drifted := contracts.Report{SchemaVersion: report.SchemaVersion, Contracts: append([]contracts.Entry{}, report.Drifted()...), Problems: report.Problems, Disclaimer: report.Disclaimer}
 				if format == "json" {
+					drifted := contracts.Report{SchemaVersion: report.SchemaVersion, Contracts: append([]contracts.Entry{}, report.Drifted()...), Problems: report.Problems, Disclaimer: report.Disclaimer}
 					return writeJSON(cmd.OutOrStdout(), drifted)
 				}
-				writeContractReport(cmd, drifted)
+				writeContractDrift(cmd, report)
 				return nil
 			})
 		},

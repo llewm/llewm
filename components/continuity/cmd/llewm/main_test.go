@@ -735,12 +735,18 @@ func TestMarkdownContractsCLI(t *testing.T) {
 	if accepted := runCLI(t, "", "contract", "check", "--accept"); !strings.Contains(accepted, "Accepted 1 contract changes") {
 		t.Fatalf("accept: %s", accepted)
 	}
-	if check := runCLI(t, "", "contract", "check"); !strings.Contains(check, "Contracts: 0, drifted: 0.") {
+	if check := runCLI(t, "", "contract", "check"); !strings.Contains(check, "Drifted: 0 of 1 contracts.") || strings.Contains(check, "pre-release\t") {
 		t.Fatalf("clean check: %s", check)
 	}
+	if list := runCLI(t, "", "contract", "list"); !strings.Contains(list, "Contracts: 1, drifted: 0.") {
+		t.Fatalf("clean list: %s", list)
+	}
 	write("# Rules\n\n<!-- continuity:contract pre-release -->\n## Pre-release changes\n\nkind: directive\n\nPrefer correctness over compatibility.\n")
-	if check := runCLI(t, "", "contract", "check"); !strings.Contains(check, "pre-release\tdirective\tchanged") {
+	if check := runCLI(t, "", "contract", "check"); !strings.Contains(check, "pre-release\tdirective\tchanged") || !strings.Contains(check, "Drifted: 1 of 1 contracts.") {
 		t.Fatalf("changed check: %s", check)
+	}
+	if check := runCLI(t, "", "contract", "check", "--output", "json"); !strings.Contains(check, `"state": "changed"`) || strings.Contains(check, "Drifted:") {
+		t.Fatalf("check JSON shape changed: %s", check)
 	}
 	hook := runCLI(t, `{"session_id":"s","hook_event_name":"SessionStart","source":"startup"}`, "hook", "claude-code")
 	if !strings.Contains(hook, "**Contracts (machine-observed):** Contracts drifted since last indexed: 1 changed (pre-release)") {

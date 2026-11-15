@@ -64,7 +64,7 @@ someone looks at it.
 ```text
 llewm contract list                 # every contract: kind, state, file:line, title
 llewm contract show ID              # one statement exactly as written, with its hash
-llewm contract check [--accept]     # only drifted contracts; --accept records them
+llewm contract check [--accept]     # only drifted contracts, "Drifted: N of M"; --accept records them
 ```
 
 Contracts are read with the CLI (`contract list`, `show`, `check`). Accepting
