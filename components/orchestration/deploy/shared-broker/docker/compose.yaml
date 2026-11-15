@@ -1,0 +1,42 @@
+services:
+  broker:
+    image: ${BROKER_IMAGE:-llewm-shared-broker:local}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - broker-data:/data
+    ports:
+      # Only nginx TLS is published. The HTTP backend stays on shared loopback.
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-8443}:8443"
+    stop_grace_period: 15s
+  nginx:
+    image: ${NGINX_IMAGE:-nginx:stable-alpine}
+    user: "10001:10001"
+    entrypoint: [nginx, -g, "daemon off;"]
+    network_mode: service:broker
+    depends_on: [broker]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    volumes:
+      - type: bind
+        source: ../nginx/docker.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ../nginx/proxy-options.conf
+        target: /etc/nginx/llewm-proxy-options.conf
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${TLS_DIR:?Set absolute TLS_DIR containing fullchain.pem and privkey.pem}
+        target: /etc/llewm/tls
+        read_only: true
+        bind: {create_host_path: false}
+volumes:
+  broker-data:

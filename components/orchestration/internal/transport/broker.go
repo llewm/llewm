@@ -53,8 +53,8 @@ func ValidateLocalEndpoint(endpoint string) error {
 	return nil
 }
 
-// Shared brokers always require TLS, including loopback connections. Local
-// broker clients retain their separate loopback-only contract.
+// Shared clients always require TLS, including loopback connections to a proxy.
+// A proxy's server-side loopback upstream is configured independently.
 func ValidateSharedBrokerEndpoint(endpoint string) error {
 	u, err := coordinatorURL(endpoint)
 	if err != nil {

@@ -14,6 +14,31 @@ import (
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
 )
 
+func TestSharedBrokerProxyListenerPolicy(t *testing.T) {
+	for _, address := range []string{"0.0.0.0:9469", "[::]:9469", "192.0.2.1:9469", "localhost:9469", ":9469"} {
+		if err := validateSharedListener(address, "", "", true); err == nil {
+			t.Fatalf("plaintext public backend accepted: %s", address)
+		}
+	}
+	for _, address := range []string{"127.0.0.1:9469", "[::1]:9469"} {
+		if err := validateSharedListener(address, "", "", true); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateSharedListener(address, "", "", false); err == nil {
+			t.Fatal("implicit plaintext accepted")
+		}
+		if err := validateSharedListener(address, "cert", "key", true); err == nil {
+			t.Fatal("ambiguous TLS/proxy configuration accepted")
+		}
+	}
+	for _, cmd := range []string{"broker-serve", "serve", "shared-broker-request"} {
+		var out bytes.Buffer
+		if err := run([]string{cmd, "--proxy-loopback"}, &out, &out); err == nil {
+			t.Fatalf("proxy option accepted for %s", cmd)
+		}
+	}
+}
+
 func TestSharedBrokerCLI(t *testing.T) {
 	dir := t.TempDir()
 	db, token := filepath.Join(dir, "private", "shared.db"), filepath.Join(dir, "engineer.token")

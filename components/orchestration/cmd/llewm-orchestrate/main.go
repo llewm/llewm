@@ -34,7 +34,7 @@ Operator commands (local coordinator database):
   shared-broker-init --db PATH --project ID --machine HOST_LABEL
   shared-broker-member --db PATH --id ENGINEER --permissions work --token-file PATH
   shared-broker-revoke --db PATH --id ENGINEER
-  shared-broker-serve --db PATH [--listen 127.0.0.1:9469] --tls-cert PATH --tls-key PATH
+  shared-broker-serve --db PATH [--listen 127.0.0.1:9469] (--tls-cert PATH --tls-key PATH | --proxy-loopback)
   init   --db PATH
   member --db PATH --id ENGINEER --permissions plan,accept,assign,review,work --token-file PATH
   revoke --db PATH --id ENGINEER
@@ -99,6 +99,7 @@ func run(args []string, out, stderr io.Writer) error {
 	listen := flags.String("listen", "127.0.0.1:9467", "listen address")
 	cert := flags.String("tls-cert", "", "TLS certificate")
 	key := flags.String("tls-key", "", "TLS private key")
+	proxyLoopback := flags.Bool("proxy-loopback", false, "shared-broker-serve only: HTTP on literal loopback behind a TLS reverse proxy; forwarded headers grant no trust")
 	endpoint := flags.String("endpoint", "", "coordinator origin URL")
 	caFile := flags.String("ca-file", "", "optional public coordinator CA bundle; trust applies to this client only")
 	plan := flags.String("plan", "", "plan identifier")
@@ -124,6 +125,9 @@ func run(args []string, out, stderr io.Writer) error {
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	if *proxyLoopback && (!sharedBroker || cmd != "broker-serve") {
+		return errors.New("--proxy-loopback is only supported by shared-broker-serve")
 	}
 	ctx := context.Background()
 	var caPEM []byte
@@ -282,8 +286,8 @@ func run(args []string, out, stderr io.Writer) error {
 				if !explicitListen {
 					*listen = "127.0.0.1:9469"
 				}
-				if *cert == "" || *key == "" {
-					return errors.New("shared broker requires --tls-cert and --tls-key")
+				if err := validateSharedListener(*listen, *cert, *key, *proxyLoopback); err != nil {
+					return err
 				}
 			}
 			if localBroker {
@@ -410,6 +414,22 @@ func run(args []string, out, stderr io.Writer) error {
 		return err
 	}
 	return errors.New("unknown command; use --help")
+}
+
+func validateSharedListener(listen, cert, key string, proxyLoopback bool) error {
+	if proxyLoopback {
+		if !transport.Loopback(listen) {
+			return errors.New("--proxy-loopback requires a literal loopback listener")
+		}
+		if cert != "" || key != "" {
+			return errors.New("--proxy-loopback cannot be combined with TLS certificate flags")
+		}
+		return nil
+	}
+	if cert == "" || key == "" {
+		return errors.New("shared broker requires --tls-cert and --tls-key or explicit --proxy-loopback")
+	}
+	return nil
 }
 
 func readPrivateToken(path string) (string, error) {

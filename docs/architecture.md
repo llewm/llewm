@@ -114,8 +114,11 @@ commands open a third database identity, distinct from local brokers and the wor
 coordinator, and clients verify the expected project/scope before publishing.
 Authenticated engineer attribution, caller-asserted machine labels, durable
 receipts, acknowledgments and cursor recovery reuse the broker protocol. No local
-history is forwarded and no offline bridge is implied. Linux service and client
-configuration templates are provided; live host deployment remains explicit.
+history is forwarded and no offline bridge is implied. Docker/Compose and native
+unprivileged Proxmox LXC tooling share a static Linux bundle. nginx may terminate
+TLS with an explicitly enabled loopback-only HTTP upstream; remote upstreams keep
+TLS. Forwarded headers never grant identity or authority. Live host deployment
+remains explicit.
 
 A separate [manual file mailbox](../components/orchestration/docs/file-mailbox.md)
 lets cooperating agents on one machine use immutable Markdown messages in an

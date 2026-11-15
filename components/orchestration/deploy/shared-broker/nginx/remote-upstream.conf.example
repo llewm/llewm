@@ -1,0 +1,18 @@
+# For nginx on a different host, retain broker TLS and verify its certificate.
+server {
+    listen 443 ssl;
+    server_name broker.example.invalid;
+    ssl_certificate /etc/llewm/tls/fullchain.pem;
+    ssl_certificate_key /etc/llewm/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    access_log off;
+    location ~ ^/v1/broker(?:/commands|/pull)?$ {
+        include /etc/nginx/llewm-proxy-options.conf;
+        proxy_pass https://broker-backend.example.invalid:9469;
+        proxy_ssl_server_name on;
+        proxy_ssl_name broker-backend.example.invalid;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/llewm/tls/backend-ca.pem;
+    }
+    location / { return 404; }
+}

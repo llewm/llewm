@@ -21,12 +21,16 @@ commands, local hooks and default ports are unchanged. No migration is needed.
 Older binaries do not support shared databases; recovery must use a compatible
 shared-broker binary, not an older local-broker command.
 
-All shared connections require HTTPS, including loopback. Clients verify the TLS
+All shared client connections require HTTPS, including loopback. Clients verify the TLS
 certificate with platform roots or an explicitly supplied public CA bundle;
 redirects and insecure verification bypasses are refused. Clients require
 `--project` and check the server's shared scope and project before sending
 message/session content. The configured origin and TLS establish server trust;
-the returned labels alone are not authentication.
+the returned labels alone are not authentication. A colocated reverse proxy can
+terminate TLS with the server's explicit `--proxy-loopback` mode, which permits
+HTTP only on literal loopback. The broker still checks bearer credentials and
+ignores forwarded identity/scheme headers. For a proxy on another machine, retain
+verified TLS on the upstream connection. See [reverse proxy deployment](../deploy/shared-broker/README.md).
 
 Credentials authenticate engineers. Enroll each engineer separately with `work`
 permission to publish state and messages. An enrollment with no permissions can
@@ -47,11 +51,12 @@ rate limiting; select network access and storage monitoring for the actual host.
 
 ## Host configuration templates
 
-[The deployment directory](../deploy/shared-broker/) contains a Linux systemd
-unit, an environment-file template and a client MCP template. They are inert
-templates, not an installer. Host selection, DNS, certificate issuance, firewall
-scope and activation are deliberately separate deployment work. No live host is
-configured by a build or test.
+[The deployment guide](../deploy/shared-broker/README.md) provides a static binary
+bundle builder, Docker image/Compose tooling, native unprivileged Proxmox LXC
+provisioning, nginx configs, and the original direct-TLS systemd/MCP templates.
+Builds do not activate a service. Deployment scripts make the documented changes
+when explicitly invoked against the chosen host; Proxmox defaults to a preview.
+Host selection, DNS, certificate issuance and firewall policy remain explicit.
 
 For a Linux system service, prepare a dedicated `llewm` user/group, install the
 verified binary at `/opt/llewm/bin/llewm-orchestrate`, and create
