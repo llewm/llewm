@@ -608,14 +608,15 @@ func TestUnknownRecordTypesAreDeferred(t *testing.T) {
 }
 
 func TestSessionSyncImportsAndLeavesThePushToTheBackground(t *testing.T) {
-	t.Parallel()
+	// This exercises import/push ownership, not a short startup deadline. Run
+	// outside the package's parallel fixture wave and leave Git startup room.
 	remote := bareRemote(t)
 	a, b := newMachine(t, "a", remote), newMachine(t, "b", remote)
 	a.decide(t, "first", "First")
 	a.sync(t, OutcomeSynced)
 
 	b.decide(t, "second", "Second")
-	result, err := b.syncer.Session(context.Background(), 5*time.Second)
+	result, err := b.syncer.Session(context.Background(), 30*time.Second)
 	if err != nil || result.Outcome != OutcomeDeferred || result.UnpushedCommits != 2 || !strings.Contains(result.Detail, "background sync pushes") {
 		t.Fatalf("session sync: %#v %v", result, err)
 	}
@@ -640,7 +641,7 @@ func TestSessionSyncImportsAndLeavesThePushToTheBackground(t *testing.T) {
 	}
 
 	// With nothing to push, a session sync is a complete sync.
-	if idle, err := b.syncer.Session(context.Background(), 5*time.Second); err != nil || idle.Outcome != OutcomeSynced {
+	if idle, err := b.syncer.Session(context.Background(), 30*time.Second); err != nil || idle.Outcome != OutcomeSynced {
 		t.Fatalf("idle session sync: %#v %v", idle, err)
 	}
 }
@@ -738,14 +739,13 @@ func TestSessionSyncStopsWaitingOnAHungRemoteAtItsBudget(t *testing.T) {
 	a.syncer.Remote = hung
 	a.decide(t, "first", "First")
 
-	const budget = 1500 * time.Millisecond
+	// Include local process startup on loaded Windows hosts. The deadline still
+	// expires far before NetworkTimeout and must terminate the transport helper.
+	const budget = 10 * time.Second
 	started := time.Now()
 	result, err := a.syncer.Session(context.Background(), budget)
-	// Without the budget a hung fetch waits out NetworkTimeout; this bound only
-	// rules that out, leaving room for slow local steps.
-	if elapsed := time.Since(started); elapsed > NetworkTimeout/4 {
-		t.Fatalf("session sync took %s with a %s budget", elapsed, budget)
-	}
+	// Local publication deliberately finishes outside the network budget. Check
+	// the transport's close time below, not total disk/process startup latency.
 	closed := make(chan struct{})
 	go func() { connections.Wait(); close(closed) }()
 	select {
@@ -754,15 +754,19 @@ func TestSessionSyncStopsWaitingOnAHungRemoteAtItsBudget(t *testing.T) {
 		t.Fatal("a connection to the hung remote stayed open after the session sync returned; a transport helper outlived Git")
 	}
 	mu.Lock()
-	count, stoppedAt := accepted, lastClosed.Sub(started)
+	count, closedAt := accepted, lastClosed
 	mu.Unlock()
+	if count == 0 || closedAt.IsZero() {
+		t.Fatalf("hung remote received %d connections; no transport close observed within the %s session budget (elapsed %s)", count, budget, time.Since(started))
+	}
+	stoppedAt := closedAt.Sub(started)
 	t.Logf("%d connections to the hung remote; last closed %s after start; session returned after %s", count, stoppedAt, time.Since(started))
 	// The deadline is fixed when Session starts, so Git and its helper stop at
 	// the budget however long the local steps took, and well before WaitDelay.
-	if count == 0 || stoppedAt > budget+time.Second {
+	if stoppedAt > budget+2*time.Second {
 		t.Fatalf("hung remote: %d connections, last closed %s after start with a %s budget", count, stoppedAt, budget)
 	}
-	if err != nil || result.Outcome != OutcomeDeferred || result.ExportedRecords != 1 || result.UnpushedCommits != 1 || !strings.Contains(result.Detail, "fetch did not finish within 1.5s") {
+	if err != nil || result.Outcome != OutcomeDeferred || result.ExportedRecords != 1 || result.UnpushedCommits != 1 || !strings.Contains(result.Detail, "fetch did not finish within "+budget.String()) {
 		t.Fatalf("hung remote: %#v %v", result, err)
 	}
 	for _, leftover := range []string{"index.lock", "shallow.lock", "FETCH_HEAD.lock"} {

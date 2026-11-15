@@ -1,5 +1,9 @@
 version: '3'
 
+vars:
+  TEST_TIMEOUT: '40m'
+  TEST_PACKAGES: '2'
+
 tasks:
   fmt:
     cmds:
@@ -18,7 +22,7 @@ tasks:
   test-component:
     internal: true
     dir: '{{.COMPONENT}}'
-    cmds: [go test ./...]
+    cmds: ['go test ./... -count=1 -timeout {{.TEST_TIMEOUT}} -p {{.TEST_PACKAGES}}']
   vet:
     cmds:
       - for: [components/continuity, components/action-control, components/orchestration, components/privatestorage]

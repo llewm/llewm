@@ -75,7 +75,7 @@ func testFetchOverlapBoundaries(t *testing.T, failLocal bool) {
 		t.Fatal(err)
 	}
 	block.Store(true)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	type outcome struct {
 		result Result
@@ -102,8 +102,8 @@ func testFetchOverlapBoundaries(t *testing.T, failLocal bool) {
 	case result := <-done:
 		joined = true
 		t.Fatalf("sync ended before overlapping fetch: %+v", result)
-	case <-time.After(3 * time.Second):
-		t.Fatal("fetch waited for capture's writer")
+	case <-ctx.Done():
+		t.Fatal("fetch did not start while capture's writer was held")
 	}
 	if failLocal {
 		// Fetch is definitely in flight. Fail the new archive row, preserving
@@ -125,7 +125,7 @@ func testFetchOverlapBoundaries(t *testing.T, failLocal bool) {
 		}
 		select {
 		case <-finished:
-		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
 			t.Fatal("local failure did not cancel HTTP fetch")
 		}
 		if _, err := m.db.Exec(`DROP TRIGGER fixture_capture_failure`); err != nil {

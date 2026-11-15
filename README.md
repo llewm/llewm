@@ -99,7 +99,7 @@ checkable:
 cd components/continuity
 go mod download
 go fmt ./...
-go test ./...
+go test ./... -count=1 -timeout 40m -p 2
 go vet ./...
 go build -o ../../dist/llewm ./cmd/llewm
 
@@ -125,6 +125,17 @@ Alternatively, with [Task](https://taskfile.dev/) installed, run `task check` an
 `task build` from the repository root. Some distributions package the executable
 as `go-task`. Root tasks dispatch to all four component modules; there is no root Go
 module. Build output goes in root `dist/`.
+
+The full suite includes durable filesystem and multi-store fixtures. On Windows,
+reported package times exceed Go's default ten-minute timeout (up to roughly
+twenty minutes). `task test`/`task check` therefore use a 40-minute per-package
+timeout and run at most two packages concurrently. `-count=1` runs every test
+without Go's test-result cache: these fixtures generate large filesystem input
+logs whose cache processing can continue long after the test process exits.
+The build cache remains enabled. This keeps all platform coverage while reducing
+contention; it does not impose a runtime sync timeout.
+Override with `task test TEST_TIMEOUT=60m TEST_PACKAGES=4` when measuring a
+different host. Use the same flags for direct Continuity `go test` runs.
 
 ## Repository layout
 
