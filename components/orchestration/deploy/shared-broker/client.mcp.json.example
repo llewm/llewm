@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "llewm-shared-messages": {
+      "command": "/path/to/llewm-orchestrate",
+      "args": [
+        "shared-broker-mcp",
+        "--endpoint", "https://broker.example.invalid:9469",
+        "--project", "project-id",
+        "--token-file", "/path/to/private/engineer.token",
+        "--ca-file", "/path/to/public/coordinator-ca.pem",
+        "--machine", "client-host-label",
+        "--agent", "client-agent-label",
+        "--session-env", "LLEWM_SESSION_ID"
+      ]
+    }
+  }
+}

@@ -25,6 +25,13 @@ for durable project messages, advisory session state, hook-cycle checks and boun
 pull/wait delivery. It uses a distinct local-only database and grants no shared
 work claims. No cross-machine message bridge or client hooks are installed automatically.
 
+For direct messaging between machines, use the separate
+[shared agent broker](docs/shared-agent-broker.md). Explicit `shared-broker-*`
+commands use a distinct database, mandatory TLS and authenticated engineers.
+Clients select the shared project; local messages and hooks are never forwarded
+automatically. [Host and client templates](deploy/shared-broker/) support later
+deployment without choosing or configuring a live host during implementation.
+
 Already-running agents can alternatively use the [manual file mailbox](docs/file-mailbox.md)
 on one machine without a Llewm install or broker configuration. It uses immutable
 Markdown messages, explicit acknowledgments, and manual polling in one agreed local

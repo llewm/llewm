@@ -26,8 +26,9 @@ const MaxCommandBytes = 128 << 10
 const MaxPlanBytes = 8 << 20
 
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db          *sql.DB
+	now         func() time.Time
+	brokerScope string
 }
 
 const schema = `

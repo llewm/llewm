@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,10 @@ Operator commands (local coordinator database):
   broker-member --db PATH --id ENGINEER --permissions work --token-file PATH
   broker-revoke --db PATH --id ENGINEER
   broker-serve --db PATH [--listen 127.0.0.1:9468]
+  shared-broker-init --db PATH --project ID --machine HOST_LABEL
+  shared-broker-member --db PATH --id ENGINEER --permissions work --token-file PATH
+  shared-broker-revoke --db PATH --id ENGINEER
+  shared-broker-serve --db PATH [--listen 127.0.0.1:9469] --tls-cert PATH --tls-key PATH
   init   --db PATH
   member --db PATH --id ENGINEER --permissions plan,accept,assign,review,work --token-file PATH
   revoke --db PATH --id ENGINEER
@@ -42,6 +47,11 @@ Engineer commands (authenticate with a private token file):
   broker-mcp --endpoint URL --token-file PATH (--session ID | --session-env VAR) --agent LABEL [--task ID]
   broker-hook --endpoint URL --token-file PATH --agent LABEL (--cursor-file PATH | --cursor-dir DIR) [--task ID]
               [--state active|ended] (reads session_id and hook_event_name from JSON stdin)
+  shared-broker-info --endpoint HTTPS_URL --project ID --token-file PATH [--ca-file PATH]
+  shared-broker-request --endpoint HTTPS_URL --project ID --token-file PATH --file COMMAND.json [--ca-file PATH]
+  shared-broker-pull --endpoint HTTPS_URL --project ID --token-file PATH --file QUERY.json [--ca-file PATH]
+  shared-broker-mcp --endpoint HTTPS_URL --project ID --token-file PATH [--ca-file PATH]
+                    (--session ID | --session-env VAR) --machine LABEL --agent LABEL [--task ID]
   list    --endpoint URL --token-file PATH
   show    --endpoint URL --token-file PATH --plan ID [--history --after SEQUENCE]
   request --endpoint URL --token-file PATH --file COMMAND.json
@@ -71,6 +81,15 @@ func run(args []string, out, stderr io.Writer) error {
 		return nil
 	}
 	cmd := args[0]
+	sharedBroker := strings.HasPrefix(cmd, "shared-broker-")
+	if sharedBroker {
+		switch cmd {
+		case "shared-broker-init", "shared-broker-member", "shared-broker-revoke", "shared-broker-serve", "shared-broker-info", "shared-broker-request", "shared-broker-pull", "shared-broker-mcp":
+			cmd = strings.TrimPrefix(cmd, "shared-")
+		default:
+			return errors.New("unknown shared broker command; use --help")
+		}
+	}
 	flags := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	dbPath := flags.String("db", "", "private orchestration database path")
@@ -90,7 +109,7 @@ func run(args []string, out, stderr io.Writer) error {
 	requestID := flags.String("request-id", "", "unique idempotency key for a prepared proposal")
 	machine := flags.String("machine", "", "caller-asserted machine label for MCP claims")
 	agent := flags.String("agent", "", "caller-asserted agent label for MCP claims")
-	project := flags.String("project", "", "stable project identifier for local broker creation")
+	project := flags.String("project", "", "broker project identifier (required for shared clients)")
 	session := flags.String("session", "", "actual client session identifier")
 	task := flags.String("task", "", "advisory task identifier")
 	cursorFile := flags.String("cursor-file", "", "private per-session hook cursor file")
@@ -137,7 +156,11 @@ func run(args []string, out, stderr io.Writer) error {
 				return fmt.Errorf("--session-env %s is unset or empty", *sessionEnv)
 			}
 		}
-		server, err := worker.NewBrokerServer(worker.BrokerConfig{Endpoint: *endpoint, Token: token, SessionID: *session, TaskID: *task, Agent: *agent})
+		newServer := worker.NewBrokerServer
+		if sharedBroker {
+			newServer = worker.NewSharedBrokerServer
+		}
+		server, err := newServer(worker.BrokerConfig{Endpoint: *endpoint, Token: token, SessionID: *session, TaskID: *task, Agent: *agent, Machine: *machine, Project: *project, CAPEM: caPEM})
 		if err != nil {
 			return err
 		}
@@ -191,7 +214,10 @@ func run(args []string, out, stderr io.Writer) error {
 		var store *coordination.Store
 		var err error
 		localBroker := strings.HasPrefix(cmd, "broker-")
-		if localBroker {
+		if sharedBroker {
+			localBroker = false
+			store, err = coordination.OpenSharedBroker(*dbPath, cmd == "broker-init", *project, *machine)
+		} else if localBroker {
 			store, err = coordination.OpenBroker(*dbPath, cmd == "broker-init", *project, *machine)
 		} else {
 			store, err = coordination.Open(*dbPath, cmd == "init")
@@ -246,6 +272,20 @@ func run(args []string, out, stderr io.Writer) error {
 			fmt.Fprintln(out, "Revoked engineer credential.")
 			return nil
 		case "serve", "broker-serve":
+			if sharedBroker {
+				explicitListen := false
+				flags.Visit(func(f *flag.Flag) {
+					if f.Name == "listen" {
+						explicitListen = true
+					}
+				})
+				if !explicitListen {
+					*listen = "127.0.0.1:9469"
+				}
+				if *cert == "" || *key == "" {
+					return errors.New("shared broker requires --tls-cert and --tls-key")
+				}
+			}
 			if localBroker {
 				explicitListen := false
 				flags.Visit(func(f *flag.Flag) {
@@ -267,10 +307,13 @@ func run(args []string, out, stderr io.Writer) error {
 				return errors.New("non-loopback listeners require TLS")
 			}
 			handler := transport.Handler(store)
-			if localBroker {
+			if localBroker || sharedBroker {
 				handler = transport.BrokerHandler(store)
 			}
 			server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8192}
+			if sharedBroker {
+				server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+			}
 			stop, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 			done := make(chan struct{})
@@ -284,7 +327,14 @@ func run(args []string, out, stderr io.Writer) error {
 				case <-done:
 				}
 			}()
-			fmt.Fprintln(out, "Serving manual orchestration coordinator at", *listen)
+			service := "manual orchestration coordinator"
+			if localBroker {
+				service = "machine-local broker"
+			}
+			if sharedBroker {
+				service = "shared messaging broker"
+			}
+			fmt.Fprintln(out, "Serving", service, "at", *listen)
 			if *cert != "" {
 				err = server.ListenAndServeTLS(*cert, *key)
 			} else {
@@ -296,7 +346,14 @@ func run(args []string, out, stderr io.Writer) error {
 			return err
 		}
 	case "list", "show", "request", "broker-info", "broker-request", "broker-pull":
-		if strings.HasPrefix(cmd, "broker-") {
+		if sharedBroker {
+			if err := transport.ValidateSharedBrokerEndpoint(*endpoint); err != nil {
+				return err
+			}
+			if *project == "" {
+				return errors.New("shared broker requires --project")
+			}
+		} else if strings.HasPrefix(cmd, "broker-") {
 			if err := transport.ValidateLocalEndpoint(*endpoint); err != nil {
 				return err
 			}
@@ -340,7 +397,12 @@ func run(args []string, out, stderr io.Writer) error {
 		if cmd == "broker-pull" {
 			path = "/v1/broker/pull"
 		}
-		data, err := transport.Request(ctx, *endpoint, token, method, path, body, caPEM)
+		var data []byte
+		if sharedBroker {
+			data, err = transport.SharedBrokerRequest(ctx, *endpoint, token, *project, method, path, body, caPEM)
+		} else {
+			data, err = transport.Request(ctx, *endpoint, token, method, path, body, caPEM)
+		}
 		if err != nil {
 			return err
 		}

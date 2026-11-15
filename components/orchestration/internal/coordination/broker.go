@@ -9,10 +9,11 @@ import (
 	"time"
 )
 
-// A local broker has a distinct database identity. It cannot open a team store
+// Each broker scope has a distinct database identity. It cannot open a team store
 // or grant work claims. Database-local sequence numbers are never portable IDs.
-const brokerSchema = `
-PRAGMA application_id = 1280790355;
+const brokerSchema = "PRAGMA application_id = 1280790355;\n" + brokerTables
+const sharedBrokerSchema = "PRAGMA application_id = 1280790356;\n" + brokerTables
+const brokerTables = `
 CREATE TABLE metadata (version INTEGER NOT NULL CHECK(version=1));
 INSERT INTO metadata VALUES (1);
 CREATE TABLE members (id TEXT PRIMARY KEY, permissions TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL);
@@ -34,13 +35,28 @@ type BrokerIdentity struct {
 }
 
 func OpenBroker(path string, create bool, project, machine string) (*Store, error) {
+	return openBroker(path, create, project, machine, "machine")
+}
+
+// OpenSharedBroker opens a separate shared authority, never a local database.
+// There is no migration or automatic forwarding of local observations.
+func OpenSharedBroker(path string, create bool, project, machine string) (*Store, error) {
+	return openBroker(path, create, project, machine, "shared")
+}
+
+func openBroker(path string, create bool, project, machine, scope string) (*Store, error) {
 	if create && (!safeID(project) || !safeID(machine)) {
 		return nil, errors.New("broker creation requires valid project and machine identifiers")
 	}
-	s, err := openStore(path, create, 1280790355, brokerSchema)
+	applicationID, schema := 1280790355, brokerSchema
+	if scope == "shared" {
+		applicationID, schema = 1280790356, sharedBrokerSchema
+	}
+	s, err := openStore(path, create, applicationID, schema)
 	if err != nil {
 		return nil, err
 	}
+	s.brokerScope = scope
 	if create {
 		_, err = s.db.Exec("INSERT INTO broker VALUES(?,?,?)", randomID(), project, machine)
 	}
@@ -54,7 +70,7 @@ func OpenBroker(path string, create bool, project, machine string) (*Store, erro
 	return s, nil
 }
 func (s *Store) brokerIdentity(ctx context.Context) (BrokerIdentity, error) {
-	b := BrokerIdentity{SchemaVersion: 1, Scope: "machine"}
+	b := BrokerIdentity{SchemaVersion: 1, Scope: s.brokerScope}
 	err := s.db.QueryRowContext(ctx, "SELECT id,project,machine FROM broker").Scan(&b.ID, &b.Project, &b.Machine)
 	return b, err
 }
@@ -71,7 +87,8 @@ type BrokerSession struct {
 	Actor      string    `json:"actor"`
 	TaskID     string    `json:"task_id,omitempty"`
 	Agent      string    `json:"agent"`
-	State      string    `json:"state"` // active, ended; expired is derived at read time
+	Machine    string    `json:"machine,omitempty"` // caller assertion, not authentication
+	State      string    `json:"state"`             // active, ended; expired is derived at read time
 	Summary    string    `json:"summary,omitempty"`
 	Refs       []string  `json:"refs,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
@@ -87,6 +104,7 @@ type BrokerCommand struct {
 	KeepTask      bool     `json:"keep_task,omitempty"` // state heartbeat preserves the current binding
 	Resume        bool     `json:"resume,omitempty"`    // explicit SessionStart may reopen ended contact
 	Agent         string   `json:"agent,omitempty"`
+	Machine       string   `json:"machine,omitempty"` // shared session's caller-asserted origin
 	State         string   `json:"state,omitempty"`
 	TTLSeconds    int      `json:"ttl_seconds,omitempty"`
 	ToSession     string   `json:"to_session,omitempty"`
@@ -101,7 +119,7 @@ type BrokerReceipt struct {
 	BrokerID      string `json:"broker_id"`
 	ID            string `json:"id"`
 	Sequence      int64  `json:"sequence"`
-	Status        string `json:"status"`            // locally_stored, acknowledged
+	Status        string `json:"status"`            // locally_stored, shared_stored, acknowledged
 	TaskID        string `json:"task_id,omitempty"` // effective task after a state update
 }
 
@@ -139,7 +157,7 @@ func cleanBrokerCommand(c BrokerCommand) (BrokerCommand, error) {
 	if c.SchemaVersion != 1 || !safeID(c.RequestID) || !safeID(c.SessionID) {
 		return c, errors.New("schema_version 1 and valid request_id/session_id required")
 	}
-	for _, id := range []string{c.TaskID, c.Agent, c.ToSession, c.ToTask, c.ReplyTo} {
+	for _, id := range []string{c.TaskID, c.Agent, c.Machine, c.ToSession, c.ToTask, c.ReplyTo} {
 		if id != "" && !safeID(id) {
 			return c, errors.New("invalid or sensitive identifier")
 		}
@@ -166,7 +184,7 @@ func cleanBrokerCommand(c BrokerCommand) (BrokerCommand, error) {
 			return c, errors.New("state requires agent and ttl_seconds 30..1800; no message routing")
 		}
 	case "message", "ack":
-		if c.KeepTask || c.Resume || c.State != "" || c.Agent != "" || c.TTLSeconds != 0 || (c.ToSession != "" && c.ToTask != "") {
+		if c.KeepTask || c.Resume || c.State != "" || c.Agent != "" || c.Machine != "" || c.TTLSeconds != 0 || (c.ToSession != "" && c.ToTask != "") {
 			return c, errors.New("message requires at most one recipient and no state fields")
 		}
 		if c.Action == "message" && strings.TrimSpace(c.Text) == "" {
@@ -229,6 +247,12 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 	if err != nil {
 		return empty, err
 	}
+	if identity.Scope == "shared" && c.Action == "state" && c.Machine == "" {
+		return empty, errors.New("shared session state requires a machine label")
+	}
+	if identity.Scope == "machine" && c.Machine != "" {
+		return empty, errors.New("local broker uses its own machine identity")
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return empty, err
@@ -261,6 +285,9 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 	if err == nil && previous.Actor != m.ID {
 		return empty, ErrForbidden
 	}
+	if err == nil && c.Action == "state" && previous.Machine != c.Machine {
+		return empty, errors.New("session machine cannot change; use a new session identifier")
+	}
 	if c.Action != "state" && err != nil {
 		return empty, errors.New("publish session state before messaging")
 	}
@@ -281,7 +308,7 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 		if c.Refs == nil && c.TaskID == previous.TaskID {
 			c.Refs = previous.Refs
 		}
-		session := BrokerSession{ID: c.SessionID, Actor: m.ID, TaskID: c.TaskID, Agent: c.Agent, State: c.State, Summary: c.Text, Refs: c.Refs, UpdatedAt: now, ValidUntil: now.Add(time.Duration(c.TTLSeconds) * time.Second)}
+		session := BrokerSession{ID: c.SessionID, Actor: m.ID, TaskID: c.TaskID, Agent: c.Agent, Machine: c.Machine, State: c.State, Summary: c.Text, Refs: c.Refs, UpdatedAt: now, ValidUntil: now.Add(time.Duration(c.TTLSeconds) * time.Second)}
 		body, _ := json.Marshal(session)
 		if len(body) > 32<<10 {
 			return empty, errors.New("session state exceeds 32 KiB")
@@ -327,6 +354,9 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 	}
 	event := BrokerEvent{Sequence: seq, ID: id, Actor: m.ID, At: now, Command: c}
 	receipt := BrokerReceipt{SchemaVersion: 1, BrokerID: identity.ID, ID: id, Sequence: seq, Status: "locally_stored", TaskID: c.TaskID}
+	if identity.Scope == "shared" {
+		receipt.Status = "shared_stored"
+	}
 	if c.Action == "ack" {
 		receipt.Status = "acknowledged"
 	}

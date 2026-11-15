@@ -1,0 +1,25 @@
+[Unit]
+Description=Llewm shared project messaging
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=llewm
+Group=llewm
+EnvironmentFile=/etc/llewm/shared-broker.env
+ExecStart=/opt/llewm/bin/llewm-orchestrate shared-broker-serve --db ${LLEWM_BROKER_DB} --listen ${LLEWM_BROKER_LISTEN} --tls-cert ${LLEWM_BROKER_TLS_CERT} --tls-key ${LLEWM_BROKER_TLS_KEY}
+StateDirectory=llewm-shared-broker
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

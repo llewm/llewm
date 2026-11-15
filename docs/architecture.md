@@ -108,6 +108,15 @@ receipt provenance; it must not replicate active databases or manufacture shared
 claim authority offline. No bridge, automatic host configuration or agent launcher
 is implemented. See [the local broker contract](../components/orchestration/docs/agent-broker.md).
 
+The separate [shared messaging authority](../components/orchestration/docs/shared-agent-broker.md)
+accepts direct TLS client connections across machines. Explicit shared-broker
+commands open a third database identity, distinct from local brokers and the work
+coordinator, and clients verify the expected project/scope before publishing.
+Authenticated engineer attribution, caller-asserted machine labels, durable
+receipts, acknowledgments and cursor recovery reuse the broker protocol. No local
+history is forwarded and no offline bridge is implied. Linux service and client
+configuration templates are provided; live host deployment remains explicit.
+
 A separate [manual file mailbox](../components/orchestration/docs/file-mailbox.md)
 lets cooperating agents on one machine use immutable Markdown messages in an
 agreed local folder without a broker install. It has no automatic notification,

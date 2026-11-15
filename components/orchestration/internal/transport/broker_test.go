@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -56,5 +57,63 @@ func TestBrokerHTTPBoundaries(t *testing.T) {
 	}
 	if err := ValidateLocalEndpoint(h.URL); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSharedBrokerTLSAndDestinationChecks(t *testing.T) {
+	ctx := context.Background()
+	for _, scope := range []string{"machine", "shared"} {
+		t.Run(scope, func(t *testing.T) {
+			open := coordination.OpenBroker
+			if scope == "shared" {
+				open = coordination.OpenSharedBroker
+			}
+			s, err := open(filepath.Join(t.TempDir(), "private", "broker.db"), true, "project", "host")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			token, err := s.Enroll(ctx, "engineer", []string{"work"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			posts := 0
+			handler := BrokerHandler(s)
+			h := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "POST" {
+					posts++
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer h.Close()
+			ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: h.Certificate().Raw})
+			body := []byte(`{"schema_version":1,"request_id":"start","action":"state","session_id":"s","agent":"a","machine":"client","state":"active","ttl_seconds":60}`)
+			for _, test := range []struct {
+				project, credential string
+				ca                  []byte
+			}{
+				{"project", token, nil}, {"wrong-project", token, ca}, {"project", "invalid", ca},
+			} {
+				if _, err := SharedBrokerRequest(ctx, h.URL, test.credential, test.project, "POST", "/v1/broker/commands", body, test.ca); err == nil {
+					t.Fatal("untrusted destination accepted")
+				}
+			}
+			if posts != 0 {
+				t.Fatal("sent content before destination validation")
+			}
+			_, err = SharedBrokerRequest(ctx, h.URL, token, "project", "POST", "/v1/broker/commands", body, ca)
+			if scope == "machine" {
+				if err == nil || posts != 0 {
+					t.Fatal("sent shared content to local authority")
+				}
+			} else if err != nil || posts != 1 {
+				t.Fatalf("shared request: %d %v", posts, err)
+			}
+		})
+	}
+	for _, endpoint := range []string{"http://127.0.0.1:9469", "http://example.com:9469", "https://example.com/path", "https://user@example.com"} {
+		if err := ValidateSharedBrokerEndpoint(endpoint); err == nil {
+			t.Fatalf("accepted %s", endpoint)
+		}
 	}
 }

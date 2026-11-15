@@ -141,10 +141,14 @@ func (a *adapter) request(ctx context.Context, method, path string, input, outpu
 		}
 	}
 	data, err := transport.Request(ctx, a.config.Endpoint, a.config.Token, method, path, body, a.config.CAPEM)
+	return decodeResponse(data, err, a.config.Token, output)
+}
+
+func decodeResponse(data []byte, err error, token string, output any) error {
 	if err != nil {
-		return errors.New(strings.ReplaceAll(err.Error(), a.config.Token, "[REDACTED]"))
+		return errors.New(strings.ReplaceAll(err.Error(), token, "[REDACTED]"))
 	}
-	data = bytes.ReplaceAll(data, []byte(a.config.Token), []byte("[REDACTED]"))
+	data = bytes.ReplaceAll(data, []byte(token), []byte("[REDACTED]"))
 	if err := json.Unmarshal(data, output); err != nil {
 		return errors.New("coordinator returned an invalid structured response")
 	}

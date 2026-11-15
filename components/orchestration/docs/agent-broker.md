@@ -236,7 +236,10 @@ State uses `agent`, `state`, `ttl_seconds`, `text`, `refs`, optional `keep_task`
 
 ## Cross-machine boundary
 
-This release implements local coordination; **no bridge or remote delivery exists**.
+This broker implements local coordination; **no automatic bridge exists**.
+The separate [shared messaging service](shared-agent-broker.md) supports direct
+TLS connections between machines using its own database and explicit clients.
+It does not forward this broker's messages or expose its database remotely.
 A future bridge must exchange typed envelopes through an explicitly configured
 shared authority, never replicate a writable broker/team/Continuity SQLite store.
 

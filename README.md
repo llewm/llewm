@@ -46,6 +46,9 @@ For messages between already-running agents on one machine, choose the
 [manual Markdown mailbox](components/orchestration/docs/file-mailbox.md), which
 needs no Llewm install. These local channels are separate from cross-machine
 leases and History sync; no cross-machine message bridge is implemented.
+The separate [shared messaging service](components/orchestration/docs/shared-agent-broker.md)
+supports direct TLS connections between agents on different machines, with
+explicit host/client configuration and no automatic forwarding of local history.
 
 **Continuity is Llewm’s current MVP, not its full scope.** It preserves attributable
 project guidance, tasks, plans, decisions, research, and verification across
@@ -60,7 +63,7 @@ are separate components.
 | --- | --- | --- |
 | [Continuity](components/continuity/README.md) | Implemented preview; native macOS/Windows qualification pending | Session bootstrap, checkpoints, activity ledger, audits, and MCP |
 | [Action Control](components/action-control/README.md) | Standalone validator implemented | Versioned Git commit-message policy validation; no execution or hook installation |
-| [Orchestration](components/orchestration/README.md) | Manual coordination pilot; local fixture-qualified | Collaborative plans, authenticated claims, reassignment and stale-result review |
+| [Orchestration](components/orchestration/README.md) | Manual coordination pilot; fixture-qualified | Collaborative plans, authenticated claims, reassignment, stale-result review, and local/shared messaging |
 | [Private storage](components/privatestorage/README.md) | Shared library | Owner-private files and directories (POSIX modes, Windows DACLs), reparse rejection and OS locks |
 
 See the

@@ -1,13 +1,15 @@
 package transport
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 )
 
-// BrokerHandler exposes only machine-local messages, never team claims.
+// BrokerHandler exposes messages for the opened broker scope, never team claims.
 func BrokerHandler(store *coordination.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/broker", func(w http.ResponseWriter, r *http.Request) {
@@ -49,4 +51,47 @@ func ValidateLocalEndpoint(endpoint string) error {
 		return errors.New("local broker requires a literal loopback endpoint with explicit port")
 	}
 	return nil
+}
+
+// Shared brokers always require TLS, including loopback connections. Local
+// broker clients retain their separate loopback-only contract.
+func ValidateSharedBrokerEndpoint(endpoint string) error {
+	u, err := coordinatorURL(endpoint)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "https" {
+		return errors.New("shared broker requires HTTPS")
+	}
+	return nil
+}
+
+// SharedBrokerRequest checks the destination's scope and project before sending
+// session or message content. TLS and the explicitly configured origin remain
+// the server authentication boundary; labels alone do not establish trust.
+func SharedBrokerRequest(ctx context.Context, endpoint, token, project, method, path string, body, caPEM []byte) ([]byte, error) {
+	if err := ValidateSharedBrokerEndpoint(endpoint); err != nil {
+		return nil, err
+	}
+	if project == "" {
+		return nil, errors.New("shared broker requires an expected project")
+	}
+	if path != "/v1/broker" && path != "/v1/broker/commands" && path != "/v1/broker/pull" {
+		return nil, errors.New("invalid shared broker API path")
+	}
+	data, err := Request(ctx, endpoint, token, http.MethodGet, "/v1/broker", nil, caPEM)
+	if err != nil {
+		return nil, err
+	}
+	var identity coordination.BrokerIdentity
+	if err := json.Unmarshal(data, &identity); err != nil {
+		return nil, errors.New("invalid shared broker identity")
+	}
+	if identity.SchemaVersion != 1 || identity.Scope != "shared" || identity.Project != project || identity.ID == "" {
+		return nil, errors.New("shared broker scope or project mismatch")
+	}
+	if method == http.MethodGet && path == "/v1/broker" {
+		return data, nil
+	}
+	return Request(ctx, endpoint, token, method, path, body, caPEM)
 }
