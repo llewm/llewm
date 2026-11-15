@@ -552,8 +552,8 @@ func TestSavedCheckpointSurvivesGuidanceGrowth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if readiness.Ready {
-		t.Fatal("optional read recovery weakened full save validation")
+	if !readiness.Ready || len(readiness.DeferredCheckpointFields) == 0 || len(readiness.DeferredRules) != 0 {
+		t.Fatalf("preflight did not apply the same optional-detail recovery: %+v", readiness)
 	}
 }
 

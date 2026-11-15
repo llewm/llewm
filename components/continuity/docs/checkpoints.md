@@ -169,15 +169,25 @@ this validation for the exact payload it receives, so direct callers cannot bypa
 the startup budget or rely on a preflight performed for different content.
 Readiness describes the current snapshot: later changes to guidance, notices,
 other tasks, or the reading session's selection can change the packet size.
-On read, if those changes exceed the budget, the compiler first drops advisory
+Preflight, save validation and startup share one fitting routine. If the packet
+exceeds the budget, the compiler first drops advisory
 expansions, then defers whole completed/changes/verified/evidence-reference fields
 in that order. `checkpoint_details_omitted` and a Markdown notice name the deferred
 fields and exact checkpoint retrieval. The saved checkpoint is unchanged. Task
 identity, status, summary, next action, prior attempts and unresolved actions stay
-in the packet; global/project guidance retains its existing protection. If this
-minimum still cannot fit, the error reports both serialized sizes and directs the
-caller to exact checkpoint retrieval. New saves still require the complete
-prospective packet to fit; this recovery path does not weaken write validation.
+in the packet. Without global guidance, trailing project instruction sections may
+also be deferred. `deferred_rules` names their source, heading, hash and content
+byte count in the packet and preflight; Markdown names the same source sections.
+When global guidance is present, project sections remain protected because they
+may override those global defaults. Preflight reports `deferred_checkpoint_fields`
+and `guidance_sources` for the original instruction sections. Its section totals
+measure the delivered packet, including omission metadata in `base_bytes`.
+
+If the protected content still cannot fit, `budget_error` names the cause,
+serialized sizes, instruction sources and their content sizes, and the existing
+`bootstrap.max_bytes` setting. Save fails with the same diagnosis before writing.
+An accepted save persists the full checkpoint even when its delivered view defers
+optional detail. Later guidance changes can still change the fitting result.
 
 Restart checks remain attributable task acceptance checks. SessionStart does not
 prove completion. The built-in `resume-completion` rule and matching continue,

@@ -215,10 +215,7 @@ func (a *App) saveCheckpointWithReconciliation(ctx context.Context, candidate ch
 		return checkpoint.CreateResult{}, err
 	}
 	if !readiness.Ready {
-		return checkpoint.CreateResult{}, fmt.Errorf(
-			"checkpoint bootstrap exceeds %d-byte budget (json=%d, markdown=%d, oversize_by=%d); shorten the checkpoint before saving",
-			readiness.MaxBytes, readiness.JSONBytes, readiness.MarkdownBytes, readiness.OversizeByBytes,
-		)
+		return checkpoint.CreateResult{}, fmt.Errorf("checkpoint %s", readiness.BudgetError)
 	}
 	created, err := a.createBoundCheckpoint(ctx, candidate, reconciliation)
 	if err == nil && coordinateSession && candidate.SessionID != "" && (candidate.Fence.Claim.Token == 0 || candidate.RestartResume != nil) {

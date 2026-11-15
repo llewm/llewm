@@ -26,6 +26,7 @@ type Packet struct {
 	CoreRules         []CoreRule             `json:"core_rules,omitempty"`
 	CoreRulesDisabled []string               `json:"core_rules_disabled,omitempty"`
 	CoreRulesWarning  string                 `json:"core_rules_warning,omitempty"`
+	RegistryWarning   string                 `json:"registry_warning,omitempty"`
 	Checkpoint        *checkpoint.Checkpoint `json:"checkpoint,omitempty"`
 	UnresolvedActions []checkpoint.Action    `json:"unresolved_actions,omitempty"`
 	// OtherTaskActions counts unresolved actions owned by tasks other than the
@@ -72,8 +73,32 @@ type Packet struct {
 	Choice *Choice `json:"choice,omitempty"`
 	// Detail fields may be deferred to exact checkpoint retrieval when later
 	// guidance growth makes a previously valid checkpoint too large to deliver.
-	CheckpointDetailsOmitted []string `json:"checkpoint_details_omitted,omitempty"`
-	Truncated                bool     `json:"truncated"`
+	CheckpointDetailsOmitted []string          `json:"checkpoint_details_omitted,omitempty"`
+	DeferredRules            []GuidanceSection `json:"deferred_rules,omitempty"`
+	Truncated                bool              `json:"truncated"`
+}
+
+// GuidanceSection names source content without copying it into diagnostics.
+type GuidanceSection struct {
+	Source      string `json:"source"`
+	HeadingPath string `json:"heading_path"`
+	Hash        string `json:"hash"`
+	Bytes       int    `json:"bytes"`
+	Scope       string `json:"scope"`
+}
+
+func guidanceSections(global, rules []instructions.Section) []GuidanceSection {
+	var result []GuidanceSection
+	for i, sections := range [][]instructions.Section{global, rules} {
+		scope := "global"
+		if i == 1 {
+			scope = "project"
+		}
+		for _, s := range sections {
+			result = append(result, GuidanceSection{Source: s.Source, HeadingPath: s.HeadingPath, Hash: s.Hash, Bytes: len(s.Content), Scope: scope})
+		}
+	}
+	return result
 }
 
 type RecoveryFallback struct {
@@ -88,6 +113,10 @@ type RecoveryFallback struct {
 }
 
 type Readiness struct {
+	BudgetError                          string              `json:"budget_error,omitempty"`
+	GuidanceSources                      []GuidanceSection   `json:"guidance_sources,omitempty"`
+	DeferredRules                        []GuidanceSection   `json:"deferred_rules,omitempty"`
+	DeferredCheckpointFields             []string            `json:"deferred_checkpoint_fields,omitempty"`
 	SchemaVersion                        int                 `json:"schema_version"`
 	Ready                                bool                `json:"ready"`
 	MaxBytes                             int                 `json:"max_bytes"`
@@ -130,6 +159,7 @@ type Compiler struct {
 	CoreRulesDisabled []string
 	// CoreRulesWarning reports configuration that was rejected.
 	CoreRulesWarning string
+	RegistryWarning  string
 	// Coordination reports commits by others since the checkpoint that changed
 	// the task's files, and files shared with other in-progress tasks. Nil means
 	// no check; like CodeCheck it is best-effort.
@@ -266,7 +296,7 @@ func (c Compiler) PreflightWithReconciliation(ctx context.Context, projectID, ro
 	if err != nil {
 		return Readiness{}, err
 	}
-	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, Checkpoint: &prepared, UnresolvedActions: unresolved, Pins: pins, PinsOmitted: omitted}
+	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, RegistryWarning: c.RegistryWarning, Checkpoint: &prepared, UnresolvedActions: unresolved, Pins: pins, PinsOmitted: omitted}
 	c.addNotices(ctx, projectID, &packet)
 	var automaticChoice *Choice
 	if c.Choose != nil {
@@ -277,24 +307,61 @@ func (c Compiler) PreflightWithReconciliation(ctx context.Context, projectID, ro
 		packet.Choice = c.Choose(ctx, projectID, prepared.SessionID, selection)
 		automaticChoice = c.Choose(ctx, projectID, prepared.SessionID, checkpoint.Selection{})
 	}
+	unfitted := packet
+	packet, fitErr := c.fit(packet)
 	body, err := json.MarshalIndent(packet, "", "  ")
 	if err != nil {
 		return Readiness{}, err
 	}
 	jsonBytes, markdownBytes := len(body)+1, len([]byte(Markdown(packet)))
+	accountingPacket := packet
+	deferredRules := append([]GuidanceSection(nil), packet.DeferredRules...)
+	deferredFields := append([]string(nil), packet.CheckpointDetailsOmitted...)
 	// Explicit readback and normal startup may render different selection
 	// notices. Reserve the larger current representation in each format.
 	if automaticChoice != nil {
-		automatic := packet
+		automatic := unfitted
 		automatic.Choice = automaticChoice
+		automatic, automaticErr := c.fit(automatic)
+		if fitErr == nil {
+			fitErr = automaticErr
+		}
+		for _, rule := range automatic.DeferredRules {
+			found := false
+			for _, existing := range deferredRules {
+				if rule == existing {
+					found = true
+					break
+				}
+			}
+			if !found {
+				deferredRules = append(deferredRules, rule)
+			}
+		}
+		for _, field := range automatic.CheckpointDetailsOmitted {
+			found := false
+			for _, existing := range deferredFields {
+				if field == existing {
+					found = true
+					break
+				}
+			}
+			if !found {
+				deferredFields = append(deferredFields, field)
+			}
+		}
 		body, err := json.MarshalIndent(automatic, "", "  ")
 		if err != nil {
 			return Readiness{}, err
 		}
 		jsonBytes = max(jsonBytes, len(body)+1)
+		if len(Markdown(automatic)) > markdownBytes {
+			accountingPacket = automatic
+		}
 		markdownBytes = max(markdownBytes, len(Markdown(automatic)))
 	}
 	result := Readiness{
+		GuidanceSources: guidanceSections(global, rules), DeferredRules: deferredRules, DeferredCheckpointFields: deferredFields,
 		SchemaVersion: 1, MaxBytes: c.MaxBytes, JSONBytes: jsonBytes, MarkdownBytes: markdownBytes,
 		UnresolvedActionCount: len(unresolved), CurrentUnresolvedActionCount: len(projection.Current),
 		ProjectedUnresolvedActionCount: projection.ProjectedUnresolvedCount, ReconciledActionCount: len(projection.Reconciled),
@@ -302,16 +369,19 @@ func (c Compiler) PreflightWithReconciliation(ctx context.Context, projectID, ro
 		ProjectedPredecessorActions: projectedActions, ProjectedPredecessorActionsTruncated: projectedActionsTruncated, Authority: "prospective_caller_asserted",
 		Disclaimer: "Read-only prospective compilation. Byte counts and projected actions use the current instruction sources, unresolved predecessors, and requested lifecycle dispositions; this does not save a checkpoint, make it current, or authorize its next action.",
 	}
+	if fitErr != nil {
+		result.BudgetError = fitErr.Error()
+	}
 	base := Packet{SchemaVersion: 3, Project: name}
 	baseBytes := len([]byte(Markdown(base)))
 	result.BaseBytes = baseBytes
 	result.GlobalGuidanceBytes = len([]byte(Markdown(Packet{SchemaVersion: 3, Project: name, Global: global}))) - baseBytes
-	result.ProjectGuidanceBytes = len([]byte(Markdown(Packet{SchemaVersion: 3, Project: name, Rules: rules}))) - baseBytes
-	kernel := prepared
+	result.ProjectGuidanceBytes = len([]byte(Markdown(Packet{SchemaVersion: 3, Project: name, Rules: accountingPacket.Rules}))) - baseBytes
+	kernel := *accountingPacket.Checkpoint
 	kernel.Completed, kernel.Changes, kernel.Verified, kernel.EvidenceRefs, kernel.Attempts = nil, nil, nil, nil, nil
 	kernelPacket := Packet{SchemaVersion: 3, Project: name, Checkpoint: &kernel}
 	result.CheckpointKernelBytes = len([]byte(Markdown(kernelPacket))) - baseBytes
-	fullCheckpointPacket := Packet{SchemaVersion: 3, Project: name, Checkpoint: &prepared}
+	fullCheckpointPacket := Packet{SchemaVersion: 3, Project: name, Checkpoint: accountingPacket.Checkpoint}
 	result.CheckpointDetailBytes = len([]byte(Markdown(fullCheckpointPacket))) - len([]byte(Markdown(kernelPacket)))
 	withActions := fullCheckpointPacket
 	withActions.UnresolvedActions = unresolved
@@ -319,7 +389,7 @@ func (c Compiler) PreflightWithReconciliation(ctx context.Context, projectID, ro
 	// Base includes the current notices, selection, pins and named slices.
 	// Keep all Markdown costs accounted for without hiding metadata overhead.
 	result.BaseBytes += markdownBytes - (result.BaseBytes + result.GlobalGuidanceBytes + result.ProjectGuidanceBytes + result.CheckpointKernelBytes + result.CheckpointDetailBytes + result.UnresolvedActionBytes)
-	result.Ready = jsonBytes <= c.MaxBytes && markdownBytes <= c.MaxBytes
+	result.Ready = fitErr == nil && jsonBytes <= c.MaxBytes && markdownBytes <= c.MaxBytes
 	if jsonBytes > c.MaxBytes {
 		result.LimitingFormats = append(result.LimitingFormats, "json")
 		result.OversizeByBytes = jsonBytes - c.MaxBytes
@@ -396,7 +466,7 @@ func (c Compiler) BuildForSession(ctx context.Context, projectID, root, name str
 	if err != nil {
 		return Packet{}, err
 	}
-	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, Checkpoint: latest, UnresolvedActions: unresolved, Fallback: fallback, Pins: pins, PinsOmitted: omitted}
+	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, RegistryWarning: c.RegistryWarning, Checkpoint: latest, UnresolvedActions: unresolved, Fallback: fallback, Pins: pins, PinsOmitted: omitted}
 	c.addNotices(ctx, projectID, &packet)
 	if latest != nil || ambiguous {
 		packet.Choice = choice
@@ -451,12 +521,13 @@ func (c Compiler) addNotices(ctx context.Context, projectID string, packet *Pack
 }
 
 func (c Compiler) fit(packet Packet) (Packet, error) {
+	sources := guidanceSections(packet.Global, packet.Rules)
 	for {
 		// Match the CLI JSON representation, including its trailing newline,
 		// and also bound the Markdown sent through startup hooks and MCP.
 		body, err := json.MarshalIndent(packet, "", "  ")
 		if err != nil {
-			return Packet{}, err
+			return packet, err
 		}
 		if len(body)+1 <= c.MaxBytes && len(Markdown(packet)) <= c.MaxBytes {
 			break
@@ -516,15 +587,30 @@ func (c Compiler) fit(packet Packet) (Packet, error) {
 		if len(packet.Global) > 0 {
 			// Dropping project sections could erase a project-specific override
 			// and inadvertently change the meaning of retained global defaults.
-			return Packet{}, fmt.Errorf("bootstrap requires %d JSON bytes and %d Markdown bytes after optional detail removal (budget %d); guidance, task kernel, attempts and unresolved actions are retained; retrieve the checkpoint with continuity_checkpoint_get or llewm checkpoint show, then shorten the relevant sources", len(body)+1, len(Markdown(packet)), c.MaxBytes)
+			return packet, c.budgetError(packet, sources, "global guidance prevents deferring project overrides")
 		}
 		if len(packet.Rules) == 0 {
-			return Packet{}, fmt.Errorf("bootstrap global guidance, checkpoint and metadata exceed %d-byte budget; shorten global sources or checkpoint, or increase bootstrap.max_bytes", c.MaxBytes)
+			return packet, c.budgetError(packet, sources, "task kernel, attempts, unresolved actions and required metadata cannot be deferred")
 		}
+		packet.DeferredRules = append(packet.DeferredRules, guidanceSections(nil, packet.Rules[len(packet.Rules)-1:])...)
 		packet.Rules = packet.Rules[:len(packet.Rules)-1]
 		packet.Truncated = true
 	}
 	return packet, nil
+}
+
+type BudgetError struct{ Message string }
+
+func (e *BudgetError) Error() string          { return e.Message }
+func (e *BudgetError) DiagnosticCode() string { return "bootstrap_budget" }
+
+func (c Compiler) budgetError(packet Packet, sources []GuidanceSection, reason string) error {
+	body, _ := json.MarshalIndent(packet, "", "  ")
+	var descriptions []string
+	for _, source := range sources {
+		descriptions = append(descriptions, fmt.Sprintf("%s#%s (%s, %d content bytes)", source.Source, source.HeadingPath, source.Scope, source.Bytes))
+	}
+	return &BudgetError{Message: fmt.Sprintf("bootstrap exceeds %d-byte budget (requires %d JSON bytes and %d Markdown bytes) after optional detail removal: %s; instruction sources: %s; inspect continuity_checkpoint_get or llewm checkpoint show and the named sources; shorten the protected content or increase bootstrap.max_bytes", c.MaxBytes, len(body)+1, len(Markdown(packet)), reason, strings.Join(descriptions, "; "))}
 }
 
 func (c Compiler) coreRules() []CoreRule {
@@ -571,6 +657,9 @@ func Markdown(packet Packet) string {
 		out.WriteString("Trial: full local continuity is enabled. Preserve original project docs for review and handback; History sync remains disabled. Do not maintain duplicate operational plans by default.\n\n")
 	}
 	out.WriteString(coreRulesMarkdown(packet.CoreRules, packet.CoreRulesDisabled, packet.CoreRulesWarning))
+	if packet.RegistryWarning != "" {
+		fmt.Fprintf(&out, "Registry: %s\n\n", packet.RegistryWarning)
+	}
 	if packet.Checkpoint != nil {
 		fmt.Fprintf(&out, "Suggested conversation title: %s\n\n", conversationTitle(packet.Project, packet.Checkpoint.Task))
 	}
@@ -716,6 +805,13 @@ func Markdown(packet Packet) string {
 		for _, rule := range packet.Rules {
 			fmt.Fprintf(&out, "### %s\n\nSource: %s (sha256: %s)\n\n%s\n\n", rule.HeadingPath, rule.Source, rule.Hash, rule.Content)
 		}
+	}
+	if len(packet.DeferredRules) > 0 {
+		out.WriteString("**Project instruction sections deferred by size budget:**\n\n")
+		for _, rule := range packet.DeferredRules {
+			fmt.Fprintf(&out, "- %s — %s (%d content bytes; sha256: %s)\n", rule.Source, rule.HeadingPath, rule.Bytes, rule.Hash)
+		}
+		out.WriteString("\nRead the named source sections before acting.\n\n")
 	}
 	if packet.Truncated {
 		out.WriteString("_Additional context is available on demand._\n")
