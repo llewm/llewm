@@ -29,6 +29,12 @@ type Status struct {
 
 type MigrationRequiredError struct{ Status Status }
 
+type UninitializedError struct{ Path string }
+
+func (e *UninitializedError) Error() string {
+	return fmt.Sprintf("database is not initialized: %s; run `llewm init` in this project first", e.Path)
+}
+
 func (e *MigrationRequiredError) Error() string {
 	return fmt.Sprintf("migration_required: database is at %s and this binary requires %s; run `llewm database migrate --from %s --to %s --backup PATH`", e.Status.AppliedMigration, e.Status.CompiledMigration, e.Status.AppliedMigration, e.Status.CompiledMigration)
 }
@@ -44,17 +50,18 @@ type MigrateOptions struct {
 }
 
 type MigrateResult struct {
-	Path                 string               `json:"path"`
-	From                 string               `json:"from"`
-	To                   string               `json:"to"`
-	BackupPath           string               `json:"backup_path"`
-	BackupMigration      string               `json:"backup_migration"`
-	BackupIntegrity      string               `json:"backup_integrity"`
-	BackupSHA256         string               `json:"backup_sha256"`
-	AppliedMigrations    []string             `json:"applied_migrations"`
-	DatabaseIntegrity    string               `json:"database_integrity"`
-	ForeignKeyViolations int                  `json:"foreign_key_violations"`
-	PrunePlan            *BackupRetentionPlan `json:"prune_plan,omitempty"`
+	Path                  string               `json:"path"`
+	From                  string               `json:"from"`
+	To                    string               `json:"to"`
+	BackupPath            string               `json:"backup_path"`
+	BackupMigration       string               `json:"backup_migration"`
+	BackupIntegrity       string               `json:"backup_integrity"`
+	BackupSHA256          string               `json:"backup_sha256"`
+	AppliedMigrations     []string             `json:"applied_migrations"`
+	DatabaseIntegrity     string               `json:"database_integrity"`
+	ForeignKeyViolations  int                  `json:"foreign_key_violations"`
+	PrunePlan             *BackupRetentionPlan `json:"prune_plan,omitempty"`
+	BackupRetentionAction string               `json:"backup_retention_action"`
 }
 
 // BackupResult is the integrity receipt for a consistent SQLite snapshot.
@@ -171,7 +178,8 @@ func Inspect(ctx context.Context, path string) (Status, error) {
 	status.CompiledMigration = compiled
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return status, fmt.Errorf("database is not initialized: %s", path)
+			status.State = "uninitialized"
+			return status, &UninitializedError{Path: path}
 		}
 		return status, err
 	}
@@ -306,6 +314,7 @@ func Migrate(ctx context.Context, path string, options MigrateOptions) (MigrateR
 			return result, fmt.Errorf("plan backup retention: %w", err)
 		}
 		result.PrunePlan = &plan
+		result.BackupRetentionAction = "preview_only_no_backups_deleted"
 	}
 
 	db, err := openReadWrite(ctx, path)

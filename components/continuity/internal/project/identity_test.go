@@ -84,7 +84,7 @@ func TestEnsureFingerprintsOnceThenAvoidsGit(t *testing.T) {
 	calls := commits.calls
 	for range 3 {
 		existing, err := resolver.Ensure(ctx, "/work/a", "a", true)
-		if err != nil || existing.Outcome != project.OutcomeExisting || existing.ProjectID != created.ProjectID || existing.RepositoryID != created.RepositoryID {
+		if err != nil || existing.Outcome != project.OutcomeExisting || existing.ProjectID != created.ProjectID || existing.RepositoryID != created.RepositoryID || existing.RootCommit != "root-a" {
 			t.Fatalf("existing: %#v %v", existing, err)
 		}
 	}
@@ -93,6 +93,51 @@ func TestEnsureFingerprintsOnceThenAvoidsGit(t *testing.T) {
 	}
 	if got := locationSources(t, db, created.ProjectID); got != "observed:/work/a" {
 		t.Fatalf("locations = %s", got)
+	}
+}
+
+func TestShallowMoveAfterDeepeningPreservesIdentity(t *testing.T) {
+	for _, depth := range []string{"2", "10"} {
+		t.Run(depth, func(t *testing.T) {
+			ctx := context.Background()
+			base := t.TempDir()
+			origin := filepath.Join(base, "origin")
+			clone := filepath.Join(base, "clone")
+			if err := os.Mkdir(origin, 0700); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, origin, "init", "-q")
+			for range 4 {
+				runGit(t, origin, "commit", "-q", "--allow-empty", "-m", "history")
+			}
+			runGit(t, base, "clone", "-q", "--depth", "1", "file:///"+strings.TrimPrefix(filepath.ToSlash(origin), "/"), clone)
+			path := filepath.Join(clone, "state.db")
+			db, err := database.Initialize(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolver := project.Resolver{DB: db}
+			initial, err := resolver.Ensure(ctx, clone, "test", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db.Close()
+			runGit(t, clone, "fetch", "-q", "--depth", depth)
+			moved := filepath.Join(base, "moved")
+			if err := os.Rename(clone, moved); err != nil {
+				t.Fatal(err)
+			}
+			db, err = database.Open(ctx, filepath.Join(moved, "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			resolver.DB = db
+			got, err := resolver.Ensure(ctx, moved, "test", true)
+			if err != nil || got.ProjectID != initial.ProjectID || got.Outcome != project.OutcomeRelocated {
+				t.Fatalf("relocation=%+v %v", got, err)
+			}
+		})
 	}
 }
 

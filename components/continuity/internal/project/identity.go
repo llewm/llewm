@@ -43,6 +43,7 @@ type Resolution struct {
 	Root         string `json:"root"`
 	Outcome      string `json:"outcome"`
 	PreviousRoot string `json:"previous_root,omitempty"`
+	RootCommit   string `json:"root_commit,omitempty"`
 }
 
 // Candidate is a project whose repository fingerprint matches an unbound checkout.
@@ -109,6 +110,9 @@ func (r Resolver) Ensure(ctx context.Context, root, name string, storeInsideRoot
 	if _, err := commit.get(ctx); err != nil {
 		return Resolution{}, err
 	}
+	if err := commit.prepareShallowAnchors(ctx, r.DB); err != nil {
+		return Resolution{}, err
+	}
 	var resolution Resolution
 	err := r.immediate(ctx, func(tx execQueryer) error {
 		var err error
@@ -134,6 +138,7 @@ func (r Resolver) Ensure(ctx context.Context, root, name string, storeInsideRoot
 		}
 		return err
 	})
+	resolution.RootCommit = commit.value
 	return resolution, err
 }
 
@@ -158,6 +163,7 @@ func (r Resolver) current(ctx context.Context, root, name string) (Resolution, b
 		return Resolution{}, false, nil
 	}
 	resolution.Root, resolution.Outcome = root, OutcomeExisting
+	resolution.RootCommit = lastCommit.String
 	return resolution, true, nil
 }
 
@@ -188,6 +194,13 @@ func (r Resolver) immediate(ctx context.Context, fn func(execQueryer) error) err
 // as OutcomeRelocationPending; an unknown root returns ErrNotRegistered.
 func (r Resolver) Lookup(ctx context.Context, root string, storeInsideRoot bool) (Resolution, error) {
 	commit := r.fingerprint(root)
+	if _, found, err := projectAt(ctx, r.DB, root); err != nil {
+		return Resolution{}, err
+	} else if !found {
+		if err := commit.prepareShallowAnchors(ctx, r.DB); err != nil {
+			return Resolution{}, err
+		}
+	}
 	tx, err := r.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return Resolution{}, err
@@ -298,7 +311,7 @@ func (r Resolver) resolve(ctx context.Context, q queryer, root string, commit *l
 			if err != nil {
 				return Resolution{}, err
 			}
-			if !fingerprinted && !exists(only.Root) {
+			if (!fingerprinted || commit.shallowProjects[only.ProjectID]) && !exists(only.Root) {
 				return relocate(only), nil
 			}
 		}
@@ -427,11 +440,13 @@ func candidates(rows *sql.Rows, err error) ([]Candidate, error) {
 
 // lazyCommit computes a checkout's fingerprint at most once, and only when needed.
 type lazyCommit struct {
-	read  func(context.Context, string) (string, error)
-	root  string
-	done  bool
-	value string
-	err   error
+	read            func(context.Context, string) (string, error)
+	root            string
+	done            bool
+	value           string
+	err             error
+	inspectShallow  bool
+	shallowProjects map[string]bool
 }
 
 func (r Resolver) fingerprint(root string) *lazyCommit {
@@ -439,7 +454,53 @@ func (r Resolver) fingerprint(root string) *lazyCommit {
 	if read == nil {
 		read = GitRootCommit
 	}
-	return &lazyCommit{read: read, root: root}
+	return &lazyCommit{read: read, root: root, inspectShallow: r.RootCommit == nil}
+}
+
+// A shallow boundary is an observation, not a stable repository root. On an
+// unknown location, verify a recorded anchor is still reachable from HEAD,
+// including after the repository has been fully unshallowed.
+// Ensure calls this before reserving its writer. Relocation additionally needs
+// a sole project, an internal store and a missing former root; external stores
+// and unrelated repositories still require an explicit rebind.
+func (c *lazyCommit) prepareShallowAnchors(ctx context.Context, q queryer) error {
+	if !c.inspectShallow {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT l.project_id,l.root_commit FROM repository_locations l JOIN repositories r ON r.id=l.repository_id AND r.role='primary' WHERE l.root_commit IS NOT NULL GROUP BY l.project_id,l.root_commit`)
+	if err != nil {
+		return err
+	}
+	type anchor struct{ project, commit string }
+	var anchors []anchor
+	for rows.Next() {
+		var a anchor
+		if err := rows.Scan(&a.project, &a.commit); err != nil {
+			rows.Close()
+			return err
+		}
+		anchors = append(anchors, a)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	c.shallowProjects = map[string]bool{}
+	for _, a := range anchors {
+		// Only exact object IDs can become revision arguments; never evaluate a
+		// stored revision expression or an option supplied through a database.
+		if len(a.commit) != 40 && len(a.commit) != 64 {
+			continue
+		}
+		if _, err := hex.DecodeString(a.commit); err != nil {
+			continue
+		}
+		if gitenv.Command(ctx, "-C", c.root, "merge-base", "--is-ancestor", a.commit, "HEAD").Run() == nil {
+			c.shallowProjects[a.project] = true
+		}
+	}
+	return nil
 }
 
 func (c *lazyCommit) get(ctx context.Context) (string, error) {

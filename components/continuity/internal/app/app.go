@@ -23,6 +23,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/coverage"
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
+	"github.com/llewm/llewm/components/continuity/internal/diagnostic"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/friction"
 	"github.com/llewm/llewm/components/continuity/internal/history"
@@ -48,11 +49,12 @@ import (
 )
 
 type App struct {
-	Root      string
-	Config    config.Config
-	DB        *sql.DB
-	ProjectID string
-	Identity  project.Resolution
+	Root            string
+	Config          config.Config
+	DB              *sql.DB
+	ProjectID       string
+	Identity        project.Resolution
+	RegistryWarning string
 	// Workspace is the unified workspace manifest at Root, or nil.
 	Workspace *project.Workspace
 	// Repositories selects the Git checkout for commit-anchored operations.
@@ -181,15 +183,26 @@ func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, 
 			return nil, err
 		}
 	}
+	registryWarning := ""
 	if !readOnly && identity.RepositoryID != "" {
 		repositoryRoot := checkout.Path
 		if repositoryRoot == "" {
 			repositoryRoot = root
 		}
-		fingerprint, fingerprintErr := project.GitRootCommit(ctx, repositoryRoot)
-		if fingerprintErr != nil {
-			db.Close()
-			return nil, fingerprintErr
+		fingerprint := identity.RootCommit
+		// Unified members have their own cached observations; do not walk Git
+		// history again on every hook just to refresh a derived machine index.
+		if repositoryRoot != root && workspace != nil && workspace.Mode == project.ModeUnified {
+			members, memberErr := project.Members(ctx, db, projectID, *workspace)
+			if memberErr != nil {
+				registryWarning = memberErr.Error()
+			}
+			for _, member := range members {
+				if member.Location == repositoryRoot {
+					fingerprint = member.RootCommit
+					break
+				}
+			}
 		}
 		if fingerprint != "" {
 			lineage := ""
@@ -204,8 +217,7 @@ func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, 
 				entry.GroupRoot, entry.GroupName, entry.Member = workspace.Root, workspace.Name, checkout.Member
 			}
 			if err := project.ObserveRegistry(ctx, globalRoot, entry); err != nil {
-				db.Close()
-				return nil, err
+				registryWarning = diagnostic.Bounded(fmt.Sprintf("Machine registry unavailable; local project remains usable: %v. Run `llewm doctor` after resolving registry access.", err))
 			}
 		}
 	}
@@ -253,7 +265,7 @@ func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, 
 		}
 	}
 	return &App{
-		Root: root, Config: cfg, DB: db, ProjectID: projectID, Identity: identity, Workspace: workspace, Repositories: repositories, Events: events,
+		Root: root, Config: cfg, DB: db, ProjectID: projectID, Identity: identity, RegistryWarning: registryWarning, Workspace: workspace, Repositories: repositories, Events: events,
 		Checkpoints:        checkpoints,
 		CheckpointRecovery: checkpoint.RecoveryStore{StateDir: config.StateDir(root), ProjectID: projectID},
 		Procedures:         procedures.Service{DB: db},
@@ -264,7 +276,7 @@ func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, 
 		LeasePolicy:        leasePolicy,
 		StandingGrants:     standinggrant.Service{DB: db},
 		Contracts:          contracts.Service{DB: db, Root: root},
-		Bootstrap: bootstrap.Compiler{Checkpoints: checkpoints, MaxBytes: cfg.Bootstrap.MaxBytes, GlobalRoot: globalRoot, CoreRules: coreRules, CoreRulesDisabled: coreRulesDisabled, CoreRulesWarning: coreRulesWarning, Pins: func(ctx context.Context, projectID, taskID string) ([]pin.Line, error) {
+		Bootstrap: bootstrap.Compiler{Checkpoints: checkpoints, MaxBytes: cfg.Bootstrap.MaxBytes, GlobalRoot: globalRoot, CoreRules: coreRules, CoreRulesDisabled: coreRulesDisabled, CoreRulesWarning: coreRulesWarning, RegistryWarning: registryWarning, Pins: func(ctx context.Context, projectID, taskID string) ([]pin.Line, error) {
 			return pin.ForTask(ctx, db, projectID, taskID)
 		}, CodeCheck: func(ctx context.Context, projectID, checkpointID string) string {
 			lags, err := codeBehind(ctx, db, repositories, projectID, checkpointID)
