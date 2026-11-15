@@ -21,6 +21,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
+	"github.com/llewm/llewm/components/continuity/internal/diagnostic"
 	"github.com/llewm/llewm/components/continuity/internal/friction"
 	"github.com/llewm/llewm/components/continuity/internal/history"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
@@ -29,6 +30,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/procedures"
 	"github.com/llewm/llewm/components/continuity/internal/projectpulse"
 	"github.com/llewm/llewm/components/continuity/internal/readiness"
+	"github.com/llewm/llewm/components/continuity/internal/redact"
 	"github.com/llewm/llewm/components/continuity/internal/release"
 	"github.com/llewm/llewm/components/continuity/internal/researchcapture"
 	"github.com/llewm/llewm/components/continuity/internal/resource"
@@ -484,10 +486,14 @@ type InfoInput struct {
 }
 
 type InfoOutput struct {
-	Health           buildinfo.Health  `json:"health"`
-	DatabaseSchema   string            `json:"database_schema"`
-	ProcessStartedAt time.Time         `json:"process_started_at"`
-	Readiness        *readiness.Report `json:"readiness,omitempty"`
+	Health           buildinfo.Health   `json:"health"`
+	DatabaseSchema   string             `json:"database_schema"`
+	ProcessStartedAt time.Time          `json:"process_started_at"`
+	Readiness        *readiness.Report  `json:"readiness,omitempty"`
+	ProjectStatus    string             `json:"project_status"`
+	ProjectError     string             `json:"project_error,omitempty"`
+	Diagnostic       *diagnostic.Report `json:"diagnostic,omitempty"`
+	RegistryWarning  string             `json:"registry_warning,omitempty"`
 }
 
 // Run serves the Continuity MCP tools over stdio until the client disconnects.
@@ -495,6 +501,13 @@ func Run(ctx context.Context, application *app.App) error {
 	startedAt := time.Now().UTC()
 	defer observeMCPPresence(context.Background(), application, startedAt, "sessionyield")
 	return newServerAt(application, startedAt).Run(ctx, &mcp.StdioTransport{})
+}
+
+// RunUnavailable keeps user-scope plugins connected even outside a project or
+// when opening its store fails. No project handlers or presence writers run.
+// Recovery is explicit; a new MCP process opens the selected project again.
+func RunUnavailable(ctx context.Context, cause error) error {
+	return newServerUnavailable(nil, time.Now().UTC(), cause).Run(ctx, &mcp.StdioTransport{})
 }
 
 // ToolNames lists the tools the server registers, in the order it lists them,
@@ -552,12 +565,35 @@ func newServer(application *app.App) *mcp.Server {
 }
 
 func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
+	return newServerUnavailable(application, startedAt, nil)
+}
+
+func newServerUnavailable(application *app.App, startedAt time.Time, cause error) *mcp.Server {
 	runtimeState := buildinfo.CaptureRuntime()
 	ledger := &sessionLedger{}
+	problem := ""
+	if application == nil {
+		problem = "Continuity project unavailable"
+		if cause != nil {
+			detail := redact.String(cause.Error())
+			if len(detail) > 2048 {
+				detail = strings.ToValidUTF8(detail[:2048], "") + "..."
+			}
+			problem += ": " + detail
+		}
+		problem += ". Resolve the project setup explicitly, then restart this MCP connection. No project was initialized or migrated."
+	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "llewm", Version: runtimeState.Build.ApplicationVersion}, nil)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
 			if method == "tools/call" {
+				if application == nil {
+					params, ok := request.GetParams().(*mcp.CallToolParamsRaw)
+					if !ok || params.Name != "continuity_info" {
+						return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: problem}}}, nil
+					}
+					return next(ctx, method, request)
+				}
 				if err := adoption.CheckActive(config.StateDir(application.Root)); err != nil {
 					return nil, err
 				}
@@ -568,11 +604,15 @@ func newServerAt(application *app.App, startedAt time.Time) *mcp.Server {
 	})
 	addTool(server, &mcp.Tool{Name: "continuity_info", Description: "Read runtime identity; checks/probes add readiness."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input InfoInput) (*mcp.CallToolResult, InfoOutput, error) {
+			if application == nil {
+				detail := diagnostic.From(cause)
+				return nil, InfoOutput{Health: runtimeState.CheckInstalled(), ProcessStartedAt: startedAt, ProjectStatus: "unavailable", ProjectError: problem, Diagnostic: &detail}, nil
+			}
 			migration, err := database.LatestMigration(ctx, application.DB)
 			if err != nil {
 				return nil, InfoOutput{}, err
 			}
-			output := InfoOutput{Health: runtimeState.CheckInstalled(), DatabaseSchema: migration, ProcessStartedAt: startedAt}
+			output := InfoOutput{Health: runtimeState.CheckInstalled(), DatabaseSchema: migration, ProcessStartedAt: startedAt, ProjectStatus: "available", RegistryWarning: application.RegistryWarning}
 			if input.Checks || input.CheckIntegrity || len(input.Probes) > 0 || len(input.SourceVerifications) > 0 {
 				report, err := application.Readiness.Report(ctx, readiness.Input{Runtime: &runtimeState, ProcessStartedAt: &startedAt, Probes: input.Probes, SourceVerifications: input.SourceVerifications, CheckIntegrity: input.CheckIntegrity})
 				if err != nil {

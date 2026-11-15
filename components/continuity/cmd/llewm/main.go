@@ -30,6 +30,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/coverage"
 	"github.com/llewm/llewm/components/continuity/internal/database"
+	"github.com/llewm/llewm/components/continuity/internal/diagnostic"
 	"github.com/llewm/llewm/components/continuity/internal/gitprotection"
 	"github.com/llewm/llewm/components/continuity/internal/layout"
 	"github.com/llewm/llewm/components/continuity/internal/lease"
@@ -68,17 +69,26 @@ func programName() string {
 }
 
 func newRootCommand(name string) *cobra.Command {
+	var version bool
 	root := &cobra.Command{
 		Use:           name,
 		Short:         "Local continuity and activity controller for coding agents",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if version {
+				return versionCommand().RunE(cmd, args)
+			}
+			return cmd.Help()
+		},
 	}
+	root.Flags().BoolVar(&version, "version", false, "show executable version and compatibility identity")
 	root.PersistentFlags().String("project-root", "", "explicit Git project root or path within it")
 	root.AddCommand(pmCommand(), logCommand())
 	root.AddCommand(versionCommand(), initCommand(), databaseCommand(), projectCommand(), workspaceCommand(), syncCommand(), globalCommand(), doctorCommand(), clientCommand(), briefCommand(), workCommand(), presenceCommand(), tuiCommand(), consoleCommand(), hookCommand(), coverageCommand(), usageCommand(), statsCommand(), checkpointCommand(), procedureCommand(), resourceCommand(), pinCommand(), leaseCommand(), standingGrantCommand(), forkCommand(), contractCommand(), bootstrapCommand(), activityCommand(), roadmapCommand(), releaseCommand(), trackPlanCommand(), decisionCommand(), historyCommand(), topicCommand(), narrativeCommand(), itemCommand(), memoryCommand(), mcpCommand())
 	root.AddCommand(modeCommand(), trialCommand(), proseImportCommand())
-	root.AddCommand(installCommand(), updateCommand(), portfolioCommand())
+	root.AddCommand(installCommand(), updateCommand(), portfolioCommand(), registryCommand())
 	return root
 }
 
@@ -1093,11 +1103,16 @@ func withReadOnlyApp(cmd *cobra.Command, fn func(*app.App) error) error {
 
 func databaseCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "database", Short: "Inspect and explicitly migrate project storage"}
-	parent.AddCommand(&cobra.Command{
+	var statusOutput string
+	statusCommand := &cobra.Command{
 		Use:   "status",
 		Short: "Inspect schema state without changing the database",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := outputFormat(statusOutput)
+			if err != nil {
+				return err
+			}
 			root, err := projectRoot(cmd)
 			if err != nil {
 				return err
@@ -1110,9 +1125,15 @@ func databaseCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if format == "text" {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Database: %s\nState: %s\nApplied: %s\nCompiled: %s\n", status.Path, status.State, status.AppliedMigration, status.CompiledMigration)
+				return err
+			}
 			return writeJSON(cmd.OutOrStdout(), status)
 		},
-	})
+	}
+	statusCommand.Flags().StringVar(&statusOutput, "output", "json", "json (default, compatible with previous releases) or text")
+	parent.AddCommand(statusCommand)
 	var backupPath string
 	backupCommand := &cobra.Command{
 		Use:   "backup",
@@ -1190,8 +1211,18 @@ func databaseCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := database.Migrate(cmd.Context(), cfg.Storage.Database, database.MigrateOptions{From: from, To: to, BackupPath: backup, BackupRetention: &database.BackupRetentionOptions{Dir: cfg.Backups.Dir, KeepLast: cfg.Backups.KeepLast, KeepDays: cfg.Backups.KeepDays, Pinned: cfg.Backups.Pinned}})
+			destination := backup
+			if destination == "" {
+				destination, err = database.NextBackupPath(cfg.Backups.Dir, time.Now())
+				if err != nil {
+					return err
+				}
+			}
+			result, err := database.Migrate(cmd.Context(), cfg.Storage.Database, database.MigrateOptions{From: from, To: to, BackupPath: destination, BackupRetention: &database.BackupRetentionOptions{Dir: cfg.Backups.Dir, KeepLast: cfg.Backups.KeepLast, KeepDays: cfg.Backups.KeepDays, Pinned: cfg.Backups.Pinned}})
 			if err != nil {
+				if result.BackupIntegrity == "ok" {
+					return fmt.Errorf("migration failed; verified backup retained at %s: %w", result.BackupPath, err)
+				}
 				return err
 			}
 			return writeJSON(cmd.OutOrStdout(), result)
@@ -1199,10 +1230,9 @@ func databaseCommand() *cobra.Command {
 	}
 	migrate.Flags().StringVar(&from, "from", "", "confirm the exact currently applied migration")
 	migrate.Flags().StringVar(&to, "to", "", "confirm the exact compiled target migration")
-	migrate.Flags().StringVar(&backup, "backup", "", "required path for a new consistent pre-migration backup")
+	migrate.Flags().StringVar(&backup, "backup", "", "new verified backup path; generated under configured backups directory when omitted")
 	_ = migrate.MarkFlagRequired("from")
 	_ = migrate.MarkFlagRequired("to")
-	_ = migrate.MarkFlagRequired("backup")
 	var floorSet int
 	writerFloor := &cobra.Command{
 		Use:   "writer-floor",
@@ -1326,7 +1356,13 @@ With --readiness (implied by --probe, --source-verification, or
 separate source, installed artifact, database, runtime, and named probe
 observations. Nothing is changed either way.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (resultErr error) {
+			reported := false
+			defer func() {
+				if resultErr != nil && !reported && (output == "json" || readinessReport || checkIntegrity || len(probes) > 0 || len(sourceVerifications) > 0) {
+					_ = writeJSON(cmd.OutOrStdout(), map[string]any{"schema_version": 1, "state": "unavailable", "diagnostic": diagnostic.From(resultErr), "health_error": diagnostic.Bounded(resultErr.Error())})
+				}
+			}()
 			format, err := outputFormat(output)
 			if err != nil {
 				return err
@@ -1355,12 +1391,29 @@ observations. Nothing is changed either way.`,
 			opened := false
 			err = withReadOnlyApp(cmd, func(application *app.App) error {
 				opened = true
+				warnings := []string{}
+				if _, budgetErr := application.Bootstrap.Build(cmd.Context(), application.ProjectID, application.Root, application.Config.Project.Name); budgetErr != nil {
+					warnings = append(warnings, diagnostic.Bounded(budgetErr.Error()))
+				}
+				if application.Bootstrap.CoreRulesWarning != "" {
+					warnings = append(warnings, application.Bootstrap.CoreRulesWarning)
+				}
+				if global, e := config.GlobalDir(); e == nil {
+					if _, e = project.RegistryAll(cmd.Context(), global); e != nil {
+						warnings = append(warnings, "Machine registry: "+diagnostic.Bounded(e.Error()))
+					}
+				}
 				if jsonReport {
 					report, err := application.Readiness.Report(cmd.Context(), readiness.Input{Probes: probes, SourceVerifications: sourceVerifications, CheckIntegrity: checkIntegrity})
 					if err != nil {
 						return err
 					}
+					report.Warnings = append(report.Warnings, warnings...)
+					reported = true
 					return writeJSON(cmd.OutOrStdout(), report)
+				}
+				for _, warning := range warnings {
+					fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-8s %s\n", "configuration", "warning", warning)
 				}
 				migration, err := database.LatestMigration(cmd.Context(), application.DB)
 				if err != nil {
@@ -1379,7 +1432,7 @@ observations. Nothing is changed either way.`,
 					{"binary", true, identity.ApplicationVersion + " " + identity.GitCommit, false},
 					{"runtime", runtimeHealth.Status == "current", runtimeHealth.Status, false},
 					{"DB schema", true, migration, false},
-					{"AGENTS.md", fileExists(filepath.Join(application.Root, "AGENTS.md")), "project instruction source", false},
+					{"instructions", fileExists(filepath.Join(application.Root, "AGENTS.md")) || fileExists(filepath.Join(application.Root, "CLAUDE.md")), "AGENTS.md or CLAUDE.md project instruction source", false},
 					{"CLAUDE.md", fileExists(filepath.Join(application.Root, "CLAUDE.md")), "optional project instruction source", true},
 				}
 				failed := false
@@ -1422,7 +1475,9 @@ observations. Nothing is changed either way.`,
 				return nil
 			})
 			if err != nil && !opened && jsonReport {
-				_ = writeJSON(cmd.OutOrStdout(), map[string]any{"project_state": state, "health_error": err.Error(), "git_protection": gitprotection.Inspect(cmd.Context(), root)})
+				reported = true
+				status, _ := database.Inspect(cmd.Context(), cfg.Storage.Database)
+				_ = writeJSON(cmd.OutOrStdout(), map[string]any{"schema_version": 1, "state": "unavailable", "database": status, "diagnostic": diagnostic.From(err), "project_state": state, "health_error": diagnostic.Bounded(err.Error()), "git_protection": gitprotection.Inspect(cmd.Context(), root)})
 			}
 			return err
 		},
@@ -1467,8 +1522,20 @@ func hookCommand() *cobra.Command {
 			if phase.Phase() == "exited" {
 				return nil
 			}
-			return withApp(cmd, func(application *app.App) error {
-				if auditOnly || application.Config.Mode == "audit-only" {
+			switch strings.ToLower(args[0]) {
+			case "codex", "claude", "claude-code":
+			default:
+				return fmt.Errorf("unsupported client %q", args[0])
+			}
+			if _, err := clients.Decode("", args[0], body, false); err != nil {
+				return err
+			}
+			if cfg, e := config.Load(root); e == nil {
+				auditOnly = auditOnly || cfg.Mode == "audit-only"
+			}
+			err = withApp(cmd, func(application *app.App) error {
+				auditOnly = auditOnly || application.Config.Mode == "audit-only"
+				if auditOnly {
 					return auditHook(cmd, application, args[0], body)
 				}
 				var codexEnvelope clients.HookEnvelope
@@ -1592,6 +1659,7 @@ func hookCommand() *cobra.Command {
 				}
 				return nil
 			})
+			return hookRecovery(cmd, root, args[0], body, auditOnly, err)
 		},
 	}
 	command.Flags().BoolVar(&auditOnly, "audit-only", false, "collect usage silently without bootstrap, reminders, sync, presence or attribution")
@@ -2470,12 +2538,18 @@ func mcpCommand() *cobra.Command {
 		Use:   "mcp",
 		Short: "Run the continuity MCP server over stdio",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withApp(cmd, func(application *app.App) error {
+			opened := false
+			err := withApp(cmd, func(application *app.App) error {
+				opened = true
 				if application.Config.Mode == "audit-only" {
 					return errors.New("audit-only mode does not serve MCP tools; disable the full plugin/MCP for baseline sessions or select mode full")
 				}
 				return mcpserver.Run(cmd.Context(), application)
 			})
+			if !opened && err != nil {
+				return mcpserver.RunUnavailable(cmd.Context(), err)
+			}
+			return err
 		},
 	}
 }

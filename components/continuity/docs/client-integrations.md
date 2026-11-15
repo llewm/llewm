@@ -1,5 +1,13 @@
 # Client integrations
 
+Installer previews observe plugin installation independently of marketplace
+ownership. A source-owned marketplace conflict reports all observed scopes and
+cache identities, clears inapplicable install steps, and recommends preserving the
+owner while refreshing each existing scope through its native client command.
+`installed_state: unknown` distinguishes a failed observation from known absence.
+Use `llewm update plan --output json` to inventory both clients without changing
+their ownership, permissions, hook trust, or caches.
+
 These instructions install the full client integration. For an audit-first
 baseline, use [audit-first onboarding](onboarding.md#start-with-usage-auditing)
 instead; offline collection needs no plugin, MCP server or skills. Existing users
@@ -108,6 +116,15 @@ that exact lock file. Modified, extra, or symlinked package files require manual
 review; they are never silently overwritten.
 
 ## Scope and qualification
+
+At MCP API 143, a user-scope plugin can connect outside a Git project or in a
+project whose store cannot open. The server completes initialization and lists
+the normal tool catalog. `continuity_info` reports `project_status: unavailable`
+with a bounded, redacted `project_error`; other tools return that setup error.
+Resolve the reported condition explicitly and restart the MCP connection to open
+the intended project. This fallback does not initialize or migrate storage and
+does not bypass audit-only mode or project write checks. Live Claude multi-window
+connection-cache behavior requires separate client qualification.
 
 Without `--permissions`, plugin installation works outside a Git project and
 leaves approvals for a separate reviewed step. `--permissions` needs an initialized

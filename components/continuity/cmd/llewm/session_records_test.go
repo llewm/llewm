@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -18,7 +17,7 @@ import (
 func TestMCPSessionLinksRecordsToItsTaskAndReportsUnlinked(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	connect := func(name string) *mcp.ClientSession {
 		t.Helper()

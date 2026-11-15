@@ -1,5 +1,11 @@
 # Memory repository rules of engagement
 
+After first-machine `llewm sync init --remote URL`, the output includes a join
+command with the chosen lineage. `llewm sync status` repeats it; JSON exposes
+`join_command`. On another machine, initialize the checkout with `llewm init`
+before running that command. Credentials, URL query strings, and fragments are
+removed from join hints; configure authentication separately on each machine.
+
 The memory repository is the Git repository that History sync uses to move curated
 Continuity records between machines (see [multi-repository projects and
 sync](../../../docs/multi-repo-and-sync.md#history-sync)). It is a special case. It is

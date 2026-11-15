@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -55,7 +54,7 @@ func toolSchemaSession(t *testing.T) (context.Context, *mcp.ClientSession, strin
 	t.Helper()
 	root := testProject(t)
 	runCLI(t, "", "init")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	t.Cleanup(cancel)
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()

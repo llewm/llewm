@@ -387,18 +387,47 @@ Updating the executable does not remove project state in `.llewm/continuity`.
 ### Migration-bearing updates
 
 Ordinary commands, lifecycle hooks, and MCP startup never apply database migrations.
-They inspect schema identity read-only and fail with `migration_required` when the
-installed binary contains pending migrations. This means replacing the executable
+They inspect schema identity read-only and report `migration_required` when the
+installed binary contains pending migrations. Hooks emit an advisory on
+SessionStart or the first PostToolUse for a session; they do not capture activity
+while the store is unavailable. A bounded optional hash-only marker suppresses
+repeated warnings when project state is writable. Missing session IDs or an
+unwritable marker may repeat the advisory. Unexpected failures still fail the hook.
+MCP remains available for discovery and diagnostics until setup is repaired and
+the connection restarted. This means replacing the executable
 cannot let the PostToolUse hook migrate the live database before a backup.
 
-`llewm database status` reports the applied migration, the binary's compiled
+`llewm database status` (also `--output json`, or `--output text`) reports the applied migration, the binary's compiled
 target, and the exact pending list without changing storage. Only `llewm
 database migrate` has migration authority. It requires exact `--from` and `--to`
-confirmations plus a new `--backup` path, creates a consistent SQLite backup with
+confirmations, creates a consistent SQLite backup with
 `VACUUM INTO`, verifies that backup, applies pending migrations, and then runs
 database integrity and foreign-key checks. It refuses an existing backup path.
+An explicit `--backup PATH` is supported; when omitted, a collision-safe name is
+generated under the configured backups directory. The `prune_plan` receipt key
+remains supported and is preview-only; `backup_retention_action` explicitly says
+that migration deleted no backups. `llewm --version` aliases `llewm version`.
 Passing migration tests on a temporary database does not mean an existing project
 database has been upgraded.
+
+`llewm doctor --output json` emits a structured diagnosis even when project
+opening fails, with a nonzero exit status for the failed check. Either root
+`AGENTS.md` or `CLAUDE.md` satisfies its project instruction check. Configuration
+and bootstrap budget warnings identify the responsible sources.
+
+The machine registry is a rebuildable routing index. Known checkout opens reuse
+saved fingerprints; unchanged routes need no writer, and a blocked or malformed
+registry is advisory to local activity capture. Version 1 preserves the old
+single-route table for older binaries and retains distinct checkout/store routes
+through compatibility triggers. Newer registry schemas are refused without
+rewriting them. A moved shallow clone can retain identity after deepening when its
+internal store names one project, its former root is absent, and a recorded anchor
+is still reachable; ambiguous/external-store cases still require explicit rebind.
+
+`llewm registry list --output json` inventories routes. `llewm registry prune`
+previews routes whose checkout and store are both confirmed absent. Apply only a
+reviewed inventory with `--apply --review-sha256 HASH`; unknown/inaccessible paths
+are retained. This removes registry rows only, never project data or directories.
 
 For a verified migration-bearing release:
 

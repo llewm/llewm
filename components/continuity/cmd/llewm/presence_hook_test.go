@@ -83,7 +83,7 @@ func TestMCPToolCallsRefreshSoleClientPresenceAndDisconnectYields(t *testing.T) 
 	runCLI(t, "", "checkpoint", "create", "--task-id", "mcp-live", "--task", "MCP live work", "--next", "Continue", "--session", "mcp-live-session")
 	runCLI(t, `{"session_id":"mcp-live-session","hook_event_name":"SessionStart","source":"startup"}`, "hook", "codex")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()

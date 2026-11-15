@@ -181,7 +181,8 @@ func runHistorySync(ctx context.Context, application *app.App, session, prompt b
 
 type historyStatus struct {
 	memsync.Status
-	Folders []foldersync.Result `json:"folders,omitempty"`
+	JoinCommand string              `json:"join_command,omitempty"`
+	Folders     []foldersync.Result `json:"folders,omitempty"`
 }
 
 func (s historyStatus) Line(now time.Time) string {

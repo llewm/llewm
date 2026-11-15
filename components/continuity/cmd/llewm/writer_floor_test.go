@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -41,7 +40,7 @@ func TestOnlyWriterIncompatibleProcessesStopWriting(t *testing.T) {
 func TestRunningMCPServerRefusesWritesAfterWriterUpgrade(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()

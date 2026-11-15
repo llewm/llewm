@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/config"
@@ -17,7 +16,7 @@ import (
 func TestTrialHandbackPreservesLearningAndConcurrentProse(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "trial", "start", "--prose", "plan.md")
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()

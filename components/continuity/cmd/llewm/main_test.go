@@ -31,6 +31,11 @@ import (
 // expectedMCPToolCount is the number of tools the MCP server registers.
 const expectedMCPToolCount = 27
 
+// These are end-to-end persisted protocol scenarios, not latency assertions.
+// Loaded Windows runs exceeded both 15s and 60s; give all stdio scenarios the
+// same bounded budget while retaining their individual behavior assertions.
+const mcpIntegrationTimeout = 3 * time.Minute
+
 // latestSchema is the newest migration this build embeds.
 var latestSchema = func() string {
 	name, err := database.CompiledLatestMigration()
@@ -162,6 +167,10 @@ func TestDoctorTreatsClaudeInstructionsAsOptional(t *testing.T) {
 	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "checks need attention") {
 		t.Fatalf("doctor accepted missing required project instructions: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("# Rules\nRun checks.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "", "doctor")
 }
 
 func TestCardCommandsAreRetired(t *testing.T) {
@@ -1180,7 +1189,9 @@ func TestHookRefusesPendingMigrationWithoutWriting(t *testing.T) {
 	if !strings.Contains(status, `"state": "pending"`) || !strings.Contains(status, `"pending_migrations": [`) || !strings.Contains(status, latestSchema) {
 		t.Fatalf("unexpected pending database status: %s", status)
 	}
-	for _, args := range [][]string{{"work"}, {"mcp"}} {
+	// MCP now stays connected and reports the condition through tools; its
+	// no-write guarantee is covered by the stdio unavailable-project tests.
+	for _, args := range [][]string{{"work"}} {
 		command := newRootCommand("llewm")
 		command.SetArgs(args)
 		if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "migration_required") {
@@ -1194,9 +1205,21 @@ func TestHookRefusesPendingMigrationWithoutWriting(t *testing.T) {
 	command := newRootCommand("llewm")
 	command.SetIn(bytes.NewReader(body))
 	command.SetArgs([]string{"hook", "codex"})
+	var advisory bytes.Buffer
+	command.SetOut(&advisory)
 	err = command.Execute()
-	if err == nil || !strings.Contains(err.Error(), "migration_required") {
-		t.Fatalf("hook did not report migration_required: %v", err)
+	if err != nil || !strings.Contains(advisory.String(), "migration_required") {
+		t.Fatalf("hook did not deliver migration advisory: %v %s", err, advisory.String())
+	}
+	if repeat := runCLI(t, string(body), "hook", "codex"); strings.TrimSpace(repeat) != "" {
+		t.Fatalf("repeated advisory: %s", repeat)
+	}
+	var doctor bytes.Buffer
+	command = newRootCommand("llewm")
+	command.SetOut(&doctor)
+	command.SetArgs([]string{"doctor", "--output", "json"})
+	if err := command.Execute(); err == nil || !json.Valid(doctor.Bytes()) || !strings.Contains(doctor.String(), "migration_required") {
+		t.Fatalf("doctor diagnosis: %v %s", err, doctor.String())
 	}
 	db, err = sql.Open("sqlite", "file:"+filepath.ToSlash(databasePath)+"?mode=ro")
 	if err != nil {
@@ -1355,7 +1378,11 @@ func TestMCPStdio(t *testing.T) {
 		runCLI(t, fmt.Sprintf(`{"session_id":%q,"hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{"command":"go test ./..."},"error":"go: failed to initialize build cache: permission denied"}`, sessionID), "hook", "claude")
 		runCLI(t, fmt.Sprintf(`{"session_id":%q,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"GOCACHE=/tmp/llewm-cache go test ./..."}}`, sessionID), "hook", "claude")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// This scenario exercises many persisted tool calls, not a latency SLA.
+	// Loaded Windows qualification exceeded 60s while isolated runs took 24s.
+	// Bound the entire scenario without mistaking filesystem contention for a
+	// protocol failure; individual behavior assertions remain unchanged.
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()

@@ -269,6 +269,7 @@ memory repository holds none.`,
 						return err
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "Lineage: %s (%s)\n", created.LineageID, created.AssociationSource)
+					identity = &created
 				} else if lineageID != "" && lineageID != identity.LineageID {
 					return fmt.Errorf("this project already belongs to %s, not %s", identity.LineageID, lineageID)
 				}
@@ -277,6 +278,7 @@ memory repository holds none.`,
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Memory repository: %s\nClone: %s\nConfig: %s\nRun `llewm sync` to sync now.\n", redact.String(remote), target, path)
+				fmt.Fprintf(cmd.OutOrStdout(), "On another machine, run `llewm init` in the checkout, then (configure credentials separately):\n%s\n", joinHint(identity.LineageID, remote))
 				return nil
 			})
 		},
@@ -313,6 +315,9 @@ memory repository holds none.`,
 					line = "Sync: not configured (llewm sync init --remote URL)"
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), line)
+				if value.JoinCommand != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "Join after `llewm init` (configure credentials separately):\n%s\n", value.JoinCommand)
+				}
 				if receipt := value.LastPublication; receipt != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "Last publication observation (%s): %s; snapshot %s; peer receipt unconfirmed\n", receipt.ObservedAt, receipt.State, receipt.SnapshotHead)
 				}
@@ -480,6 +485,9 @@ func projectSyncStatus(ctx context.Context, application *app.App) (historyStatus
 		return value, err
 	}
 	if application.Config.Sync.Remote != "" {
+		if value.Identity != nil {
+			value.JoinCommand = joinHint(value.Identity.LineageID, application.Config.Sync.Remote)
+		}
 		syncer, err := projectSyncer(application)
 		if err != nil {
 			return value, err

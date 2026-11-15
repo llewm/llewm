@@ -33,7 +33,7 @@ func TestSyncPublicationCLIAndMCP(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
 	runCLI(t, "", "sync", "init", "--remote", remote)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()

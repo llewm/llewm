@@ -16,6 +16,26 @@ later through [guided onboarding](onboarding.md#choose-the-project-topology).
 
 ## Source builds available today
 
+`llewm update plan --source-root /path/to/llewm --output json` assembles a
+read-only machine inventory. It reads the exact source HEAD's writer API and
+migration filenames, each distinct registered store, and native client plugin
+registrations at every observed scope. It prints backup-gated migration commands
+only when a reachable checkout still routes to that store. The command never
+fetches, installs, migrates, prunes, refreshes plugins, or restarts processes.
+
+`--manifest FILE` selects a distribution target instead. Older manifests without
+writer/schema fields remain supported; those target facts are unknown. With no
+target flags, the configured source checkout is used when available, otherwise
+the running executable is the comparison target. Cache digests are compared with
+this executable's bundled plugin files, not an uninstalled candidate. Rerun the
+plan with the qualified candidate before applying its migrations or plugins.
+
+Missing, inaccessible, malformed, or newer registries/stores are reported without
+creating a replacement. Registry inventory covers observed routes, not arbitrary
+databases elsewhere on disk. Live MCP identities are not observable from this CLI:
+compare `continuity_info` in each client after an update. A prospective floor rise
+means older writers may defer checkpoints; it does not prove that one is running.
+
 Install Git and a Go toolchain matching the target revision's `go.mod`. Use an
 identified Llewm source checkout, separate from the project using Llewm:
 

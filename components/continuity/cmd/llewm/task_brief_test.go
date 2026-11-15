@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/brief"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,7 +21,7 @@ func TestMCPTaskBriefRoutesExactlyWithoutDuplicateMarkdown(t *testing.T) {
 	if err := json.Unmarshal([]byte(cli), &b); err != nil || b.TaskID != "brief-task" {
 		t.Fatalf("CLI: %s %v", cli, err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()

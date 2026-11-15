@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -16,7 +15,7 @@ func TestMCPBootstrapSkipsThePacketTheSessionStartHookDelivered(t *testing.T) {
 	root := testProject(t)
 	runCLI(t, "", "init")
 	runCLI(t, "", "checkpoint", "create", "--task", "Dedup task", "--task-id", "dedup", "--next", "Continue")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()
@@ -83,7 +82,7 @@ func TestMCPBootstrapRecoversWhenStartupWasNotDelivered(t *testing.T) {
 	runCLI(t, "", "checkpoint", "create", "--task", "Local work", "--task-id", "local-work", "--next", "Continue", "--session", "old")
 	runCLI(t, "", "checkpoint", "create", "--task", "Other work", "--task-id", "other-work", "--next", "Later")
 	runCLI(t, `{"session_id":"old","hook_event_name":"SessionEnd","reason":"exit"}`, "hook", "codex")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
 	child.Dir = t.TempDir()
