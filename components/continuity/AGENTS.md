@@ -27,7 +27,8 @@ Build a local-first continuity and activity controller for coding agents. A fres
 - Exact usage and estimated usage must never be combined without labeling confidence.
 - Prefer deterministic parsing and verification over model inference.
 - Add fixtures for every supported hook event and golden tests for bootstraps and reports.
-- Run `go test ./...`, `go vet ./...`, and `go fmt ./...` before declaring work complete.
+- Run `go test ./... -count=1 -timeout=40m -p=2`, `go vet ./...`, and `go fmt ./...` before declaring work complete. On Windows, heavy test packages reject missing explicit `-count` and short full-suite timeouts; use root `task check` for the standard invocation.
+- Integration fixtures that need the current schema may use `internal/testdb.Create` for an isolated copy of a process-local, fully migrated template. Migration, initialization, upgrade, and CLI initialization tests must exercise real initialization. Never share a mutable database between parallel tests or weaken SQLite durability to speed them up.
 
 ## Operational notes
 

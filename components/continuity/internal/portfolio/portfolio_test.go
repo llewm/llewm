@@ -11,7 +11,6 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/config"
-	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/foldersync"
 	"github.com/llewm/llewm/components/continuity/internal/gitenv"
@@ -19,6 +18,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/permtest"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/testdb"
 )
 
 func isolated(t *testing.T) {
@@ -59,7 +59,7 @@ func source(t *testing.T, name, lineage string) Project {
 	if _, err := config.WriteDefault(root); err != nil {
 		t.Fatal(err)
 	}
-	db, err := database.Initialize(ctx, config.Default(root).Storage.Database)
+	db, err := testdb.Create(ctx, config.Default(root).Storage.Database)
 	if err != nil {
 		t.Fatal(err)
 	}

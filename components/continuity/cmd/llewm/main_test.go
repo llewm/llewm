@@ -1384,7 +1384,7 @@ func TestMCPStdio(t *testing.T) {
 	// protocol failure; individual behavior assertions remain unchanged.
 	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
-	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child := mcpTestCommand(ctx)
 	child.Dir = t.TempDir()
 	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
 	client := mcp.NewClient(&mcp.Implementation{Name: "scaffold-smoke", Version: "1"}, nil)

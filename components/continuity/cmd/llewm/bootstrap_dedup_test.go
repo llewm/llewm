@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -17,7 +16,7 @@ func TestMCPBootstrapSkipsThePacketTheSessionStartHookDelivered(t *testing.T) {
 	runCLI(t, "", "checkpoint", "create", "--task", "Dedup task", "--task-id", "dedup", "--next", "Continue")
 	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
-	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child := mcpTestCommand(ctx)
 	child.Dir = t.TempDir()
 	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "dedup", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)
@@ -84,7 +83,7 @@ func TestMCPBootstrapRecoversWhenStartupWasNotDelivered(t *testing.T) {
 	runCLI(t, `{"session_id":"old","hook_event_name":"SessionEnd","reason":"exit"}`, "hook", "codex")
 	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
-	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child := mcpTestCommand(ctx)
 	child.Dir = t.TempDir()
 	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "recovery", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)

@@ -3,6 +3,8 @@ package memsync
 import (
 	"os"
 	"testing"
+
+	"github.com/llewm/llewm/components/continuity/internal/testguard"
 )
 
 // TestMain isolates every test from the engineer's global and system Git
@@ -13,5 +15,5 @@ import (
 func TestMain(m *testing.M) {
 	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	os.Exit(m.Run())
+	os.Exit(testguard.Run(m))
 }

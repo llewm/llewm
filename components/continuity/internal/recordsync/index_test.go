@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
-	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/testdb"
 )
 
 func TestBlockIndexVersionsDependentsAndRebuild(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	db, err := database.Initialize(ctx, filepath.Join(root, "history.db"))
+	db, err := testdb.Create(ctx, filepath.Join(root, "history.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

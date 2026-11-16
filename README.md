@@ -145,6 +145,22 @@ contention; it does not impose a runtime sync timeout.
 Override with `task test TEST_TIMEOUT=60m TEST_PACKAGES=4` when measuring a
 different host. Use the same flags for direct Continuity `go test` runs.
 
+On Windows, the CLI, memsync, portfolio, and recordsync test entry points fail
+before fixtures run if `-count` is omitted or a full-package run uses a timeout
+below 40 minutes. Focused `-run` tests may use shorter timeouts; listing tests
+is exempt. A deliberate diagnostic can set `LLEWM_TEST_ALLOW_UNSAFE_WINDOWS=1`
+for that invocation. Package concurrency (`-p`) is controlled by the Go command,
+so the entry points cannot enforce it.
+
+The long suites exercise real Git, SQLite, multiple stores, and recovery.
+Their shared memsync, portfolio, and recordsync fixtures use `internal/testdb`
+to migrate once per test process, close and checkpoint the pristine database,
+then copy its bytes to a new file for each fixture. Each copy gets a fresh global
+generation token and retains normal WAL and durability settings. There is no
+shared mutable database or cache across runs. Migration and initialization tests
+still run the actual migration chain; this only removes repeated schema setup
+from selected integration fixtures.
+
 ## Repository layout
 
 - `components/continuity/`: Continuity's Go module, tests, schemas, plugins, and documentation.

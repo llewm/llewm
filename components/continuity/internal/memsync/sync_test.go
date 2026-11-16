@@ -20,11 +20,11 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
 	"github.com/llewm/llewm/components/continuity/internal/app"
-	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/decision"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
 	"github.com/llewm/llewm/components/continuity/internal/recordsync"
+	"github.com/llewm/llewm/components/continuity/internal/testdb"
 	"github.com/llewm/llewm/components/continuity/internal/topic"
 )
 
@@ -92,7 +92,7 @@ func newMachine(t testing.TB, name, remote string) machine {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
-	db, err := database.Initialize(ctx, filepath.Join(dir, "continuity.db"))
+	db, err := testdb.Create(ctx, filepath.Join(dir, "continuity.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -85,7 +84,7 @@ func TestMCPToolCallsRefreshSoleClientPresenceAndDisconnectYields(t *testing.T) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 	defer cancel()
-	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+	child := mcpTestCommand(ctx)
 	child.Dir = t.TempDir()
 	child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
 	client := mcp.NewClient(&mcp.Implementation{Name: "presence-test", Version: "1"}, nil)

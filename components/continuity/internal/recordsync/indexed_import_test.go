@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
-	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/testdb"
 	"github.com/llewm/llewm/components/continuity/internal/topic"
 	"github.com/llewm/llewm/components/continuity/internal/worknarrative"
 )
@@ -22,7 +22,7 @@ func indexedTestProject(t testing.TB, name string) (context.Context, *sql.DB, st
 	t.Helper()
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), name)
-	db, err := database.Initialize(ctx, filepath.Join(root, "history.db"))
+	db, err := testdb.Create(ctx, filepath.Join(root, "history.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

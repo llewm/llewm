@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -21,7 +20,7 @@ func TestMCPSessionLinksRecordsToItsTaskAndReportsUnlinked(t *testing.T) {
 	defer cancel()
 	connect := func(name string) *mcp.ClientSession {
 		t.Helper()
-		child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+		child := mcpTestCommand(ctx)
 		child.Dir = t.TempDir()
 		child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+root)
 		session, err := mcp.NewClient(&mcp.Implementation{Name: name, Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: child}, nil)

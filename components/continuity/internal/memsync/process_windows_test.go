@@ -62,7 +62,7 @@ func TestProcessTreeHelperProcess(t *testing.T) {
 }
 
 func helperCommand(ctx context.Context, dir, role string, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestProcessTreeHelperProcess$", "--"}, args...)...)
+	command := exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestProcessTreeHelperProcess$", "-test.count=1", "-test.timeout=0", "--"}, args...)...)
 	command.Env = append(os.Environ(), memsyncProcessHelperEnv+"="+role, memsyncProcessHelperDir+"="+dir)
 	return command
 }

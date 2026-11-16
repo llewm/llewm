@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,7 +48,7 @@ func TestMCPInitializesWithoutAnAvailableProject(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), mcpIntegrationTimeout)
 			defer cancel()
-			child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPProcess$")
+			child := mcpTestCommand(ctx)
 			child.Dir = cwd
 			child.Env = append(os.Environ(), "LLEWM_TEST_MCP_PROCESS=1", "LLEWM_TEST_PROJECT_ROOT="+explicit)
 			client := mcp.NewClient(&mcp.Implementation{Name: "unavailable-project", Version: "1"}, nil)

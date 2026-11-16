@@ -45,7 +45,7 @@ func boolWord(value bool) string {
 func TestBackgroundCommandHasAWindowlessConsole(t *testing.T) {
 	t.Parallel()
 	report := filepath.Join(t.TempDir(), "state")
-	command := backgroundCommand(os.Args[0], "-test.run=^TestBackgroundHelperProcess$")
+	command := backgroundCommand(os.Args[0], "-test.run=^TestBackgroundHelperProcess$", "-test.count=1", "-test.timeout=0")
 	command.Env = append(os.Environ(), backgroundHelperEnv+"="+report)
 	if err := command.Start(); err != nil {
 		t.Fatalf("start background helper: %v", err)
