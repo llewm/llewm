@@ -20,6 +20,7 @@ const (
 	DefaultTrackInventoryRefLimit = 10
 	MaxTrackInventoryRefLimit     = 50
 	maxTrackInventoryTasks        = 2000
+	maxTrackInventoryNodes        = 2000
 	maxTrackInventoryLinks        = 1000
 )
 
@@ -179,9 +180,12 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 
 	// Keep terminal nodes in the join so their bound tasks do not reappear as
 	// unbound open work. All/everything can then show the complete track history.
-	nodes, err := latestNodesFrom(ctx, service.DB, projectID, true)
+	nodes, err := loadLatestNodes(ctx, service.DB, projectID, true, maxTrackInventoryNodes+1)
 	if err != nil {
 		return TrackInventory{}, err
+	}
+	if len(nodes) > maxTrackInventoryNodes {
+		return TrackInventory{}, fmt.Errorf("current roadmap nodes exceed %d-item inventory limit", maxTrackInventoryNodes)
 	}
 	links, linksTruncated, err := service.currentNodeLinks(ctx, projectID, maxTrackInventoryLinks)
 	if err != nil {

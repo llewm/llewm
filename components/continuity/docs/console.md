@@ -71,6 +71,9 @@ promotes current work while it is in progress and its task is not retired;
 completed tracks stay in history even if an old checkpoint disagrees.
 The same ordering applies to `llewm work list --view open` and the other work
 list/inventory views. The CLI's existing `current` default is unchanged.
+Inventory joins allow up to 2,000 latest node revisions, including terminal
+history, before filtering and pagination. Exceeding that bound reports an error;
+it never silently omits nodes. Review packets retain their separate 64-node bound.
 
 Proposed, accepted and historical tracks need no task binding;
 only active or blocked nodes flag a missing task binding as an anomaly. Other recorded

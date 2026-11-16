@@ -90,10 +90,18 @@ func currentNodesFrom(ctx context.Context, db roadmapQueryer, projectID string) 
 }
 
 func latestNodesFrom(ctx context.Context, db roadmapQueryer, projectID string, includeSuperseded bool) ([]Node, error) {
+	nodes, err := loadLatestNodes(ctx, db, projectID, includeSuperseded, maxReviewNodes+1)
+	if err == nil && len(nodes) > maxReviewNodes {
+		return nil, fmt.Errorf("current roadmap nodes exceed %d-item review limit", maxReviewNodes)
+	}
+	return nodes, err
+}
+
+func loadLatestNodes(ctx context.Context, db roadmapQueryer, projectID string, includeSuperseded bool, limit int) ([]Node, error) {
 	rows, err := db.QueryContext(ctx, `SELECT n.node_id, n.revision, n.title, n.status, n.priority, n.kind, COALESCE(n.target_date,''), COALESCE(n.target_release,''), COALESCE(n.target_horizon,''), n.evidence_refs_json, n.source_path, n.source_ref, n.authority, n.recorded_at, n.schema_version
 		FROM roadmap_nodes n WHERE n.project_id = ?
 		AND n.revision = (SELECT MAX(latest.revision) FROM roadmap_nodes latest WHERE latest.project_id = n.project_id AND latest.node_id = n.node_id)
-		AND (? OR n.status != 'superseded') ORDER BY n.priority, n.node_id LIMIT ?`, projectID, includeSuperseded, maxReviewNodes+1)
+		AND (? OR n.status != 'superseded') ORDER BY n.priority, n.node_id LIMIT ?`, projectID, includeSuperseded, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -116,9 +124,6 @@ func latestNodesFrom(ctx context.Context, db roadmapQueryer, projectID string, i
 			return nil, err
 		}
 		nodes = append(nodes, node)
-		if len(nodes) > maxReviewNodes {
-			return nil, fmt.Errorf("current roadmap nodes exceed %d-item review limit", maxReviewNodes)
-		}
 	}
 	return nodes, rows.Err()
 }
