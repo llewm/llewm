@@ -3,6 +3,7 @@ version: '3'
 vars:
   TEST_TIMEOUT: '40m'
   TEST_PACKAGES: '2'
+  EXE_SUFFIX: '{{if eq OS "windows"}}.exe{{end}}'
 
 tasks:
   fmt:
@@ -45,15 +46,15 @@ tasks:
   build-continuity:
     internal: true
     dir: components/continuity
-    cmds: [go build -buildvcs=true -o ../../dist/llewm ./cmd/llewm]
+    cmds: ['go build -buildvcs=true -o ../../dist/llewm{{.EXE_SUFFIX}} ./cmd/llewm']
   build-action-control:
     internal: true
     dir: components/action-control
-    cmds: [go build -buildvcs=true -o ../../dist/action-control ./cmd/action-control]
+    cmds: ['go build -buildvcs=true -o ../../dist/action-control{{.EXE_SUFFIX}} ./cmd/action-control']
   build-orchestration:
     internal: true
     dir: components/orchestration
-    cmds: [go build -buildvcs=true -o ../../dist/llewm-orchestrate ./cmd/llewm-orchestrate]
+    cmds: ['go build -buildvcs=true -o ../../dist/llewm-orchestrate{{.EXE_SUFFIX}} ./cmd/llewm-orchestrate']
   package-preview:
     dir: components/continuity
     requires:

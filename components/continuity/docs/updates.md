@@ -16,6 +16,15 @@ later through [guided onboarding](onboarding.md#choose-the-project-topology).
 
 ## Source builds available today
 
+Inventory optional installed components as well as `llewm`. An existing
+`llewm-orchestrate` installation follows the
+[orchestration upgrade runbook](../../orchestration/docs/installation.md#upgrade-an-existing-installation),
+including the server, CLI, hooks and adapters that may use different binaries.
+The Continuity update plan and database migration commands do not inventory or
+migrate orchestration stores. Record that component's installed and running
+identities separately; a Continuity-only receipt cannot establish that the whole
+installation is current. Preserve explicit component pins and package ownership.
+
 `llewm update plan --source-root /path/to/llewm --output json` assembles a
 read-only machine inventory. It reads the exact source HEAD's writer API and
 migration filenames, each distinct registered store, and native client plugin

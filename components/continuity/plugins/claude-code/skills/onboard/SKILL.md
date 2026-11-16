@@ -5,6 +5,15 @@ description: Install or update Llewm independently, then optionally configure a 
 
 # Guide Continuity onboarding
 
+Include `llewm-orchestrate` when coordination is requested or already installed.
+Follow `components/orchestration/docs/installation.md` from the selected source
+revision for build/PATH setup, existing hook and adapter paths, independent broker
+storage, and installed versus running identity checks. Root builds include it;
+Continuity update plans and preview bundles do not establish its installation.
+Preserve explicit component pins and package ownership. Installing a binary does
+not enable a broker or authorize credential, listener, trust, or permission changes.
+Continuity-only and audit-only setups do not require orchestration.
+
 Follow `docs/onboarding.md#agent-workflow` from the selected source revision.
 First handle executable installation/update in the actual client environment;
 no project, Git root, adoption choice or project checkpoint is required for an

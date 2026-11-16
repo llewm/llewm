@@ -22,6 +22,10 @@ They cannot establish ownership, process liveness or execution authority.
 
 ## Start locally
 
+First [install the executable on PATH](installation.md), including in the client
+environment that must act on broker hook hints. The `dist/` commands below are
+development examples; deployed hooks and adapters should use the installed path.
+
 Build from `components/orchestration`:
 
 ```sh

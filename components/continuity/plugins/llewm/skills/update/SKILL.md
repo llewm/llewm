@@ -5,6 +5,15 @@ description: Check or update the Llewm executable and matching client plugins, i
 
 # Update Llewm
 
+Include `llewm-orchestrate` when coordination is requested or already installed.
+Follow `components/orchestration/docs/installation.md` from the selected source
+revision for build/PATH setup, existing hook and adapter paths, independent broker
+storage, and installed versus running identity checks. Root builds include it;
+Continuity update plans and preview bundles do not establish its installation.
+Preserve explicit component pins and package ownership. Installing a binary does
+not enable a broker or authorize credential, listener, trust, or permission changes.
+Continuity-only and audit-only setups do not require orchestration.
+
 Honor the requested scope: a check returns observations without installing.
 An authorized update prepares and verifies a concrete candidate, preserves current
 knowledge/configuration, applies required migrations explicitly and verifies the

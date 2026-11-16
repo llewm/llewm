@@ -46,10 +46,14 @@ Run all commands below from this component directory.
 ```bash
 go mod download
 go fmt ./...
-go test ./...
+go test ./... -count=1 -timeout 40m -p 2
 go vet ./...
 go build -buildvcs=true -o ../../dist/llewm ./cmd/llewm
 ```
+
+On Windows, use `../../dist/llewm.exe` as the output filename, or run root
+`task build`. The [root testing notes](../../README.md#development) explain the
+longer timeout, bounded package concurrency and disabled test-result cache.
 
 See the [checkpoint contract](docs/checkpoints.md) for validation, redaction,
 failed attempts, and verification-claim semantics.

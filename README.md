@@ -85,12 +85,18 @@ current source builds and future published binary bundles. The `update` skill
 keeps acquisition, verified backups, explicit migrations, matching plugins and
 fresh-client recovery together.
 
+For requested or existing coordination, also follow the
+[orchestration installation and upgrade runbook](components/orchestration/docs/installation.md).
+It covers `llewm-orchestrate` on PATH and the running service, hooks and adapters.
+
 [Preview distribution](components/continuity/docs/preview-distribution.md) builds
 versioned binaries and matching client packages.
 [Portfolio federation](components/continuity/docs/portfolio-history.md) routes
 independent project histories to a private aggregate and separate developer groups.
 Report ordinary bugs through GitHub or Forgejo issues; include the affected component,
 version and reproduction steps. Review any draft before posting it publicly.
+
+## Development
 
 From the repository root, with Go installed, each component remains independently
 checkable:
@@ -124,7 +130,9 @@ go vet ./...
 Alternatively, with [Task](https://taskfile.dev/) installed, run `task check` and
 `task build` from the repository root. Some distributions package the executable
 as `go-task`. Root tasks dispatch to all four component modules; there is no root Go
-module. Build output goes in root `dist/`.
+module. Build output goes in root `dist/`, with `.exe` filenames on Windows.
+The manual build examples above use Unix output names; append `.exe` to their
+explicit output filenames when building on Windows.
 
 The full suite includes durable filesystem and multi-store fixtures. On Windows,
 reported package times exceed Go's default ten-minute timeout (up to roughly

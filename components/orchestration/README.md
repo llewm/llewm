@@ -1,5 +1,9 @@
 # Shared agent work
 
+For executable/PATH setup and upgrades, follow the
+[installation runbook](docs/installation.md). Root builds include orchestration;
+installation and service configuration remain separate steps.
+
 `llewm-orchestrate` coordinates manually started clients: engineers share
 reviewed plans and a work pool, run their own agents using their own provider
 accounts, and return attributable context and results. An engineer with assignment

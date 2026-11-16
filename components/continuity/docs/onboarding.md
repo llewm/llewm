@@ -31,6 +31,12 @@ or reconstruct project history.
 
 ### 1. Install or update independently
 
+Include `llewm-orchestrate` when coordination is requested or already installed;
+follow the [orchestration installation runbook](../../orchestration/docs/installation.md).
+Verify its PATH command as well as configured absolute hook/adapter paths.
+Executable installation and broker startup/configuration are separate steps.
+Continuity-only and usage-audit setups do not require orchestration.
+
 Observe the client, OS/architecture, execution environment (native, WSL, container
 or remote host), existing executable/PATH and relevant installation receipts.
 Ask only for facts or choices that cannot be observed. Install in the environment

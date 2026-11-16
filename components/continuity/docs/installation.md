@@ -37,6 +37,11 @@ Keep the entire `.llewm/` directory out of source control on every platform.
 
 ## Install the executable
 
+If coordination is requested or already installed, also follow the
+[orchestration installation runbook](../../orchestration/docs/installation.md)
+for `llewm-orchestrate`. Root `task build` builds that executable but does not
+install it on PATH. Preserve Continuity-only and audit-only installation scope.
+
 Ordinary installations, including source builds and migration-bearing updates,
 skip development tests, vet and formatting checks by default. Review
 [upstream verification evidence](updates.md#upstream-verification-evidence) for
