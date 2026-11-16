@@ -14,6 +14,15 @@ for existing installations, including affected-store backups/migrations and acti
 client checks. If no project is available, finish installation and leave project
 configuration pending. Do not create a repository or dummy project.
 
+Ordinary end-user installs and updates, including source builds, skip development
+tests, vet and formatting checks by default. Use upstream evidence through
+`docs/updates.md#upstream-verification-evidence` for the exact commit and tested
+OS/architecture. Missing, pending, failed or unavailable evidence is not a pass
+and must never trigger local tests implicitly. Run development checks only for
+development work or an explicit local-testing request. Keep local executable/PATH,
+doctor, plugin, restart and backup/migration checks. Llewm's contributor rules do
+not impose a development test suite on an adopting project's installation.
+
 For a source install/adoption with a reviewed update remote and branch, run
 `llewm update configure --if-unconfigured --enabled --fetch --source-root SOURCE --remote REMOTE --branch BRANCH`
 with the installation's actual values, independently of the active project.

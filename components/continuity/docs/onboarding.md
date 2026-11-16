@@ -46,6 +46,13 @@ https://go.dev/doc/install. Use an identified preview bundle when available and
 appropriate; do not invent a public release, package-manager channel or signature.
 An existing package-manager-owned installation must be updated through its owner.
 
+Skip development tests, vet and formatting checks for ordinary end-user installs
+and updates, including source builds. Review
+[upstream verification evidence](updates.md#upstream-verification-evidence) for the
+exact commit and platform. Report gaps without silently running local tests or
+claiming a pass. Development work and explicit local-testing requests retain their
+own validation requirements; the local installation checks below still apply.
+
 Verify `llewm --help`, `llewm version --output json` and PATH from the client
 launcher. Installation/update alone must not initialize project state, create a
 trial, select adoption, import prose, enable History sync or require a project

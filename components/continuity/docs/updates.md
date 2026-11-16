@@ -107,10 +107,99 @@ Binary manifests remain available through manual `update check`; there is no
 automatic release feed yet.
 
 The agent prepares a separate clean checkout of the exact selected commit,
-preserves dirty user work, runs required checks, builds into a separate candidate
+preserves dirty user work, reviews upstream evidence, builds into a separate candidate
 path, and verifies the candidate identity before touching the installed binary.
 It does not build unreviewed code merely because a remote branch changed. Follow
 the common qualification flow below and retain the resulting installation receipt.
+
+## Upstream verification evidence
+
+Ordinary end-user installation/update, including a source build, does **not** run
+the development test suite, vet or formatting checks. Development and CI retain
+their required checks; an explicit request for local testing can also run them.
+Installation uses upstream evidence plus local executable identity, PATH, doctor,
+compatibility, backup/migration, plugin and fresh-client checks. No evidence gap
+silently launches local tests, and a successful build is not a test pass.
+
+The GitHub `check` workflow in `.github/workflows/check.yml` prepares one JSON
+receipt per native Linux/Windows runner, using
+`components/continuity/scripts/verify-upstream.py`. It records the actual checked
+out commit, repository, OS/architecture, Go version, run/attempt URL and separate
+test, vet, format and build results for all four Go modules, including standalone
+module builds and Continuity's Python tests. Receipts are retained as workflow
+artifacts for 90 days, subject to repository retention limits. The existing
+Forgejo workflow remains independent; its older Ubuntu job is not Windows
+evidence. Neither workflow qualifies interactive clients or untested platforms.
+A successful test command can include individual skipped tests; inspect the run
+logs for those limits rather than claiming every test executed.
+
+Acquire evidence only from the installation's reviewed repository/channel. On
+GitHub, use the [workflow-runs API](https://docs.github.com/en/rest/actions/workflow-runs)
+to find `check.yml` runs with `head_sha=FULL_COMMIT`, then the
+[run-artifacts API](https://docs.github.com/en/rest/actions/artifacts) to obtain
+the matching `verification-...` artifact. Inspect the run's repository, event,
+workflow revision, attempt and completed conclusion, as well as its native job
+results. Prefer a push run on the reviewed upstream commit. A pull-request merge
+run tests its synthetic merge commit, not necessarily the requested source HEAD.
+Use existing read-only authentication if artifact download requires it; never
+place credentials in receipt files, URLs or installation records. Downloads may
+expire or require access even when run metadata is public. Do not dispatch or
+rerun CI merely to install. A workflow file in source is not evidence of a run.
+
+After obtaining and extracting the JSON from that run, compare it locally:
+
+```sh
+llewm update evidence --receipt verification.json --commit FULL_COMMIT --target windows/amd64 --output json
+```
+
+The default target is the running executable's OS/architecture. Use the actual
+installation target, including `linux/...` for WSL. `--repository` selects a
+reviewed fork instead of the default `https://github.com/llewm/llewm`. The command
+reads local files only, creates no project state and runs no subprocesses. It
+compares a full commit, never a branch/tag name or abbreviated hash. For source
+installation also verify a clean checkout and the built candidate's stamped
+identity; a receipt for an unmodified commit does not cover dirty source. Older
+installed versions lacking `update evidence` can inspect the JSON directly or use
+the staged candidate; do not install merely to read a receipt.
+
+Version-1 receipts contain `schema_version`, `repository`, `commit`, `target`,
+`go_version`, `run_url`, `status` and a `checks` array of `component`, `name`,
+`status`. Results are `passed`, `failed`, `pending` (checks also allow `skipped`).
+All required checks must pass; missing checks, duplicate entries, unknown schemas
+or malformed identities cannot establish a pass. For a binary bundle the publisher
+must additionally bind an `artifact` with `kind: binary-bundle`, `target`, `size`
+and `sha256`; pass `--artifact BUNDLE` to compare its bytes. The current source CI
+does not produce release bundles or bundle attestations. A manifest checksum alone
+does not establish that a bundle was tested.
+
+The command reports observations with exit code zero, including non-passing
+states; automation must inspect `state`. Invalid command arguments return an
+error. Interpret evidence separately from installation success:
+
+| State | Meaning and installation handling |
+| --- | --- |
+| `passed` | The matching receipt reports all checks passed. Authenticate its origin/run separately; retain local installation checks. |
+| `failed` | Upstream reports a failed check. Report the failure before replacing the installed version; use a known qualified revision or an explicitly reviewed exception. |
+| `pending` | A run/check is unfinished or skipped. Never describe it as passed. |
+| `missing` | No receipt/file, or no bundle digest for a requested bundle. Report upstream verification as unknown. |
+| `unavailable` | Evidence cannot be read/retrieved (including offline, access or expired artifacts). Preserve offline/local-first installation and report the limit. |
+| `incomplete`, `invalid`, `mismatch` | Evidence cannot qualify this selection. Explain the gap and do not infer a pass. |
+
+Network lookup states are reported by the acquiring agent; the offline command
+only classifies supplied files. When no receipt is available, omit `--receipt` to
+record `missing`. Missing/unavailable evidence is not by itself a new installation
+approval gate: honor the authorized source trust and installation scope, retain
+local checks and report uncertainty. Never silently substitute local tests or
+transfer a Linux result to Windows/macOS. `publisher_authentication` remains
+`not_verified`: a local JSON file and a URL are claims, not signatures. Record the
+reviewed run URL and acquisition provenance separately. A retained, previously
+authenticated receipt can be used offline for its exact identity; its presence
+does not establish latest-version discovery.
+
+Adding the workflow does not assert that GitHub Actions is enabled or that any
+particular commit passed. Until a matching completed run and receipt are observed,
+report missing/pending evidence. Publishing releases, enabling infrastructure and
+changing access remain separate from an installation request.
 
 ## Published binary bundles
 
@@ -144,8 +233,9 @@ comparison also works with locally generated preview bundles today.
    package-manager-owned installations under their manager's update mechanism.
    Respect pinned versions; a check is not permission to move a pin.
 2. Verify a candidate separately: clean build identity, artifact provenance,
-   platform, API/writer compatibility and expected migration target. Source builds
-   run the target's documented checks. No candidate replaces a running binary
+   platform, API/writer compatibility and expected migration target. Review
+   [upstream verification evidence](#upstream-verification-evidence); source installs
+   skip development tests by default. No candidate replaces a running binary
    while it is being built.
 3. Save/read back a checkpoint; preserve previous binary, installation/client
    receipts and configuration. Back up each affected store using the supported

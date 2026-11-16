@@ -1,0 +1,43 @@
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: components/continuity/go.mod
+          cache: true
+          cache-dependency-path: components/*/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Run developer checks and record evidence
+        shell: bash
+        env:
+          RECEIPT: ${{ runner.temp }}/verification.json
+          REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: python -B components/continuity/scripts/verify-upstream.py --output "$RECEIPT" --repository "$REPOSITORY" --run-url "$RUN_URL"
+      - name: Retain evidence even when checks fail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ matrix.os }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verification.json
+          if-no-files-found: warn
+          retention-days: 90

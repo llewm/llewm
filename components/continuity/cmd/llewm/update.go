@@ -52,7 +52,7 @@ func updateCommand() *cobra.Command {
 	check.Flags().StringVar(&artifact, "artifact", "", "downloaded platform bundle to verify against manifest")
 	check.Flags().StringVar(&target, "target", runtime.GOOS+"/"+runtime.GOARCH, "binary platform in manifest")
 	check.Flags().StringVar(&output, "output", "text", "text or json")
-	parent.AddCommand(check, updateConfigureCommand(), updateStatusCommand(), updatePlanCommand())
+	parent.AddCommand(check, updateConfigureCommand(), updateStatusCommand(), updatePlanCommand(), updateEvidenceCommand())
 	return parent
 }
 

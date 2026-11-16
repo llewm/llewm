@@ -37,6 +37,14 @@ Keep the entire `.llewm/` directory out of source control on every platform.
 
 ## Install the executable
 
+Ordinary installations, including source builds and migration-bearing updates,
+skip development tests, vet and formatting checks by default. Review
+[upstream verification evidence](updates.md#upstream-verification-evidence) for
+the exact commit and tested platform. An evidence gap never silently launches
+local tests or counts as a pass. Contributor validation remains required for
+development work; local testing during installation requires an explicit request.
+Retain executable identity/PATH, doctor, plugin, restart and backup/migration checks.
+
 For preview archives and matching client packages, see
 [preview distribution](preview-distribution.md). These source-build instructions
 remain useful for development and unqualified platforms.
@@ -432,7 +440,8 @@ are retained. This removes registry rows only, never project data or directories
 For a verified migration-bearing release:
 
 1. Stop long-running MCP processes so they cannot keep serving the old binary.
-2. Build the candidate to a separate path, run its tests, and then install it. Do
+2. Build the candidate to a separate path, review its upstream verification
+   evidence and local identity, and then install it. Do
    not build directly over the executable used by active hooks.
 3. Run `llewm version --output json` and retain its commit, dirty flag, API version,
    and executable path with the verification record.

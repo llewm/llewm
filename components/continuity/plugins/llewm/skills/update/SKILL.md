@@ -34,9 +34,19 @@ For source builds, run `llewm update check --source-root CHECKOUT --output json`
 Use `--fetch --remote NAME --branch BRANCH` when checking the authorized upstream.
 Preserve dirty source; prepare a separate clean checkout at the exact selected
 commit rather than resetting user work. Read that revision's Go requirement and
-checks. Build to a separate candidate path and verify its clean commit/API/writer
-identity before replacing anything. A changed upstream is not permission to
+installation instructions. Build to a separate candidate path and verify its
+clean commit/API/writer identity before replacing anything. A changed upstream is not permission to
 build arbitrary code or change a pinned version; honor the selected source trust.
+
+Ordinary end-user installs and updates, including source builds, skip development
+tests, vet and formatting checks by default. Do not import Llewm's contributor
+validation rules into an adopting project's installation. Use upstream evidence
+as described in `docs/updates.md#upstream-verification-evidence`, bound to the exact
+commit and tested OS/architecture; a build or another platform's pass is not a
+native test pass. Report missing, pending, failed or unavailable evidence accurately.
+Never launch tests implicitly to fill an evidence gap. Run development checks only
+for development work or when the user explicitly requests local testing. Retain
+the local identity, doctor, plugin, restart and backup/migration checks below.
 
 For release binaries, use actual publisher metadata and a matching platform
 bundle. `llewm update check --manifest MANIFEST --artifact BUNDLE --output json`
