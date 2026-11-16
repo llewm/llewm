@@ -21,11 +21,11 @@ func (a *App) codeHeads(ctx context.Context) []checkpoint.CodeHead {
 func observeCodeHeads(ctx context.Context, repositories project.Repositories) []checkpoint.CodeHead {
 	var heads []checkpoint.CodeHead
 	for _, repository := range repositories.All() {
-		output, err := gitenv.Command(ctx, "-C", repository.Root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}").Output()
+		output, err := gitenv.Command(ctx, "-C", repository.WorkTree(), "rev-parse", "--verify", "--quiet", "HEAD^{commit}").Output()
 		if err != nil {
 			continue
 		}
-		heads = append(heads, checkpoint.CodeHead{Member: repository.Member, Commit: strings.TrimSpace(string(output)), Branch: currentBranch(ctx, repository.Root)})
+		heads = append(heads, checkpoint.CodeHead{Member: repository.Member, Commit: strings.TrimSpace(string(output)), Branch: currentBranch(ctx, repository.WorkTree())})
 	}
 	return heads
 }
@@ -83,12 +83,13 @@ func codeBehind(ctx context.Context, db *sql.DB, repositories project.Repositori
 			lags = append(lags, CodeLag{Member: head.Member, Commit: head.Commit, Missing: true, Absent: true})
 			continue
 		}
-		if gitenv.Command(ctx, "-C", repository.Root, "cat-file", "-e", head.Commit+"^{commit}").Run() != nil {
+		worktree := repository.WorkTree()
+		if gitenv.Command(ctx, "-C", worktree, "cat-file", "-e", head.Commit+"^{commit}").Run() != nil {
 			lags = append(lags, CodeLag{Member: head.Member, Commit: head.Commit, Missing: true})
 			continue
 		}
-		if gitenv.Command(ctx, "-C", repository.Root, "merge-base", "--is-ancestor", head.Commit, "HEAD").Run() != nil {
-			lags = append(lags, CodeLag{Member: head.Member, Commit: head.Commit, Landed: landedIn(ctx, repository.Root, head.Commit)})
+		if gitenv.Command(ctx, "-C", worktree, "merge-base", "--is-ancestor", head.Commit, "HEAD").Run() != nil {
+			lags = append(lags, CodeLag{Member: head.Member, Commit: head.Commit, Landed: landedIn(ctx, worktree, head.Commit)})
 		}
 	}
 	return lags, nil

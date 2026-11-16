@@ -45,14 +45,15 @@ func (s Service) UnnarratedCommits(ctx context.Context, projectID string) ([]Unn
 	cutoff := s.now().Add(-CoverageWindow)
 	var result []UnnarratedCommit
 	for _, repository := range repositories.All() {
-		if _, err := s.git(ctx, repository.Root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
+		worktree := repository.WorkTree()
+		if _, err := s.git(ctx, worktree, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
 			continue // An unborn branch has nothing to cover.
 		}
 		email := ""
-		if output, err := s.git(ctx, repository.Root, "config", "user.email"); err == nil {
+		if output, err := s.git(ctx, worktree, "config", "user.email"); err == nil {
 			email = strings.TrimSpace(string(output))
 		}
-		output, err := s.git(ctx, repository.Root, "log", "--first-parent", "--no-merges", fmt.Sprintf("-n%d", CoverageScan), "--format=%H%x00%ae%x00%cI%x00%s", "HEAD")
+		output, err := s.git(ctx, worktree, "log", "--first-parent", "--no-merges", fmt.Sprintf("-n%d", CoverageScan), "--format=%H%x00%ae%x00%cI%x00%s", "HEAD")
 		if err != nil {
 			return nil, err
 		}

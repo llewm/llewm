@@ -219,6 +219,17 @@ can be attributed without crediting its existing ancestors. Missing, expired or
 over-budget reflog history leaves attribution unknown; reachability alone is
 insufficient. This remains best-effort hook observation, not proof of authorship.
 
+A linked Git worktree without its own state directory shares the main
+checkout's store but has its own HEAD, branch and HEAD reflog. Hooks, checkpoint
+code heads, the code check, narrative coverage, "changed by others" notices and
+`--commit` references therefore read the worktree the session works in, and the
+last observed HEAD of each linked worktree is kept apart from the main
+checkout's (migration 099). Builds before this change read the main checkout's
+HEAD from a worktree: they left a worktree session's commits unattributed, could
+credit it with an unhooked main-checkout commit, and recorded the main
+checkout's commit and branch as its checkpoint code heads. Those records stay as
+observed; they are not repaired.
+
 An attributed commit also names the session's current task: its live presence
 task, else the task it last checkpointed. A task whose newest checkpoint is
 completed, or whose lineage ended, is never current, so a commit made before a

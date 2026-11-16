@@ -16,6 +16,20 @@ import (
 type Repository struct {
 	Member string `json:"member,omitempty"`
 	Root   string `json:"root"`
+	// Checkout is the linked worktree of Root that the caller works in, or
+	// empty when the caller works in Root itself. Linked worktrees share Root's
+	// objects and refs but have their own HEAD, branch and HEAD reflog.
+	Checkout string `json:"checkout,omitempty"`
+}
+
+// WorkTree is the working tree whose HEAD the caller sees: Checkout when set,
+// otherwise Root. Read HEAD, the current branch and the HEAD reflog here; use
+// Root for the primary checkout and its worktree listing.
+func (r Repository) WorkTree() string {
+	if r.Checkout != "" {
+		return r.Checkout
+	}
+	return r.Root
 }
 
 // Prefix is the workspace-relative path prefix of the repository's files.
@@ -34,6 +48,15 @@ type Repositories struct {
 	Root      string
 	Workspace *Workspace
 	Default   string
+	// Checkout is the linked worktree of Root that the caller works in, outside
+	// a unified workspace; empty in Root itself. Every Repository returned for
+	// Root carries it.
+	Checkout string
+}
+
+// primary is the single-repository project's checkout.
+func (r Repositories) primary() Repository {
+	return Repository{Root: r.Root, Checkout: r.Checkout}
 }
 
 // Workspaced reports whether commits must be qualified by member.
@@ -48,7 +71,7 @@ func (r Repositories) Select(member string) (Repository, error) {
 		if member != "" {
 			return Repository{}, fmt.Errorf("--repo %q applies only in a unified workspace", member)
 		}
-		return Repository{Root: r.Root}, nil
+		return r.primary(), nil
 	}
 	if member == "" {
 		member = r.Default
@@ -74,7 +97,7 @@ func (r Repositories) Select(member string) (Repository, error) {
 // All returns every repository whose checkout is present, ordered by member.
 func (r Repositories) All() []Repository {
 	if !r.Workspaced() {
-		return []Repository{{Root: r.Root}}
+		return []Repository{r.primary()}
 	}
 	var result []Repository
 	for _, member := range r.Workspace.Members {
@@ -125,7 +148,7 @@ func (r Repositories) CheckoutRoots(ctx context.Context) []string {
 func (r Repositories) ForPath(path string) (Repository, string, bool) {
 	path = filepath.ToSlash(filepath.Clean(path))
 	if !r.Workspaced() {
-		return Repository{Root: r.Root}, path, true
+		return r.primary(), path, true
 	}
 	var best Repository
 	for _, repository := range r.All() {

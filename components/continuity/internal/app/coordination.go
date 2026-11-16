@@ -131,7 +131,7 @@ func changedUnderneath(ctx context.Context, db *sql.DB, repositories project.Rep
 		if !ok {
 			continue
 		}
-		output, err := gitenv.Command(ctx, "-C", repository.Root, "log", "--max-count", fmt.Sprint(changedCommitScan), "--format=%x00%H%x09%s", "--name-only", base+"..HEAD").Output()
+		output, err := gitenv.Command(ctx, "-C", repository.WorkTree(), "log", "--max-count", fmt.Sprint(changedCommitScan), "--format=%x00%H%x09%s", "--name-only", base+"..HEAD").Output()
 		if err != nil {
 			continue
 		}

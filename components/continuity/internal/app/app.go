@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/llewm/llewm/components/continuity/internal/brief"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -224,6 +225,10 @@ func open(ctx context.Context, checkout project.Checkout, readOnly bool) (*App, 
 	repositories := project.Repositories{Root: root, Default: checkout.Member}
 	if workspace != nil && workspace.Mode == project.ModeUnified {
 		repositories.Workspace = workspace
+	} else if checkout.Kind == project.KindWorktree && checkout.Path != "" && filepath.Clean(checkout.Path) != filepath.Clean(root) {
+		// A linked worktree shares the main checkout's store and objects but
+		// has its own HEAD: commit-anchored readers must see the caller's.
+		repositories.Checkout = filepath.Clean(checkout.Path)
 	}
 	var roadmapRepository roadmap.Repository
 	if repositories.Workspaced() {

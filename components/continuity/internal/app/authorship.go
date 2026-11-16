@@ -22,7 +22,7 @@ func (a *App) ObserveHeads(ctx context.Context, client, sessionID, eventType, to
 	}
 	for _, repository := range a.Repositories.All() {
 		_, _ = authorship.Observe(ctx, a.DB, authorship.Observation{
-			ProjectID: a.ProjectID, Member: repository.Member, Root: repository.Root,
+			ProjectID: a.ProjectID, Member: repository.Member, Root: repository.WorkTree(), Worktree: repository.Checkout,
 			SessionID: sessionID, Client: client, TaskID: taskID, ToolName: toolName,
 			Attribute: attribute, At: time.Now(),
 		})

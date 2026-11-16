@@ -127,8 +127,12 @@ func RanGitWrite(toolInput any) bool {
 // Observation is one hook's view of a checkout.
 type Observation struct {
 	ProjectID, Member, Root string
-	SessionID, Client       string
-	TaskID, ToolName        string
+	// Worktree is the linked worktree Root names, or empty for the primary
+	// checkout. Each linked worktree has its own HEAD, so its last observed
+	// HEAD is kept apart from the primary checkout's.
+	Worktree          string
+	SessionID, Client string
+	TaskID, ToolName  string
 	// Attribute is true when this hook's tool call ran a Git command that can
 	// create commits; only then are new commits attributed to the session.
 	Attribute bool
@@ -147,7 +151,11 @@ func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, err
 		return 0, err
 	}
 	var previous string
-	err = db.QueryRowContext(ctx, `SELECT head FROM head_observations WHERE project_id=? AND member=?`, observation.ProjectID, observation.Member).Scan(&previous)
+	if observation.Worktree == "" {
+		err = db.QueryRowContext(ctx, `SELECT head FROM head_observations WHERE project_id=? AND member=?`, observation.ProjectID, observation.Member).Scan(&previous)
+	} else {
+		err = db.QueryRowContext(ctx, `SELECT head FROM worktree_head_observations WHERE project_id=? AND member=? AND worktree=?`, observation.ProjectID, observation.Member, observation.Worktree).Scan(&previous)
+	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
@@ -169,8 +177,13 @@ func Observe(ctx context.Context, db *sql.DB, observation Observation) (int, err
 			}
 		}
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO head_observations(project_id,member,head,observed_at) VALUES (?,?,?,?)
+	if observation.Worktree == "" {
+		_, err = db.ExecContext(ctx, `INSERT INTO head_observations(project_id,member,head,observed_at) VALUES (?,?,?,?)
 		ON CONFLICT(project_id,member) DO UPDATE SET head=excluded.head, observed_at=excluded.observed_at`, observation.ProjectID, observation.Member, head, at)
+	} else {
+		_, err = db.ExecContext(ctx, `INSERT INTO worktree_head_observations(project_id,member,worktree,head,observed_at) VALUES (?,?,?,?,?)
+		ON CONFLICT(project_id,member,worktree) DO UPDATE SET head=excluded.head, observed_at=excluded.observed_at`, observation.ProjectID, observation.Member, observation.Worktree, head, at)
+	}
 	return recorded, err
 }
 

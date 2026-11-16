@@ -73,7 +73,8 @@ func (s Service) AddCommitIn(ctx context.Context, record Record, ref, member str
 	if err != nil {
 		return record, result, err
 	}
-	root := repository.Root
+	// Resolve ref where the caller works: HEAD differs per linked worktree.
+	root := repository.WorkTree()
 	ref = strings.TrimSpace(ref)
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return record, result, fmt.Errorf("commit reference is required and cannot start with -")
