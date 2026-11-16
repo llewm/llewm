@@ -174,7 +174,10 @@ With multiple endpoints JSON reports `git` and `folders` separately. A folder
 receipt reports `published_locally` or `pending`/`unavailable`/`error`, counts,
 time and `peer_receipt: "unknown"`. Git transport may publish retained objects
 while local semantic application remains pending; its error/detail makes that
-condition visible. Neither a directory write nor a Git push certifies that a
+condition visible. A refused semantic import includes the first available
+validation reason, redacted and bounded, alongside its counts. A single invalid
+count can describe a batch validation failure rather than one malformed record.
+Neither a directory write nor a Git push certifies that a
 particular peer imported a record.
 
 After checkpoints, automatic projects request a detached sync through the existing

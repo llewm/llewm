@@ -1,12 +1,48 @@
 package roadmap
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 	"github.com/llewm/llewm/components/continuity/internal/workitem"
 )
+
+func TestTrackInventoryPagesBeyondReviewNodeLimit(t *testing.T) {
+	ctx, service, projectID, _, _ := testService(t)
+	for i := 0; i < 70; i++ {
+		if _, err := service.AppendNode(ctx, Node{ProjectID: projectID, ID: fmt.Sprintf("history-%02d", i), Title: "Historical track", Status: "completed", SourcePath: "ROADMAP.md"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.AppendNode(ctx, Node{ProjectID: projectID, ID: "next", Title: "Next track", Status: "accepted", SourcePath: "ROADMAP.md"}); err != nil {
+		t.Fatal(err)
+	}
+	open, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: "open", Limit: 10})
+	if err != nil || open.Total != 1 || len(open.Items) != 1 || open.Items[0].Node.ID != "next" {
+		t.Fatalf("historical nodes blocked open inventory: %+v %v", open, err)
+	}
+	seen := map[string]bool{}
+	for offset := 0; offset < 71; offset += 10 {
+		page, err := service.TrackInventory(ctx, projectID, TrackInventoryOptions{Filter: "everything", Limit: 10, Offset: offset})
+		if err != nil || page.Total != 71 || len(page.Items) == 0 {
+			t.Fatalf("page %d: %+v %v", offset, page, err)
+		}
+		for _, item := range page.Items {
+			if seen[item.Node.ID] {
+				t.Fatalf("duplicate node %s", item.Node.ID)
+			}
+			seen[item.Node.ID] = true
+		}
+	}
+	if len(seen) != 71 {
+		t.Fatalf("lost inventory nodes: %d", len(seen))
+	}
+	if _, err := service.CurrentNodes(ctx, projectID); err == nil {
+		t.Fatal("inventory change removed the review packet limit")
+	}
+}
 
 func TestTaskBindingRequiredOnlyForWorkUnderway(t *testing.T) {
 	for _, status := range []string{"proposed", "accepted", "completed", "deferred", "active", "blocked"} {
