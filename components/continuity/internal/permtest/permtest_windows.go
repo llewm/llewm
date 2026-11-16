@@ -1,6 +1,10 @@
 package permtest
 
-import "golang.org/x/sys/windows"
+import (
+	"strconv"
+
+	"golang.org/x/sys/windows"
+)
 
 func currentUser() (string, error) {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
@@ -59,4 +63,8 @@ func deny(path string) (func() error, error) {
 		return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
 			windows.DACL_SECURITY_INFORMATION|protection, nil, nil, acl, nil)
 	}, nil
+}
+
+func privilege() string {
+	return "elevated token " + strconv.FormatBool(windows.GetCurrentProcessToken().IsElevated())
 }

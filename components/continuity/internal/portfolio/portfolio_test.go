@@ -514,10 +514,8 @@ func TestPortfolioFolderFailuresRemainIndependentAndRetained(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(bad.Directory, "v3")); !os.IsNotExist(err) {
 		t.Fatal("published into replacement")
 	}
-	if os.Geteuid() == 0 {
-		return
-	}
-	// Use a real access denial in this launching process; no alternate executable.
+	// Use a real access denial in this launching process; no alternate
+	// executable. Deny skips where the process bypasses access control.
 	defer permtest.Deny(t, good.Directory)()
 	r, err = Run(context.Background(), c, "p", false, false)
 	if err == nil || r[0].Destinations[1].Error == "" {

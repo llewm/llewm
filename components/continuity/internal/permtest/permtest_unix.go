@@ -2,7 +2,10 @@
 
 package permtest
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 func expose(path string) error { return os.Chmod(path, 0o644) }
 
@@ -16,3 +19,5 @@ func deny(path string) (func() error, error) {
 	}
 	return func() error { return os.Chmod(path, info.Mode().Perm()) }, nil
 }
+
+func privilege() string { return "euid " + strconv.Itoa(os.Geteuid()) }
