@@ -638,7 +638,7 @@ func planOperationalImport(ctx context.Context, db transactionStarter, projectID
 	if err != nil {
 		return ImportPlan{}, err
 	}
-	decoded, err := decodeImportChanges(bundle, plan)
+	decoded, err := decodeImportChanges(ctx, tx, projectID, bundle, plan)
 	if err != nil {
 		return invalidImportPlan(projectID, err), nil
 	}

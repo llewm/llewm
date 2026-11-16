@@ -128,7 +128,7 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 			return ImportApplyResult{}, err
 		}
 	}
-	decoded, err := decodeImportChanges(bundle, plan)
+	decoded, err := decodeImportChanges(ctx, tx, projectID, bundle, plan)
 	if err != nil {
 		return ImportApplyResult{Plan: invalidImportPlan(projectID, err)}, fmt.Errorf("cannot apply invalid operational records: %w", err)
 	}
@@ -273,17 +273,27 @@ func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID str
 // content rules here would strand historical data after a redaction upgrade.
 // New, changed, and merely schema-equivalent records still receive all checks;
 // dependencies on omitted records are resolved against the local transaction.
-func decodeImportChanges(bundle Bundle, plan ImportPlan) (decodedOperationalBundle, error) {
+// A source with a host-local redaction review decodes as its verified
+// projection (admittedForm); the caller still retains the source bytes.
+func decodeImportChanges(ctx context.Context, source queryer, projectID string, bundle Bundle, plan ImportPlan) (decodedOperationalBundle, error) {
 	present := make(map[string]string)
 	for _, item := range plan.Items {
 		if item.Disposition == PlanAlreadyPresent && item.ExistingEnvelopeSHA256 != "" && item.ExistingEnvelopeSHA256 == item.IncomingEnvelopeSHA256 {
 			present[planItemKey(item)] = item.ExistingEnvelopeSHA256
 		}
 	}
+	reviewed, err := reviewedProjections(ctx, source, projectID)
+	if err != nil {
+		return decodedOperationalBundle{}, err
+	}
 	changes := Bundle{Records: make([]EncodedEnvelope, 0, len(bundle.Records))}
 	for _, record := range bundle.Records {
 		if present[recordKey(record.Envelope)] != record.Envelope.EnvelopeSHA256 {
-			changes.Records = append(changes.Records, record)
+			admitted, err := admittedForm(record, reviewed)
+			if err != nil {
+				return decodedOperationalBundle{}, err
+			}
+			changes.Records = append(changes.Records, admitted)
 		}
 	}
 	return decodeOperationalBundle(changes)

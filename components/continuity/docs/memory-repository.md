@@ -733,8 +733,35 @@ refuse. Already-admissible observations do not need a projection.
 The preview is an interpretation for review, not a replacement observation or an
 import authorization. It performs no import, publication, operational rewrite, or
 retention of the derived bytes. Its `review_required` is true and `applied` is
-false. Fresh-peer recovery still requires a source-bound projection representation
-and import/export support; a successful preview alone does not recover a peer.
+false. A successful preview alone does not recover a peer.
+
+A fresh peer recovers by reviewing those projections on its own host (migration
+101). When its sync refuses a historical record that current redaction rules
+reject, list every tracked observation a projection repairs, then record the
+review:
+
+```sh
+llewm sync review-redaction --all
+llewm sync review-redaction --all --apply --reviewer NAME --reason "why the redaction is acceptable"
+```
+
+`--source ENVELOPE_SHA256` (repeatable) selects specific observations instead of
+`--all`. Without `--apply` nothing is written. Output lists only source and
+projected hashes and the safe projected identity. Other records that fail alone
+are counted as `unsupported` (families a projection never rewrites, including
+supersessions that decode only together with their successor) or `unrepairable`;
+they are never described.
+
+A review stores hashes, reviewer, reason and time in the device-local
+`redaction_projection_reviews` table, never source content, and is not synced:
+each fresh host reviews for itself. On the next sync, every import path decodes a
+reviewed source as its projection, but only after recomputing the projection from
+the exact incoming bytes and matching the reviewed hash; the source hash alone is
+never proof. A mismatch, for example after redaction rules change again, refuses
+the import and asks for a new review. Import still retains the exact source
+envelope, so this host exports and replays the same bytes as every other host and
+never publishes the projection as a new version of that record. Operational reads
+on this host show the redacted projection.
 
 Writer API 125 adds migration 077 and proof-carrying `redaction_recovery`
 records for historical checkpoint, narrative, procedure, and track-plan

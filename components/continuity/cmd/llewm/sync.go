@@ -178,6 +178,7 @@ incomplete records refuse conversion before removal.`,
 	parent.AddCommand(syncStorageCommand())
 	parent.AddCommand(syncRedactionRecoveryCommand())
 	parent.AddCommand(syncRedactionProjectionCommand())
+	parent.AddCommand(syncRedactionReviewCommand())
 
 	var remote, clone, askpass, sshKey, credentialHelper, lineageID string
 	var plaintextCredentials, tokenStdin bool

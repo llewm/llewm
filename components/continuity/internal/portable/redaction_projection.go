@@ -3,6 +3,7 @@ package portable
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -17,6 +18,15 @@ type RedactionProjection struct {
 	Projected    EncodedEnvelope `json:"-"`
 }
 
+// ErrSourceAdmissible reports that a source needs no projection: it already
+// passes current admission checks and imports as itself.
+var ErrSourceAdmissible = errors.New("projection source already passes current admission checks")
+
+// ErrProjectionUnsupported reports a family that redaction projection never
+// rewrites. Such a source failing alone may also be a record, like a
+// supersession, that only decodes together with its dependencies.
+var ErrProjectionUnsupported = errors.New("redaction projection does not support")
+
 // PreviewRedactionProjection admits only the prose families with observed legacy
 // redaction failures. Identity, authority, timestamps and semantic references may
 // not change. Current ordinary decoding remains the final admission gate.
@@ -30,13 +40,13 @@ func PreviewRedactionProjection(source []byte) (RedactionProjection, error) {
 	if err != nil {
 		return RedactionProjection{}, fmt.Errorf("invalid projection source envelope")
 	}
+	if _, err := decodeOperationalBundle(Bundle{Records: []EncodedEnvelope{original}}); err == nil {
+		return RedactionProjection{}, ErrSourceAdmissible
+	}
 	switch spec.RecordType {
 	case "checkpoint", "checkpoint_action", "decision", "resource_note":
 	default:
-		return RedactionProjection{}, fmt.Errorf("redaction projection does not support %s", spec.RecordType)
-	}
-	if _, err := decodeOperationalBundle(Bundle{Records: []EncodedEnvelope{original}}); err == nil {
-		return RedactionProjection{}, fmt.Errorf("projection source already passes current admission checks")
+		return RedactionProjection{}, fmt.Errorf("%w: %s", ErrProjectionUnsupported, spec.RecordType)
 	}
 	// Preserve JSON numbers exactly, and refuse key collapse instead of allowing
 	// structural sanitization to overwrite one field with another.

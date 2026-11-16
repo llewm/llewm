@@ -471,7 +471,7 @@ func ImportMemoryRecordsTx(ctx context.Context, tx *sql.Tx, projectID string, sp
 	if err != nil || !plan.ApplyAllowed {
 		return plan, nil, err
 	}
-	decoded, err := decodeImportChanges(bundle, plan)
+	decoded, err := decodeImportChanges(ctx, tx, projectID, bundle, plan)
 	if err != nil {
 		return invalidImportPlan(projectID, err), nil, nil
 	}

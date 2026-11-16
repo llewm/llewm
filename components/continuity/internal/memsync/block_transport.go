@@ -111,6 +111,23 @@ func (s Syncer) RebuildInventory(ctx context.Context, other func(context.Context
 // trackedBlockObservations resolves exact envelope hashes from tracked blocks;
 // neither untracked blocks nor records from a different lineage qualify.
 func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage string, hashes ...string) (map[string][]byte, error) {
+	requested := make(map[string]bool, len(hashes))
+	for _, hash := range hashes {
+		requested[hash] = true
+	}
+	bodies, err := s.readTrackedObservations(ctx, repo, lineage, func(hash string) bool { return requested[hash] })
+	if err != nil {
+		return nil, err
+	}
+	if len(bodies) != len(requested) {
+		return nil, fmt.Errorf("all requested observations must already be tracked in this lineage")
+	}
+	return bodies, nil
+}
+
+// readTrackedObservations returns the exact bytes of every tracked observation
+// that keep selects, keyed by envelope hash.
+func (s Syncer) readTrackedObservations(ctx context.Context, repo git, lineage string, keep func(string) bool) (map[string][]byte, error) {
 	// Recovery previews must not repair or populate the disposable SQL index.
 	// Validate committed bytes directly so inspecting a source remains read-only
 	// even when that index is absent, damaged, or stale.
@@ -120,20 +137,13 @@ func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage 
 	if err != nil {
 		return nil, err
 	}
-	requested := make(map[string]bool, len(hashes))
-	for _, hash := range hashes {
-		requested[hash] = true
-	}
-	bodies := make(map[string][]byte, len(requested))
+	bodies := map[string][]byte{}
 	for _, block := range blocks {
 		for _, object := range block.Objects {
-			if requested[object.Envelope.EnvelopeSHA256] {
+			if keep(object.Envelope.EnvelopeSHA256) {
 				bodies[object.Envelope.EnvelopeSHA256] = append([]byte(nil), object.Bytes...)
 			}
 		}
-	}
-	if len(bodies) != len(requested) {
-		return nil, fmt.Errorf("all requested observations must already be tracked in this lineage")
 	}
 	return bodies, nil
 }
