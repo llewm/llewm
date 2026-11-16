@@ -111,7 +111,12 @@ func (s Syncer) RebuildInventory(ctx context.Context, other func(context.Context
 // trackedBlockObservations resolves exact envelope hashes from tracked blocks;
 // neither untracked blocks nor records from a different lineage qualify.
 func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage string, hashes ...string) (map[string][]byte, error) {
-	blocks, err := s.trackedBlocks(ctx, repo, lineage)
+	// Recovery previews must not repair or populate the disposable SQL index.
+	// Validate committed bytes directly so inspecting a source remains read-only
+	// even when that index is absent, damaged, or stale.
+	blocks, err := s.readTrackedBlocks(ctx, repo, lineage, false, func(hash string, body []byte) (recordsync.Block, error) {
+		return recordsync.DecodeBlock(lineage, hash, body)
+	})
 	if err != nil {
 		return nil, err
 	}

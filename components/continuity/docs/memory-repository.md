@@ -720,6 +720,22 @@ semantic checks. This permits existing peers to resume after redaction rules gro
 stricter without rewriting history; it does not authorize importing an unredacted
 historical payload into a fresh store.
 
+`llewm sync preview-redaction --source ENVELOPE_SHA256` provides a read-only
+preview for a tracked historical checkpoint, checkpoint action,
+decision, or resource note that fails current redaction checks. It emits the
+exact source hash and the redacted proposed envelope, never the original content.
+Identity, authority, timestamps, schema, and semantic dependency references must
+remain unchanged; only evidence-reference prose may be redacted. The resulting
+payload must pass ordinary current admission checks. Corrupt transport, unrelated
+schema errors, unsupported families, and redaction that collapses object keys
+refuse. Already-admissible observations do not need a projection.
+
+The preview is an interpretation for review, not a replacement observation or an
+import authorization. It performs no import, publication, operational rewrite, or
+retention of the derived bytes. Its `review_required` is true and `applied` is
+false. Fresh-peer recovery still requires a source-bound projection representation
+and import/export support; a successful preview alone does not recover a peer.
+
 Writer API 125 adds migration 077 and proof-carrying `redaction_recovery`
 records for historical checkpoint, narrative, procedure, and track-plan
 re-exports. With automatic sync paused and all writers upgraded, preview each
