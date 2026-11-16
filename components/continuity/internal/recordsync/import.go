@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/database"
 	"github.com/llewm/llewm/components/continuity/internal/fork"
 	"github.com/llewm/llewm/components/continuity/internal/portable"
+	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
 var ErrSemanticPending = errors.New("semantic history import pending")
@@ -226,7 +228,7 @@ func (s Importer) importRecordsWithin(ctx context.Context, tx *sql.Tx, prepared 
 		if !plan.ApplyAllowed {
 			result.Collisions += plan.Counts[portable.PlanCollision]
 			if plan.Counts[portable.PlanInvalid]+plan.Counts[portable.PlanUnsupported] > 0 {
-				return fmt.Errorf("memory import refused: %d invalid, %d unsupported records", plan.Counts[portable.PlanInvalid], plan.Counts[portable.PlanUnsupported])
+				return importPlanError(plan)
 			}
 		} else {
 			if receipt != nil {
@@ -251,6 +253,26 @@ func (s Importer) importRecordsWithin(ctx context.Context, tx *sql.Tx, prepared 
 		return errAtomicImportCollision
 	}
 	return nil
+}
+
+// Preserve the first validation failure without turning the error into a dump
+// of the incoming batch. Counts may describe a batch-level failure, not a record.
+func importPlanError(plan portable.ImportPlan) error {
+	message := fmt.Sprintf("memory import refused: %d invalid, %d unsupported records", plan.Counts[portable.PlanInvalid], plan.Counts[portable.PlanUnsupported])
+	for _, item := range plan.Items {
+		if item.Disposition != portable.PlanInvalid && item.Disposition != portable.PlanUnsupported {
+			continue
+		}
+		if reason := strings.TrimSpace(item.Reason); reason != "" {
+			reason = redact.String(reason)
+			chars := []rune(reason)
+			if len(chars) > 2048 {
+				reason = string(chars[:2048]) + "…"
+			}
+			return fmt.Errorf("%s: %s", message, reason)
+		}
+	}
+	return errors.New(message)
 }
 
 func forkHeads(envelopes []portable.EncodedEnvelope, recovered map[string]portable.EncodedEnvelope) ([]fork.ObservedHead, error) {
