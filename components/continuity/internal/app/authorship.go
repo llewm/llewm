@@ -14,7 +14,6 @@ import (
 // evidence are attributed to the session and its task. It is best-effort and
 // never fails the hook.
 func (a *App) ObserveHeads(ctx context.Context, client, sessionID, eventType, toolName string, toolInput any) {
-	a.repairAuthorship(ctx)
 	attribute := eventType == "posttooluse" && authorship.RanGitWrite(toolInput)
 	taskID := ""
 	if attribute {
@@ -27,17 +26,6 @@ func (a *App) ObserveHeads(ctx context.Context, client, sessionID, eventType, to
 			Attribute: attribute, At: time.Now(),
 		})
 	}
-}
-
-// repairAuthorship runs the one-time repairs of pre-fix attributions that
-// migrations 097 and 098 request, before anything reads or adds attributions.
-// It is best-effort: a failure leaves the request for the next call.
-func (a *App) repairAuthorship(ctx context.Context) {
-	var checkouts []authorship.Checkout
-	for _, repository := range a.Repositories.All() {
-		checkouts = append(checkouts, authorship.Checkout{Member: repository.Member, Root: repository.Root})
-	}
-	_, _ = authorship.RepairPending(ctx, a.DB, a.ProjectID, checkouts, time.Now())
 }
 
 // retaskSessionCommitsTx gives the saving session's task-less commits, observed

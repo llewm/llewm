@@ -287,8 +287,8 @@ executable, while the client's MCP server keeps running the old image, and
 compatibility cases:
 
 - **Writer floor unchanged** (ordinary updates and additive migrations): both
-  versions keep writing. Migrations with one-time hook work, such as the
-  commit-attribution repair requests, run on the next hook.
+  versions keep writing. Migrations that queue one-time hook work have it
+  run on the next hook.
 - **Writer floor raised:** the old MCP server refuses record writes and keeps
   serving reads. A checkpoint returns `deferred: true` with a device-local
   recovery envelope instead of being lost. After the restart, run

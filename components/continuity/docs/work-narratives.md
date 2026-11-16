@@ -244,16 +244,7 @@ amendment: `revoke` withdraws a session's attribution, and `retask` keeps the
 session and names a different task (or none). Readers hide revoked rows and
 apply the newest retask; narrative coverage and task overlap read the result.
 
-Two one-time repairs run on the next hook of each device. Builds before commit
-922c22f recorded attributions without reflog evidence: migration 097 asks the
-hook to revalidate, once, the attributions observed before the migration
-against the checkout's reflogs (branches and every worktree HEAD) under the
-same rule, and to revoke each one that fails. Later observations are never
-revalidated, so reflog expiry cannot revoke them. Builds before commit 286dbb1
-credited a session's finished task, or no task to a commit made before the
-session's first checkpoint: migration 098 asks the hook to give each such
-attribution observed before the migration the session's next checkpointed task.
-A finished task with no later checkpoint gives way to no task, a task the
-session reopened next keeps the commit, and a task-less commit with no later
-checkpoint stays task-less. Both repairs are removed once every device has migrated past
-098.
+Migrations 097 and 098 queued one-time hook repairs of attributions recorded
+by builds before commits 922c22f (no reflog evidence) and 286dbb1 (a finished
+task, or none, credited). Their amendments remain; migration 100 dropped the
+request table once every database had run them.

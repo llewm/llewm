@@ -94,7 +94,6 @@ func (a *App) AcceptPlan(ctx context.Context, id, status, reviewer string, claim
 // checkpoints and at session start; a failure reports nothing rather than
 // displacing the caller's result.
 func (a *App) UnnarratedCommits(ctx context.Context) []worknarrative.UnnarratedCommit {
-	a.repairAuthorship(ctx)
 	commits, err := a.Narratives.UnnarratedCommits(ctx, a.ProjectID)
 	if err != nil {
 		return nil

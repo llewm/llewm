@@ -14,9 +14,10 @@ func TestMigration098CarriesRevocationsAndRepairRequests(t *testing.T) {
 	}
 	defer db.Close()
 	names := migrationNames()
-	var before []string
+	var before, through098 []string
 	for _, name := range names {
 		if name == "098_commit_author_amendments.sql" {
+			through098 = append(append([]string(nil), before...), name)
 			break
 		}
 		before = append(before, name)
@@ -32,7 +33,7 @@ func TestMigration098CarriesRevocationsAndRepairRequests(t *testing.T) {
 		DELETE FROM commit_author_revalidations_pending; INSERT INTO commit_author_revalidations_pending(project_id,cutoff) VALUES ('p','2026-11-13T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrate(ctx, db, names); err != nil {
+	if err := migrate(ctx, db, through098); err != nil {
 		t.Fatal(err)
 	}
 	var revokes, observations int
@@ -61,6 +62,12 @@ func TestMigration098CarriesRevocationsAndRepairRequests(t *testing.T) {
 	rows.Close()
 	if repairs["revalidate"] != "2026-11-13T00:00:00Z" || repairs["retask"] == "" || len(repairs) != 2 {
 		t.Fatalf("pending repairs = %v", repairs)
+	}
+	if err := migrate(ctx, db, names); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name='commit_author_repairs_pending'`).Scan(&leftovers); err != nil || leftovers != 0 {
+		t.Fatalf("migration 100 left the repair requests: %d %v", leftovers, err)
 	}
 	if _, err := db.Exec(`INSERT INTO commit_author_amendments(project_id,member,commit_sha,session_id,kind,task_id,reason,amended_at) VALUES ('p','','aaa','s','revoke','x','bad','2026-11-14T00:00:00Z')`); err == nil {
 		t.Fatal("a revoke accepted a task")

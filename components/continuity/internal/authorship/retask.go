@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-
-	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
 )
 
 type execQueryer interface {
@@ -94,72 +92,4 @@ func RetaskSession(ctx context.Context, db execQueryer, projectID, sessionID, ta
 		count++
 	}
 	return count, nil
-}
-
-// RetaskFinished repairs attributions observed before cutoff, by builds that
-// credited a session's finished task or recorded no task for a commit made
-// before the session's first checkpoint. A commit crediting a task already
-// finished (completed or ended) when it was observed, or none, gets the task
-// the session checkpointed next, which RetaskSession now does at each
-// checkpoint. A finished task the session reopened next keeps its commit; a
-// finished task the session never followed with a checkpoint gives way to no
-// task, and a task-less commit with no later checkpoint stays task-less.
-func RetaskFinished(ctx context.Context, db *sql.DB, projectID string, cutoff, now time.Time) (int, error) {
-	values, err := attributions(ctx, db, `project_id=?`, projectID)
-	if err != nil {
-		return 0, err
-	}
-	type move struct {
-		value          attribution
-		taskID, reason string
-	}
-	var moves []move
-	sessions := map[string][]checkpoint.SessionCheckpoint{}
-	for _, value := range values {
-		if !value.observedAt.Before(cutoff) {
-			continue
-		}
-		reason := "the commit had no task"
-		if value.taskID != "" {
-			finished, err := checkpoint.TaskFinishedAt(ctx, db, projectID, value.taskID, value.observedAt)
-			if err != nil {
-				return 0, err
-			}
-			if !finished {
-				continue
-			}
-			reason = "task " + value.taskID + " was finished when the commit was observed"
-		}
-		saved, ok := sessions[value.sessionID]
-		if !ok {
-			if saved, err = checkpoint.SessionCheckpoints(ctx, db, projectID, value.sessionID); err != nil {
-				return 0, err
-			}
-			sessions[value.sessionID] = saved
-		}
-		next, why := "", reason+", and the session saved no later checkpoint"
-		for _, item := range saved {
-			if item.CreatedAt.After(value.observedAt) {
-				next, why = item.TaskID, reason+"; the session's next checkpoint names this task"
-				break
-			}
-		}
-		if next != value.taskID {
-			moves = append(moves, move{value, next, why})
-		}
-	}
-	if len(moves) == 0 {
-		return 0, nil
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	for _, item := range moves {
-		if err := retask(ctx, tx, projectID, item.value, item.taskID, item.reason, now); err != nil {
-			return 0, err
-		}
-	}
-	return len(moves), tx.Commit()
 }
