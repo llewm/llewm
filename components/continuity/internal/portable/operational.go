@@ -629,10 +629,6 @@ func planOperationalImport(ctx context.Context, db transactionStarter, projectID
 	if err != nil {
 		return invalidImportPlan(projectID, err), nil
 	}
-	decoded, err := decodeOperationalBundle(bundle)
-	if err != nil {
-		return invalidImportPlan(projectID, err), nil
-	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return ImportPlan{}, err
@@ -641,6 +637,10 @@ func planOperationalImport(ctx context.Context, db transactionStarter, projectID
 	plan, err := planValidatedOperationalImport(ctx, tx, projectID, bundle, snapshot)
 	if err != nil {
 		return ImportPlan{}, err
+	}
+	decoded, err := decodeImportChanges(bundle, plan)
+	if err != nil {
+		return invalidImportPlan(projectID, err), nil
 	}
 	if plan.ApplyAllowed {
 		appendKeys := planAppendKeys(plan)

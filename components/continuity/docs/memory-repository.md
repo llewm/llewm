@@ -710,6 +710,16 @@ planning compares retained envelopes too. This prevents new transport variants;
 it does not settle historical collisions or revision forks. Keep automatic sync
 paused during recovery, and preserve exact procedure definitions and grants.
 
+An exact replay of an already-present operational record does not reapply newer
+content/redaction rules to its immutable payload. Import still validates canonical
+transport bytes, hashes, supported fields and identity, then proves equality with
+the selected local snapshot before omitting that record from semantic decoding.
+Dependencies on it resolve against the same local transaction. New records,
+changed envelopes and merely schema-equivalent observations receive the current
+semantic checks. This permits existing peers to resume after redaction rules grow
+stricter without rewriting history; it does not authorize importing an unredacted
+historical payload into a fresh store.
+
 Writer API 125 adds migration 077 and proof-carrying `redaction_recovery`
 records for historical checkpoint, narrative, procedure, and track-plan
 re-exports. With automatic sync paused and all writers upgraded, preview each

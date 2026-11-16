@@ -467,13 +467,13 @@ func ImportMemoryRecordsTx(ctx context.Context, tx *sql.Tx, projectID string, sp
 	if err != nil {
 		return invalidImportPlan(projectID, err), nil, nil
 	}
-	decoded, err := decodeOperationalBundle(bundle)
-	if err != nil {
-		return invalidImportPlan(projectID, err), nil, nil
-	}
 	plan, err := planValidatedOperationalImport(ctx, source, projectID, bundle, nil)
 	if err != nil || !plan.ApplyAllowed {
 		return plan, nil, err
+	}
+	decoded, err := decodeImportChanges(bundle, plan)
+	if err != nil {
+		return invalidImportPlan(projectID, err), nil, nil
 	}
 	if err := validateApplyDependencies(ctx, tx, projectID, decoded, planAppendKeys(plan)); err != nil {
 		return invalidImportPlan(projectID, err), nil, nil

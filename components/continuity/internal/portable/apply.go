@@ -113,11 +113,6 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 		plan := invalidImportPlan(projectID, err)
 		return ImportApplyResult{Plan: plan}, fmt.Errorf("cannot apply invalid portable bundle: %w", err)
 	}
-	decoded, err := decodeOperationalBundle(bundle)
-	if err != nil {
-		plan := invalidImportPlan(projectID, err)
-		return ImportApplyResult{Plan: plan}, fmt.Errorf("cannot apply invalid operational records: %w", err)
-	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return ImportApplyResult{}, err
@@ -132,6 +127,10 @@ func applyOperationalImportWithPlan(ctx context.Context, db transactionStarter, 
 		if err != nil {
 			return ImportApplyResult{}, err
 		}
+	}
+	decoded, err := decodeImportChanges(bundle, plan)
+	if err != nil {
+		return ImportApplyResult{Plan: invalidImportPlan(projectID, err)}, fmt.Errorf("cannot apply invalid operational records: %w", err)
 	}
 	result, err := applyOperationalBundleWithin(ctx, tx, projectID, bundle, decoded, plan, appliedAt, within, RecoveryComparisonComplete)
 	if err != nil {
@@ -266,6 +265,28 @@ func applyOperationalBundleWithin(ctx context.Context, tx *sql.Tx, projectID str
 	result.Plan = plan
 	result.Receipt = &receipt
 	return result, nil
+}
+
+// An exact replay of an operationally present immutable envelope writes no
+// payload. Its transport bytes and identity were validated before planning, and
+// the planner compared them with the selected local snapshot. Reapplying newer
+// content rules here would strand historical data after a redaction upgrade.
+// New, changed, and merely schema-equivalent records still receive all checks;
+// dependencies on omitted records are resolved against the local transaction.
+func decodeImportChanges(bundle Bundle, plan ImportPlan) (decodedOperationalBundle, error) {
+	present := make(map[string]string)
+	for _, item := range plan.Items {
+		if item.Disposition == PlanAlreadyPresent && item.ExistingEnvelopeSHA256 != "" && item.ExistingEnvelopeSHA256 == item.IncomingEnvelopeSHA256 {
+			present[planItemKey(item)] = item.ExistingEnvelopeSHA256
+		}
+	}
+	changes := Bundle{Records: make([]EncodedEnvelope, 0, len(bundle.Records))}
+	for _, record := range bundle.Records {
+		if present[recordKey(record.Envelope)] != record.Envelope.EnvelopeSHA256 {
+			changes.Records = append(changes.Records, record)
+		}
+	}
+	return decodeOperationalBundle(changes)
 }
 
 func decodeOperationalBundle(bundle Bundle) (decodedOperationalBundle, error) {
