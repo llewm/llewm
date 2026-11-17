@@ -195,6 +195,11 @@ func TestRoadmapStatusWithoutSyncIsExplicitAndBoundedPathsAreValidated(t *testin
 	if _, err := service.AppendNode(ctx, Node{ProjectID: projectID, ID: "bad", Title: "Bad", Status: "active", SourcePath: "../outside"}); err == nil {
 		t.Fatal("accepted escaping source path")
 	}
+	for _, sourcePath := range []string{"https://github.com/llewm/llewm/issues", "C:/outside.md", "/outside.md"} {
+		if _, err := service.AppendNode(ctx, Node{ProjectID: projectID, ID: "bad", Title: "Bad", Status: "active", SourcePath: sourcePath}); err == nil {
+			t.Fatalf("accepted host-dependent source path %q", sourcePath)
+		}
+	}
 	if _, err := service.AppendBinding(ctx, Binding{ProjectID: projectID, NodeID: "missing", Path: "docs", PathKind: "directory", Relationship: "documentation"}); err == nil {
 		t.Fatal("accepted binding to a missing node")
 	}

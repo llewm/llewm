@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
+	"github.com/llewm/llewm/components/continuity/internal/projectpath"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 
 	"github.com/llewm/llewm/components/continuity/internal/project"
@@ -78,8 +79,8 @@ func text(name, value string, required bool) (string, error) {
 
 func relativePath(value string) (string, error) {
 	value = strings.TrimSpace(redact.String(value))
-	value = filepath.ToSlash(filepath.Clean(value))
-	if value == "" || value == "." || filepath.IsAbs(value) || value == ".." || strings.HasPrefix(value, "../") || strings.IndexByte(value, 0) >= 0 {
+	value, ok := projectpath.Normalize(value)
+	if !ok {
 		return "", fmt.Errorf("file and region anchors require a project-relative path")
 	}
 	return value, nil

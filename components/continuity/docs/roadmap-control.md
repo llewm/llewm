@@ -20,7 +20,12 @@ schedule, delegate, or execute tasks.
 File bindings attach a node revision to a project-relative file or directory and
 label the relationship as implementation, contract, test, documentation, or
 verification. Directory bindings include Git-tracked and non-ignored untracked
-files. Paths cannot be absolute or escape the project root. Regular files are
+files. Paths cannot be absolute or escape the project root. Source and binding
+paths are stored as clean `/`-separated paths with the same meaning on every
+host, so a first element containing `:` (a URL such as `https://…` or a drive
+such as `C:`) is refused. Sync admits retained paths by one host-independent
+rule, including the `./https:/…` spelling earlier Windows writers stored for such
+elements. Regular files are
 hashed up to 16 MiB; symlinks hash their link target without reading outside the
 project. A status scan is capped at 500 current bindings and 2,000 distinct files.
 

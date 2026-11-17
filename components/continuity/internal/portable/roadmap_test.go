@@ -40,6 +40,34 @@ func TestRoadmapNodeV1DefaultsToWorkItem(t *testing.T) {
 	}
 }
 
+// A Windows writer stored a URL source path in Windows-cleaned form. Every
+// peer must admit those retained bytes, whatever its host OS.
+func TestRoadmapNodeAdmitsWindowsGuardedSourcePathOnEveryHost(t *testing.T) {
+	payload := roadmapNodePayload{Title: "Continuity GitHub hardening", Status: "active", Priority: 10, Kind: "work_item", SourcePath: "./https:/github.com/llewm/llewm/issues", OperationalSchemaVersion: roadmap.SchemaVersion}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := json.Marshal(envelopeIndex{Title: payload.Title, Status: payload.Status})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := EncodeEnvelope(EnvelopeSpec{LineageID: "lineage:abababababababababababababababab", RecordType: "roadmap_node", RecordSchemaVersion: 1, RecordID: "continuity-github-hardening-20261115", RecordRevision: 1, RecordedAt: time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC), Authority: "caller_asserted", Index: index, Refs: roadmapNodeRefs(payload), Payload: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeRoadmapNode(encoded.Envelope, payload)
+	if err != nil || decoded.SourcePath != payload.SourcePath {
+		t.Fatalf("decoded node = %#v err=%v", decoded, err)
+	}
+	for _, rejected := range []string{"/abs/roadmap.md", "../escape.md", "./docs/roadmap.md"} {
+		payload.SourcePath = rejected
+		if _, err := decodeRoadmapNode(encoded.Envelope, payload); err == nil {
+			t.Fatalf("source path %q was admitted", rejected)
+		}
+	}
+}
+
 func TestSchemaObservationReplayKeepsAcceptedRoadmapAndRealConflicts(t *testing.T) {
 	ctx, db, project := operationalProject(t, "schema-replay")
 	lineage := "lineage:abababababababababababababababab"

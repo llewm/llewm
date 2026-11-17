@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -18,6 +17,7 @@ import (
 	"github.com/llewm/llewm/components/continuity/internal/activity"
 	"github.com/llewm/llewm/components/continuity/internal/attribution"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
+	"github.com/llewm/llewm/components/continuity/internal/projectpath"
 	"github.com/llewm/llewm/components/continuity/internal/release"
 	"github.com/llewm/llewm/components/continuity/internal/roadmap"
 	"github.com/llewm/llewm/components/continuity/internal/syncwork"
@@ -621,7 +621,7 @@ func decodeWorkNarrative(envelope Envelope, payload workNarrativePayload) (workn
 			return worknarrative.Record{}, fmt.Errorf("work narrative %s has an invalid anchor", envelope.RecordID)
 		}
 		if anchor.Kind == "file" || anchor.Kind == "region" {
-			if filepath.IsAbs(anchor.Target) || anchor.Target == ".." || strings.HasPrefix(anchor.Target, "../") || filepath.ToSlash(filepath.Clean(anchor.Target)) != anchor.Target || !portableHashPattern.MatchString(anchor.ContentSHA256) {
+			if !projectpath.Admitted(anchor.Target) || !portableHashPattern.MatchString(anchor.ContentSHA256) {
 				return worknarrative.Record{}, fmt.Errorf("work narrative %s has an invalid source anchor", envelope.RecordID)
 			}
 		} else if anchor.ContentSHA256 != "" && !portableHashPattern.MatchString(anchor.ContentSHA256) {

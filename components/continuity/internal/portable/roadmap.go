@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/llewm/llewm/components/continuity/internal/projectpath"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 	"github.com/llewm/llewm/components/continuity/internal/roadmap"
 )
@@ -586,7 +586,7 @@ func validRoadmapStrings(values []string) bool {
 }
 
 func validRoadmapPath(value string) bool {
-	return validRoadmapText(value, true) && value != "." && !filepath.IsAbs(value) && value != ".." && !strings.HasPrefix(value, "../") && filepath.ToSlash(filepath.Clean(value)) == value
+	return validRoadmapText(value, true) && value != "." && projectpath.Admitted(value)
 }
 
 func sortedRoadmapKeys[T any](values map[string]T) []string {

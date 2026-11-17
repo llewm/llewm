@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/llewm/llewm/components/continuity/internal/activity"
+	"github.com/llewm/llewm/components/continuity/internal/projectpath"
 	"github.com/llewm/llewm/components/continuity/internal/redact"
 )
 
@@ -63,8 +64,8 @@ func text(name, value string, required bool) (string, error) {
 }
 
 func relativePath(name, value string) (string, error) {
-	value = filepath.ToSlash(filepath.Clean(strings.TrimSpace(value)))
-	if value == "." || value == "" || filepath.IsAbs(value) || value == ".." || strings.HasPrefix(value, "../") {
+	value, ok := projectpath.Normalize(strings.TrimSpace(value))
+	if !ok {
 		return "", fmt.Errorf("%s must be a project-relative path", name)
 	}
 	return value, nil
