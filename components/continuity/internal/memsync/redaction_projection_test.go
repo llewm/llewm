@@ -3,7 +3,9 @@ package memsync
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -163,14 +165,92 @@ func TestFreshPeerSyncsAfterLocalRedactionReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for hash, body := range held {
-		spec, err := portable.DecodeMemoryEnvelope(body)
+	for hash, observation := range held {
+		spec, err := portable.DecodeMemoryEnvelope(observation.Bytes)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if spec.RecordType == "checkpoint" && spec.RecordID == "historical" && hash != source.Envelope.EnvelopeSHA256 {
 			t.Fatalf("a second version of the source identity was published: %s", hash)
 		}
+	}
+}
+
+func TestReviewRedactionClassifiesTrackedObservations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m := newMachine(t, "projection-classification", bareRemote(t))
+	at := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	encode := func(kind, id, authority, payload string, refs ...portable.Reference) portable.EncodedEnvelope {
+		t.Helper()
+		e, err := portable.EncodeEnvelope(portable.EnvelopeSpec{
+			LineageID: testLineage, RecordType: kind, RecordSchemaVersion: 1, RecordID: id,
+			RecordedAt: at, Authority: authority, Payload: json.RawMessage(payload), Refs: refs,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	link := func(id string) portable.EncodedEnvelope {
+		t.Helper()
+		return encode("work_narrative_supersession", id, "mixed", fmt.Sprintf(`{"successor_id":%q,"supersedes_id":"original"}`, id),
+			portable.Reference{Kind: "narrative", ID: id}, portable.Reference{Kind: "narrative", ID: "original"})
+	}
+	narrative := `{"title":"Narrative","trigger":"manual","claims":[{"kind":"note","text":"Observation","authority":"caller_asserted"}],"anchors":[],"creator":"engineer","operational_schema_version":1}`
+	repairableSpec := portable.EnvelopeSpec{
+		LineageID: testLineage, RecordType: "checkpoint", RecordSchemaVersion: 1, RecordID: "repairable",
+		RecordedAt: at, Authority: "caller_asserted",
+		Index:   json.RawMessage(`{"title":"Historical","status":"completed"}`),
+		Payload: json.RawMessage(`{"task":"Historical","status":"completed","summary":"https://fixture-user:fixture-password@example.test/history","next_action":"Done","operational_schema_version":1}`),
+	}
+	repairable, err := portable.EncodeEnvelope(repairableSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := encode("checkpoint", "unrepairable", "caller_asserted", `{"task":"Historical","status":"invalid"}`)
+	// Retired and future record types still have valid wire envelopes. The
+	// semantic encoder deliberately refuses to construct them.
+	retype := func(kind string) portable.EncodedEnvelope {
+		t.Helper()
+		original := string(broken.Bytes)
+		hashField := fmt.Sprintf(`"envelope_sha256":"%s",`, broken.Envelope.EnvelopeSHA256)
+		unsigned := strings.Replace(original, hashField, "", 1)
+		unsigned = strings.Replace(unsigned, `"record_type":"checkpoint"`, fmt.Sprintf(`"record_type":%q`, kind), 1)
+		signed := fmt.Sprintf(`"envelope_sha256":"%x",`, sha256.Sum256([]byte(unsigned)))
+		body := strings.Replace(unsigned, `"format":`, signed+`"format":`, 1)
+		e, err := portable.DecodeTransportEnvelope([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	invalidSuccessor := strings.Replace(narrative, `"trigger":"manual"`, `"trigger":"invalid"`, 1)
+	block, err := recordsync.EncodeBlock(testLineage, []portable.EncodedEnvelope{
+		retype("contract"), retype("future_record"), repairable, broken,
+		link("valid"), link("missing"), link("invalid"),
+		encode("work_narrative", "valid", "mixed", narrative),
+		encode("work_narrative", "invalid", "mixed", invalidSuccessor),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := m.syncer.repository(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commitBlocks(ctx, repo, testLineage, []recordsync.Block{block}, "fixture: mixed tracked observations", false); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.syncer.ReviewRedactionProjections(ctx, RedactionReviewRequest{All: true})
+	if err != nil || result.Applied || result.SkippedRetired != 1 ||
+		result.ValidSupersessions != 1 || result.InvalidSupersessions != 2 ||
+		result.Unsupported != 2 || result.Unrepairable != 1 ||
+		len(result.Candidates) != 1 || result.Candidates[0].SourceSHA256 != repairable.Envelope.EnvelopeSHA256 {
+		t.Fatalf("review counts: %+v %v", result, err)
+	}
+	if count := tableRows(t, m, "redaction_projection_reviews"); count != 0 {
+		t.Fatal("review preview wrote a review")
 	}
 }
 

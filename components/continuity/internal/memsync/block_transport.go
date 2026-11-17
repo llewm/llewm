@@ -115,19 +115,23 @@ func (s Syncer) trackedBlockObservations(ctx context.Context, repo git, lineage 
 	for _, hash := range hashes {
 		requested[hash] = true
 	}
-	bodies, err := s.readTrackedObservations(ctx, repo, lineage, func(hash string) bool { return requested[hash] })
+	observations, err := s.readTrackedObservations(ctx, repo, lineage, func(hash string) bool { return requested[hash] })
 	if err != nil {
 		return nil, err
 	}
-	if len(bodies) != len(requested) {
+	if len(observations) != len(requested) {
 		return nil, fmt.Errorf("all requested observations must already be tracked in this lineage")
+	}
+	bodies := make(map[string][]byte, len(observations))
+	for hash, observation := range observations {
+		bodies[hash] = observation.Bytes
 	}
 	return bodies, nil
 }
 
-// readTrackedObservations returns the exact bytes of every tracked observation
-// that keep selects, keyed by envelope hash.
-func (s Syncer) readTrackedObservations(ctx context.Context, repo git, lineage string, keep func(string) bool) (map[string][]byte, error) {
+// readTrackedObservations returns every selected wire-validated envelope and
+// its exact bytes, keyed by envelope hash.
+func (s Syncer) readTrackedObservations(ctx context.Context, repo git, lineage string, keep func(string) bool) (map[string]portable.EncodedEnvelope, error) {
 	// Recovery previews must not repair or populate the disposable SQL index.
 	// Validate committed bytes directly so inspecting a source remains read-only
 	// even when that index is absent, damaged, or stale.
@@ -137,15 +141,15 @@ func (s Syncer) readTrackedObservations(ctx context.Context, repo git, lineage s
 	if err != nil {
 		return nil, err
 	}
-	bodies := map[string][]byte{}
+	observations := map[string]portable.EncodedEnvelope{}
 	for _, block := range blocks {
 		for _, object := range block.Objects {
 			if keep(object.Envelope.EnvelopeSHA256) {
-				bodies[object.Envelope.EnvelopeSHA256] = append([]byte(nil), object.Bytes...)
+				observations[object.Envelope.EnvelopeSHA256] = object
 			}
 		}
 	}
-	return bodies, nil
+	return observations, nil
 }
 
 func (s Syncer) publishBlocks(ctx context.Context, repo git, lineage string, observation ...*gitObservationReceipt) ([]recordsync.Block, []recordsync.Block, error) {

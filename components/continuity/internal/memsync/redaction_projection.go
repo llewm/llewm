@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -80,15 +81,17 @@ type RedactionReviewCandidate struct {
 }
 
 // RedactionReviewResult lists candidates by hash and safe projected identity
-// only. Other records that fail alone are counted, never described, because
-// their content may hold a credential. Unsupported counts families projection
-// never rewrites, including records that decode only with their dependencies;
-// Unrepairable counts supported families a projection does not fix.
+// only. Other observations are counted without exposing their identity or
+// content. Unsupported includes unknown schemas and nonprojectable families
+// that fail admission. Unrepairable counts eligible records redaction cannot fix.
 type RedactionReviewResult struct {
-	Candidates   []RedactionReviewCandidate `json:"candidates"`
-	Unsupported  int                        `json:"unsupported"`
-	Unrepairable int                        `json:"unrepairable"`
-	Applied      bool                       `json:"applied"`
+	Candidates           []RedactionReviewCandidate `json:"candidates"`
+	Unsupported          int                        `json:"unsupported"`
+	Unrepairable         int                        `json:"unrepairable"`
+	SkippedRetired       int                        `json:"skipped_retired"`
+	ValidSupersessions   int                        `json:"valid_supersessions"`
+	InvalidSupersessions int                        `json:"invalid_supersessions"`
+	Applied              bool                       `json:"applied"`
 }
 
 // ReviewRedactionProjections records host-local reviews of tracked sources.
@@ -125,7 +128,11 @@ func (s Syncer) ReviewRedactionProjections(ctx context.Context, request Redactio
 	}
 	var bodies map[string][]byte
 	if request.All {
-		bodies, err = s.readTrackedObservations(ctx, repo, identity.LineageID, func(string) bool { return true })
+		var observations map[string]portable.EncodedEnvelope
+		observations, err = s.readTrackedObservations(ctx, repo, identity.LineageID, func(string) bool { return true })
+		if err == nil {
+			bodies = projectionSources(observations, &result)
+		}
 	} else {
 		bodies, err = s.trackedBlockObservations(ctx, repo, identity.LineageID, request.Sources...)
 	}
@@ -176,4 +183,36 @@ func (s Syncer) ReviewRedactionProjections(ctx context.Context, request Redactio
 	}
 	result.Applied = true
 	return result, nil
+}
+
+// projectionSources classifies records that need more context than a standalone
+// projection and returns the sources to inspect with the projection decoder.
+func projectionSources(observations map[string]portable.EncodedEnvelope, result *RedactionReviewResult) map[string][]byte {
+	successors := map[string][]portable.EncodedEnvelope{}
+	for _, observation := range observations {
+		if e := observation.Envelope; e.RecordType == "work_narrative" {
+			successors[e.RecordID] = append(successors[e.RecordID], observation)
+		}
+	}
+	sources := make(map[string][]byte, len(observations))
+	for hash, observation := range observations {
+		e := observation.Envelope
+		switch {
+		case portable.RetiredRecordType(e.RecordType):
+			result.SkippedRetired++
+		case !portable.SupportedEnvelope(e):
+			result.Unsupported++
+		case e.RecordType == "work_narrative_supersession":
+			if slices.ContainsFunc(successors[e.RecordID], func(successor portable.EncodedEnvelope) bool {
+				return portable.ValidNarrativeSupersession(observation, successor)
+			}) {
+				result.ValidSupersessions++
+			} else {
+				result.InvalidSupersessions++
+			}
+		default:
+			sources[hash] = observation.Bytes
+		}
+	}
+	return sources
 }

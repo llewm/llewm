@@ -746,11 +746,15 @@ llewm sync review-redaction --all --apply --reviewer NAME --reason "why the reda
 ```
 
 `--source ENVELOPE_SHA256` (repeatable) selects specific observations instead of
-`--all`. Without `--apply` nothing is written. Output lists only source and
-projected hashes and the safe projected identity. Other records that fail alone
-are counted as `unsupported` (families a projection never rewrites, including
-supersessions that decode only together with their successor) or `unrepairable`;
-they are never described.
+`--all`. Without `--apply` nothing is written. Candidates list source and
+projected hashes and the safe projected identity. The full scan counts retired
+records in `skipped_retired` and checks each supported narrative supersession
+with its tracked successor. `valid_supersessions` counts pairs that decode
+together. `invalid_supersessions` counts links without a matching valid
+successor. `unsupported` counts unknown schemas and other records that fail
+admission outside the projection families. `unrepairable` counts eligible
+records that projection cannot repair. These counters disclose no record
+identities or payloads.
 
 A review stores hashes, reviewer, reason and time in the device-local
 `redaction_projection_reviews` table, never source content, and is not synced:

@@ -27,6 +27,19 @@ var ErrSourceAdmissible = errors.New("projection source already passes current a
 // supersession, that only decodes together with its dependencies.
 var ErrProjectionUnsupported = errors.New("redaction projection does not support")
 
+// ValidNarrativeSupersession checks a pair of wire-validated records using the
+// importer's joint decoder. It does not resolve other import dependencies.
+func ValidNarrativeSupersession(link, successor EncodedEnvelope) bool {
+	a, b := link.Envelope, successor.Envelope
+	if a.RecordType != "work_narrative_supersession" || b.RecordType != "work_narrative" ||
+		a.RecordID != b.RecordID || a.LineageID != b.LineageID || a.RecordedAt != b.RecordedAt ||
+		!SupportedEnvelope(a) || !SupportedEnvelope(b) {
+		return false
+	}
+	_, err := decodeOperationalBundle(Bundle{Records: []EncodedEnvelope{link, successor}})
+	return err == nil
+}
+
 // PreviewRedactionProjection admits only the prose families with observed legacy
 // redaction failures. Identity, authority, timestamps and semantic references may
 // not change. Current ordinary decoding remains the final admission gate.
