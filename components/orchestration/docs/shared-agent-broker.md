@@ -208,3 +208,30 @@ system service policy and operational backup/restore require the selected host;
 templates alone do not qualify them. Local brokers remain usable during shared
 service outages. A future explicit bridge would need a durable outbox and origin
 provenance; direct shared connections do not claim those guarantees.
+
+## Named connection profiles and expiring credentials
+
+For a pairing guest, add `--expires-at RFC3339_TIMESTAMP` when issuing the
+guest credential with `shared-broker-member`. Choose a future timestamp.
+The broker checks expiry on each authenticated request and during waits.
+Re-enrolling the same engineer rotates the previous credential immediately.
+Dedicated and registry deployments both support expiring credentials.
+
+Use the host's authenticated `shared-broker-info` command with
+`--save-profile red.json` to create a new public connection file. It contains
+the HTTPS endpoint, project, stable broker authority ID and optional public CA
+certificates. Confirm the profile's provenance before using a credential with
+its endpoint. Give the guest this profile and transfer their own credential
+through a trusted channel. On the guest, import the credential to a private
+directory and name it alongside the profile, for example:
+
+```sh
+llewm-orchestrate credential-import --file received.token --token-file /private/pair/red.json.token
+llewm-orchestrate shared-broker-info --profile /private/pair/red.json
+```
+
+Place the verified red.json in that same directory before the identity check.
+Alternatively pass an explicit private `--token-file` path. The same
+`--profile` works with shared-broker-request, shared-broker-pull and
+shared-broker-mcp. Profiles check the authority before sending message content.
+A new tunnel URL requires an updated profile from the host.

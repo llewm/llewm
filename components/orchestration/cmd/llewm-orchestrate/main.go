@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/hex"
+
 	"encoding/json"
 	"errors"
 	"flag"
@@ -32,7 +32,7 @@ Operator commands (local coordinator database):
   broker-revoke --db PATH --id ENGINEER
   broker-serve --db PATH [--listen 127.0.0.1:9468]
   shared-broker-init --db PATH --project ID --machine HOST_LABEL
-  shared-broker-member --db PATH --id ENGINEER --permissions work --token-file PATH
+  shared-broker-member --db PATH --id ENGINEER --permissions work --token-file PATH [--expires-at RFC3339]
   shared-broker-revoke --db PATH --id ENGINEER
   shared-broker-serve (--db PATH | --projects REGISTRY.json) [--listen 127.0.0.1:9469] (--tls-cert PATH --tls-key PATH | --proxy-loopback)
   init   --db PATH
@@ -47,7 +47,10 @@ Engineer commands (authenticate with a private token file):
   broker-mcp --endpoint URL --token-file PATH (--session ID | --session-env VAR) --agent LABEL [--task ID]
   broker-hook --endpoint URL --token-file PATH --agent LABEL (--cursor-file PATH | --cursor-dir DIR) [--task ID]
               [--state active|ended] (reads session_id and hook_event_name from JSON stdin)
+  shared-broker-info --profile NAME.json [--token-file PATH]
   shared-broker-info --endpoint HTTPS_URL --project ID --token-file PATH [--ca-file PATH]
+  Add --save-profile NEW.json to shared-broker-info to export verified connection details.
+  Use --profile NAME.json with shared-broker-info/request/pull/mcp instead of endpoint, project and CA.
   shared-broker-request --endpoint HTTPS_URL --project ID --token-file PATH --file COMMAND.json [--ca-file PATH]
   shared-broker-pull --endpoint HTTPS_URL --project ID --token-file PATH --file QUERY.json [--ca-file PATH]
   shared-broker-mcp --endpoint HTTPS_URL --project ID --token-file PATH [--ca-file PATH]
@@ -103,6 +106,9 @@ func run(args []string, out, stderr io.Writer) error {
 	proxyLoopback := flags.Bool("proxy-loopback", false, "shared-broker-serve only: HTTP on literal loopback behind a TLS reverse proxy; forwarded headers grant no trust")
 	endpoint := flags.String("endpoint", "", "coordinator origin URL")
 	caFile := flags.String("ca-file", "", "optional public coordinator CA bundle; trust applies to this client only")
+	profile := flags.String("profile", "", "public shared broker connection profile")
+	saveProfile := flags.String("save-profile", "", "new public connection profile to export from shared-broker-info")
+	expiresAt := flags.String("expires-at", "", "shared credential expiry, RFC3339")
 	plan := flags.String("plan", "", "plan identifier")
 	history := flags.Bool("history", false, "show a page of the plan's mutation ledger")
 	after := flags.Int64("after", 0, "history cursor from next_after")
@@ -149,6 +155,34 @@ func run(args []string, out, stderr io.Writer) error {
 			return errors.New("CA file exceeds 1 MiB")
 		}
 	}
+	var authority string
+	if *profile != "" {
+		if !sharedBroker || (cmd != "broker-info" && cmd != "broker-request" && cmd != "broker-pull" && cmd != "broker-mcp") || *endpoint != "" || *project != "" || *caFile != "" {
+			return errors.New("--profile selects endpoint, project and CA for shared broker clients")
+		}
+		p, err := readBrokerProfile(*profile)
+		if err != nil {
+			return err
+		}
+		*endpoint, *project, authority, caPEM = p.Endpoint, p.Project, p.Authority, []byte(p.CACertificates)
+		if *tokenFile == "" {
+			*tokenFile = *profile + ".token"
+		}
+	}
+	if *saveProfile != "" && (!sharedBroker || cmd != "broker-info") {
+		return errors.New("--save-profile requires shared-broker-info")
+	}
+	var expiry time.Time
+	if *expiresAt != "" {
+		if !sharedBroker || cmd != "broker-member" {
+			return errors.New("--expires-at requires shared-broker-member")
+		}
+		var err error
+		expiry, err = time.Parse(time.RFC3339, *expiresAt)
+		if err != nil || expiry.IsZero() {
+			return errors.New("invalid --expires-at timestamp")
+		}
+	}
 	switch cmd {
 	case "credential-import":
 		return importCredential(*file, *tokenFile, out)
@@ -168,7 +202,7 @@ func run(args []string, out, stderr io.Writer) error {
 		if sharedBroker {
 			newServer = worker.NewSharedBrokerServer
 		}
-		server, err := newServer(worker.BrokerConfig{Endpoint: *endpoint, Token: token, SessionID: *session, TaskID: *task, Agent: *agent, Machine: *machine, Project: *project, CAPEM: caPEM})
+		server, err := newServer(worker.BrokerConfig{Endpoint: *endpoint, Token: token, SessionID: *session, TaskID: *task, Agent: *agent, Machine: *machine, Project: *project, Authority: authority, CAPEM: caPEM})
 		if err != nil {
 			return err
 		}
@@ -267,7 +301,7 @@ func run(args []string, out, stderr io.Writer) error {
 			if *permissions != "" {
 				perms = strings.Split(*permissions, ",")
 			}
-			token, err := store.Enroll(ctx, *id, perms)
+			token, err := store.EnrollUntil(ctx, *id, perms, expiry)
 			if err != nil {
 				return err
 			}
@@ -421,12 +455,22 @@ func run(args []string, out, stderr io.Writer) error {
 		}
 		var data []byte
 		if sharedBroker {
-			data, err = transport.SharedBrokerRequest(ctx, *endpoint, token, *project, method, path, body, caPEM)
+			data, err = transport.PinnedSharedBrokerRequest(ctx, *endpoint, token, *project, authority, method, path, body, caPEM)
 		} else {
 			data, err = transport.Request(ctx, *endpoint, token, method, path, body, caPEM)
 		}
 		if err != nil {
 			return err
+		}
+		if *saveProfile != "" {
+			var identity coordination.BrokerIdentity
+			if err := json.Unmarshal(data, &identity); err != nil {
+				return err
+			}
+			p := brokerProfile{Version: 1, Endpoint: *endpoint, Project: *project, Authority: identity.ID, CACertificates: string(caPEM)}
+			if err := writeBrokerProfile(*saveProfile, p); err != nil {
+				return err
+			}
 		}
 		_, err = out.Write(data)
 		return err
@@ -468,10 +512,7 @@ func readPrivateToken(path string) (string, error) {
 
 func parseToken(b []byte) (string, error) {
 	token := strings.TrimSpace(string(b))
-	if len(b) > 256 || len(token) != 71 || !strings.HasPrefix(token, "lworch_") {
-		return "", errors.New("invalid coordinator credential file")
-	}
-	if _, err := hex.DecodeString(token[7:]); err != nil {
+	if _, err := coordination.CredentialExpiry(token); len(b) > 256 || err != nil {
 		return "", errors.New("invalid coordinator credential file")
 	}
 	return token, nil

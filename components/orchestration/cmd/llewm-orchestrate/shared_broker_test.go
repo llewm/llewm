@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
@@ -112,5 +113,53 @@ func TestSharedBrokerCLI(t *testing.T) {
 	}
 	if _, err := invoke(append([]string{"shared-broker-info"}, client...)...); err == nil {
 		t.Fatal("revocation ignored")
+	}
+}
+
+func TestSharedBrokerProfiles(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "private", "store.db")
+	s, err := coordination.OpenSharedBroker(db, true, "red", "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	server := httptest.NewTLSServer(transport.BrokerHandler(s))
+	defer server.Close()
+	profile := filepath.Join(dir, "red.json")
+	token := profile + ".token"
+	var out bytes.Buffer
+	if err := run([]string{"shared-broker-member", "--db", db, "--id", "guest", "--permissions", "work", "--expires-at", time.Now().Add(time.Hour).UTC().Format(time.RFC3339), "--token-file", token}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	ca := filepath.Join(dir, "cert.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"shared-broker-info", "--endpoint", server.URL, "--project", "red", "--ca-file", ca, "--token-file", token, "--save-profile", profile}
+	if err := run(args, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(args, &out, &out); err == nil {
+		t.Fatal("profile overwritten")
+	}
+	if err := run([]string{"shared-broker-info", "--profile", profile}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	p, err := readBrokerProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Authority = strings.Repeat("0", 48)
+	wrong := filepath.Join(dir, "wrong.json")
+	if err := writeBrokerProfile(wrong, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"shared-broker-info", "--profile", wrong, "--token-file", token}, &out, &out); err == nil {
+		t.Fatal("accepted replacement authority")
+	}
+	raw, err := os.ReadFile(profile)
+	if err != nil || bytes.Contains(raw, []byte("lworch_")) || bytes.Contains(raw, []byte(dir)) {
+		t.Fatal("profile exposed private data")
 	}
 }

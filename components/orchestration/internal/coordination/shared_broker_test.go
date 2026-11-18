@@ -144,3 +144,23 @@ func TestProjectWaitLimitsAndExpiry(t *testing.T) {
 		t.Fatal("expired membership", err)
 	}
 }
+
+func TestSharedCredentialExpiry(t *testing.T) {
+	s, err := OpenSharedBroker(filepath.Join(t.TempDir(), "private", "db"), true, "red", "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	// Issue against an earlier operator clock; verify against the current server clock.
+	s.now = func() time.Time { return time.Unix(100, 0) }
+	token, err := s.EnrollUntil(ctx, "guest", []string{"work"}, time.Unix(200, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []string{token, strings.Split(token, ".")[0], strings.Split(token, ".")[0] + ".4102444800"} {
+		if _, err := s.BrokerInfo(ctx, input); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("expired or altered token accepted: %v", err)
+		}
+	}
+}

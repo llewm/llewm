@@ -90,6 +90,10 @@ func sharedDestination(endpoint string) (origin, project string, err error) {
 // session or message content. TLS and the explicitly configured origin remain
 // the server authentication boundary; labels alone do not establish trust.
 func SharedBrokerRequest(ctx context.Context, endpoint, token, project, method, path string, body, caPEM []byte) ([]byte, error) {
+	return PinnedSharedBrokerRequest(ctx, endpoint, token, project, "", method, path, body, caPEM)
+}
+
+func PinnedSharedBrokerRequest(ctx context.Context, endpoint, token, project, authority, method, path string, body, caPEM []byte) ([]byte, error) {
 	origin, routedProject, err := sharedDestination(endpoint)
 	if err != nil {
 		return nil, err
@@ -117,6 +121,9 @@ func SharedBrokerRequest(ctx context.Context, endpoint, token, project, method, 
 	}
 	if identity.SchemaVersion != 1 || identity.Scope != "shared" || identity.Project != project || identity.ID == "" {
 		return nil, errors.New("shared broker scope or project mismatch")
+	}
+	if authority != "" && identity.ID != authority {
+		return nil, errors.New("shared broker authority differs from profile")
 	}
 	if method == http.MethodGet && path == "/v1/broker" {
 		return data, nil

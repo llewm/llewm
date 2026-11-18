@@ -19,6 +19,7 @@ type BrokerConfig struct {
 	Agent     string
 	Machine   string
 	Project   string
+	Authority string
 	CAPEM     []byte
 }
 
@@ -97,7 +98,7 @@ func (a *brokerAdapter) request(ctx context.Context, method, path string, input,
 			return err
 		}
 	}
-	data, err := transport.SharedBrokerRequest(ctx, a.config.Endpoint, a.config.Token, a.config.Project, method, path, body, a.config.CAPEM)
+	data, err := transport.PinnedSharedBrokerRequest(ctx, a.config.Endpoint, a.config.Token, a.config.Project, a.config.Authority, method, path, body, a.config.CAPEM)
 	return decodeResponse(data, err, a.config.Token, output)
 }
 func (a *brokerAdapter) info(ctx context.Context, _ *mcp.CallToolRequest, _ InfoInput) (*mcp.CallToolResult, coordination.BrokerIdentity, error) {

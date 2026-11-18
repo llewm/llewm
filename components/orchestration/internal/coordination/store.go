@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -153,6 +154,15 @@ func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeT
 // Enroll is an operator-only local operation, never exposed by the HTTP API.
 // Re-enrollment rotates the credential. An empty permission list is read-only.
 func (s *Store) Enroll(ctx context.Context, id string, permissions []string) (string, error) {
+	return s.EnrollUntil(ctx, id, permissions, time.Time{})
+}
+
+// EnrollUntil binds the optional expiration to the complete hashed token.
+// Older brokers reject the longer token; stripping the suffix changes its hash.
+func (s *Store) EnrollUntil(ctx context.Context, id string, permissions []string, expiry time.Time) (string, error) {
+	if !expiry.IsZero() && (s.brokerScope != "shared" || expiry.Unix() <= s.now().Unix()) {
+		return "", errors.New("expiry requires a shared credential and a future timestamp")
+	}
 	if !validID(id) || cleanString(id) != id {
 		return "", errors.New("invalid member identifier")
 	}
@@ -163,6 +173,9 @@ func (s *Store) Enroll(ctx context.Context, id string, permissions []string) (st
 	}
 	encoded, _ := json.Marshal(permissions)
 	token := "lworch_" + hex.EncodeToString(randomBytes(32))
+	if !expiry.IsZero() {
+		token += "." + strconv.FormatInt(expiry.Unix(), 10)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -206,13 +219,33 @@ type queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// CredentialExpiry validates a serialized token without authenticating its holder.
+func CredentialExpiry(token string) (time.Time, error) {
+	base, suffix, expiring := strings.Cut(token, ".")
+	if len(base) != 71 || !strings.HasPrefix(base, "lworch_") {
+		return time.Time{}, ErrForbidden
+	}
+	if _, err := hex.DecodeString(base[7:]); err != nil {
+		return time.Time{}, ErrForbidden
+	}
+	if !expiring {
+		return time.Time{}, nil
+	}
+	unix, err := strconv.ParseInt(suffix, 10, 64)
+	if err != nil || unix <= 0 || strconv.FormatInt(unix, 10) != suffix {
+		return time.Time{}, ErrForbidden
+	}
+	return time.Unix(unix, 0), nil
+}
+
 func authenticate(ctx context.Context, q queryer, token string) (Member, error) {
 	var m Member
 	var permissions string
-	if len(token) != 71 || !strings.HasPrefix(token, "lworch_") {
+	expiry, err := CredentialExpiry(token)
+	if err != nil || (!expiry.IsZero() && !time.Now().Before(expiry)) {
 		return m, ErrForbidden
 	}
-	err := q.QueryRowContext(ctx, "SELECT id,permissions FROM members WHERE token_hash=?", digest([]byte(token))).Scan(&m.ID, &permissions)
+	err = q.QueryRowContext(ctx, "SELECT id,permissions FROM members WHERE token_hash=?", digest([]byte(token))).Scan(&m.ID, &permissions)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrForbidden
 	}
