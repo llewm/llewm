@@ -6,6 +6,57 @@ credentials for separate trust groups. A build does not deploy anything. Select
 the target host, network exposure, TLS certificate and backup destination before
 running deployment commands.
 
+## Pair two developers through a temporary HTTPS tunnel
+
+Both developers need `llewm-orchestrate`. The host also needs `cloudflared`
+for this example. Choose a tunnel operator you trust with the broker's bearer
+credentials and messages, since it terminates HTTPS. Use a fresh project for
+the pairing session. On the host, in a POSIX shell:
+
+```sh
+umask 077
+state=$(mktemp -d "$HOME/llewm-pairing.XXXXXXXX")
+llewm-orchestrate shared-broker-init --db "$state/messages.db" --project pairing --machine dev-host
+for member in host guest; do
+  llewm-orchestrate shared-broker-member --db "$state/messages.db" --id "$member" \
+    --permissions work --token-file "$state/$member.token"
+done
+llewm-orchestrate shared-broker-serve --db "$state/messages.db" \
+  --listen 127.0.0.1:19469 --proxy-loopback
+```
+
+In another terminal start the tunnel:
+
+```sh
+cloudflared tunnel --no-autoupdate --url http://127.0.0.1:19469
+```
+
+Give the guest the printed HTTPS origin and project ID. Confirm the origin
+with the host before using a credential. Deliver only `guest.token` to the
+intended guest over a trusted channel, such as an existing SSH connection.
+Keep both token values out of chat, URLs and shell arguments. The guest can
+import the received file into private storage with `credential-import`.
+On each machine, set `endpoint` to the confirmed origin and `token_file` to
+that developer's private credential path, then run:
+
+```sh
+llewm-orchestrate shared-broker-info --endpoint "$endpoint" --project pairing --token-file "$token_file"
+```
+
+Compare the returned broker IDs. Use the same endpoint, project and token file
+for the [client setup and message exchange](../../docs/shared-agent-broker.md#client-configuration-and-protocol).
+To qualify the session, register one session per machine, send a targeted
+message, retry its exact request and compare receipts. Pull from a saved
+cursor in a fresh client process, then send an acknowledgment and a reply.
+
+At teardown, revoke the guest with `shared-broker-revoke --db PATH --id guest`
+using the host's database path. Repeat the guest identity check to confirm
+rejection. Stop the tunnel and broker with Ctrl-C in their respective
+terminals. Remove disposable credentials and, when the messages are no longer
+needed, the private trial directory. A new Quick Tunnel gets a new hostname.
+Resuming against the original database requires checking the destination and
+matching the saved broker ID. [Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
+
 ## Reverse proxy contract
 
 Clients always use HTTPS and continue to verify the expected project. A broker
