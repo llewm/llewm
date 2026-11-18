@@ -5,18 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 )
 
 // BrokerHandler exposes messages for the opened broker scope, never team claims.
 func BrokerHandler(store *coordination.Store) http.Handler {
+	return brokerRoutes(store, "/v1/broker")
+}
+
+func brokerRoutes(store *coordination.Store, base string) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/broker", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
 		out, err := store.BrokerInfo(r.Context(), bearerToken(r))
 		writeResponse(w, out, err)
 	})
-	mux.HandleFunc("POST /v1/broker/commands", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+base+"/commands", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, coordination.MaxCommandBytes)
 		defer r.Body.Close()
 		var c coordination.BrokerCommand
@@ -27,7 +33,7 @@ func BrokerHandler(store *coordination.Store) http.Handler {
 		out, err := store.BrokerExecute(r.Context(), bearerToken(r), c)
 		writeResponse(w, out, err)
 	})
-	mux.HandleFunc("POST /v1/broker/pull", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+base+"/pull", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		defer r.Body.Close()
 		var q coordination.BrokerQuery
@@ -56,21 +62,36 @@ func ValidateLocalEndpoint(endpoint string) error {
 // Shared clients always require TLS, including loopback connections to a proxy.
 // A proxy's server-side loopback upstream is configured independently.
 func ValidateSharedBrokerEndpoint(endpoint string) error {
-	u, err := coordinatorURL(endpoint)
-	if err != nil {
-		return err
+	_, _, err := sharedDestination(endpoint)
+	return err
+}
+
+// Accept either a dedicated HTTPS origin or the canonical address of one registered project.
+func sharedDestination(endpoint string) (origin, project string, err error) {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.RawPath != "" || u.ForceQuery || strings.ContainsAny(endpoint, "?#") {
+		return "", "", errors.New("shared broker requires an HTTPS origin or project URL")
 	}
-	if u.Scheme != "https" {
-		return errors.New("shared broker requires HTTPS")
+	if u.Path != "" && u.Path != "/" {
+		var ok bool
+		project, ok = strings.CutPrefix(u.Path, "/v1/projects/")
+		if !ok || !coordination.ValidBrokerID(project) {
+			return "", "", errors.New("invalid shared project URL")
+		}
 	}
-	return nil
+	u.Path = ""
+	if _, err = coordinatorURL(u.String()); err != nil {
+		return "", "", err
+	}
+	return u.String(), project, nil
 }
 
 // SharedBrokerRequest checks the destination's scope and project before sending
 // session or message content. TLS and the explicitly configured origin remain
 // the server authentication boundary; labels alone do not establish trust.
 func SharedBrokerRequest(ctx context.Context, endpoint, token, project, method, path string, body, caPEM []byte) ([]byte, error) {
-	if err := ValidateSharedBrokerEndpoint(endpoint); err != nil {
+	origin, routedProject, err := sharedDestination(endpoint)
+	if err != nil {
 		return nil, err
 	}
 	if project == "" {
@@ -79,7 +100,14 @@ func SharedBrokerRequest(ctx context.Context, endpoint, token, project, method, 
 	if path != "/v1/broker" && path != "/v1/broker/commands" && path != "/v1/broker/pull" {
 		return nil, errors.New("invalid shared broker API path")
 	}
-	data, err := Request(ctx, endpoint, token, http.MethodGet, "/v1/broker", nil, caPEM)
+	base := "/v1/broker"
+	if routedProject != "" {
+		if routedProject != project {
+			return nil, errors.New("endpoint and expected project differ")
+		}
+		base = "/v1/projects/" + project
+	}
+	data, err := Request(ctx, origin, token, http.MethodGet, base, nil, caPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -93,5 +121,5 @@ func SharedBrokerRequest(ctx context.Context, endpoint, token, project, method, 
 	if method == http.MethodGet && path == "/v1/broker" {
 		return data, nil
 	}
-	return Request(ctx, endpoint, token, method, path, body, caPEM)
+	return Request(ctx, origin, token, method, base+strings.TrimPrefix(path, "/v1/broker"), body, caPEM)
 }

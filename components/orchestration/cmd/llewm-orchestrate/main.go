@@ -34,7 +34,7 @@ Operator commands (local coordinator database):
   shared-broker-init --db PATH --project ID --machine HOST_LABEL
   shared-broker-member --db PATH --id ENGINEER --permissions work --token-file PATH
   shared-broker-revoke --db PATH --id ENGINEER
-  shared-broker-serve --db PATH [--listen 127.0.0.1:9469] (--tls-cert PATH --tls-key PATH | --proxy-loopback)
+  shared-broker-serve (--db PATH | --projects REGISTRY.json) [--listen 127.0.0.1:9469] (--tls-cert PATH --tls-key PATH | --proxy-loopback)
   init   --db PATH
   member --db PATH --id ENGINEER --permissions plan,accept,assign,review,work --token-file PATH
   revoke --db PATH --id ENGINEER
@@ -93,6 +93,7 @@ func run(args []string, out, stderr io.Writer) error {
 	flags := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	dbPath := flags.String("db", "", "private orchestration database path")
+	registry := flags.String("projects", "", "shared broker project registry JSON")
 	id := flags.String("id", "", "engineer identifier")
 	permissions := flags.String("permissions", "", "comma-separated permissions; empty means read-only")
 	tokenFile := flags.String("token-file", "", "private coordinator credential file")
@@ -128,6 +129,9 @@ func run(args []string, out, stderr io.Writer) error {
 	}
 	if *proxyLoopback && (!sharedBroker || cmd != "broker-serve") {
 		return errors.New("--proxy-loopback is only supported by shared-broker-serve")
+	}
+	if *registry != "" && (!sharedBroker || cmd != "broker-serve" || *dbPath != "") {
+		return errors.New("--projects applies only to shared-broker-serve and excludes --db")
 	}
 	ctx := context.Background()
 	var caPEM []byte
@@ -212,13 +216,21 @@ func run(args []string, out, stderr io.Writer) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(command)
 	case "init", "member", "revoke", "serve", "broker-init", "broker-member", "broker-revoke", "broker-serve":
-		if *dbPath == "" {
+		if *dbPath == "" && *registry == "" {
 			return errors.New("--db is required")
 		}
 		var store *coordination.Store
 		var err error
 		localBroker := strings.HasPrefix(cmd, "broker-")
-		if sharedBroker {
+		var projects http.Handler
+		if *registry != "" {
+			var closeProjects func()
+			projects, closeProjects, err = transport.OpenProjects(*registry)
+			if err == nil {
+				defer closeProjects()
+			}
+			localBroker = false
+		} else if sharedBroker {
 			localBroker = false
 			store, err = coordination.OpenSharedBroker(*dbPath, cmd == "broker-init", *project, *machine)
 		} else if localBroker {
@@ -229,7 +241,9 @@ func run(args []string, out, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		if store != nil {
+			defer store.Close()
+		}
 		switch cmd {
 		case "init", "broker-init":
 			fmt.Fprintln(out, "Initialized private orchestration database.")
@@ -310,9 +324,13 @@ func run(args []string, out, stderr io.Writer) error {
 			if *cert == "" && !transport.Loopback(*listen) {
 				return errors.New("non-loopback listeners require TLS")
 			}
-			handler := transport.Handler(store)
-			if localBroker || sharedBroker {
-				handler = transport.BrokerHandler(store)
+			handler := projects
+			if handler == nil {
+				if localBroker || sharedBroker {
+					handler = transport.BrokerHandler(store)
+				} else {
+					handler = transport.Handler(store)
+				}
 			}
 			server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8192}
 			if sharedBroker {

@@ -179,6 +179,12 @@ func writeResponse(w http.ResponseWriter, value any, err error) {
 		if errors.Is(err, coordination.ErrConflict) {
 			status = http.StatusConflict
 		}
+		if errors.Is(err, coordination.ErrProjectFull) {
+			status = http.StatusInsufficientStorage
+		}
+		if errors.Is(err, coordination.ErrProjectBusy) {
+			status = http.StatusTooManyRequests
+		}
 		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

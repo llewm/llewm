@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSharedBrokerRecoveryAttributionAndIsolation(t *testing.T) {
@@ -95,5 +96,51 @@ func TestSharedBrokerRecoveryAttributionAndIsolation(t *testing.T) {
 	if other, err := OpenSharedBroker(localPath, false, "", ""); err == nil {
 		other.Close()
 		t.Fatal("local store exposed as shared")
+	}
+}
+
+func TestProjectWaitLimitsAndExpiry(t *testing.T) {
+	s, err := OpenSharedBroker(filepath.Join(t.TempDir(), "private", "broker.db"), true, "demo", "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	expiry := now.Add(time.Minute)
+	if err := s.ConfigureProject([]ProjectMember{{ID: "alice", ExpiresAt: &expiry}}, 10, 1); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.Enroll(ctx, "alice", []string{"work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := s.BrokerExecute(ctx, token, BrokerCommand{SchemaVersion: 1, RequestID: "start", Action: "state", SessionID: "session", State: "active", TTLSeconds: 60, Machine: "client", Agent: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := BrokerQuery{SessionID: "session", After: receipt.Sequence, BrokerID: receipt.BrokerID, WaitSeconds: 10}
+	waiting, cancel := context.WithCancel(ctx)
+	defer cancel()
+	exited := make(chan error, 1)
+	go func() { _, err := s.BrokerPull(waiting, token, query); exited <- err }()
+	deadline := time.Now().Add(time.Second * 3)
+	for len(s.waitSlots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(s.waitSlots) == 0 {
+		t.Fatal("wait never started")
+	}
+	if _, err := s.BrokerPull(ctx, token, query); !errors.Is(err, ErrProjectBusy) {
+		t.Fatalf("expected wait limit, got %v", err)
+	}
+	cancel()
+	if err := <-exited; !errors.Is(err, context.Canceled) || len(s.waitSlots) != 0 {
+		t.Fatal("wait slot not released", err)
+	}
+	now = expiry
+	if _, err := s.BrokerInfo(ctx, token); !errors.Is(err, ErrForbidden) {
+		t.Fatal("expired membership", err)
 	}
 }

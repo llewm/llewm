@@ -1,8 +1,8 @@
 # Shared broker deployment
 
-These scripts build and deploy one project messaging authority. They do not add
-multi-team authorization inside a broker. Use separate deployments, databases and
-credentials for separate trust groups. A build does not deploy anything. Select
+The provisioning scripts initialize one project per deployment. For several
+projects on one listener, use the [shared project registry](../../docs/shared-agent-broker.md#multiple-projects-on-one-service)
+with separate databases and credentials. A build does not deploy anything. Select
 the target host, network exposure, TLS certificate and backup destination before
 running deployment commands.
 
@@ -69,7 +69,8 @@ HTTPS requirements are unchanged.
 nginx forwards bearer credentials; the broker authenticates every request. It
 never trusts identity, scheme or authorization claims in forwarded headers.
 Proxy configuration does not create a new login mechanism. The nginx templates
-expose only `/v1/broker`, `/v1/broker/commands` and `/v1/broker/pull`, preserve error
+expose identity, commands and pull under `/v1/broker` and
+`/v1/projects/PROJECT`, preserve error
 responses, disable proxy retries/cache and allow the protocol's 20-second waits.
 They use a dedicated origin, not a URL subpath. Certificate issuance/renewal is
 managed by the operator; HTTP redirects and an ACME responder are not installed.

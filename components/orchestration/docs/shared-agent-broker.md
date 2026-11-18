@@ -49,6 +49,42 @@ patterns are redacted before persistence; arbitrary secrets cannot be recognized
 reliably. The service has bounded records and reads but no automatic retention or
 rate limiting; select network access and storage monitoring for the actual host.
 
+## Multiple projects on one service
+
+Initialize a private database per project and enroll each developer in the
+appropriate databases with the existing local operator commands. List the
+projects and permitted engineer IDs in an operator-controlled registry:
+
+```json
+{
+  "version": 1,
+  "projects": [
+    {"id":"red","database":"red/messages.db","members":[{"id":"alice"}]},
+    {"id":"blue","database":"blue/messages.db","members":[{"id":"alice"},{"id":"bob","expires_at":"2027-01-01T00:00:00Z"}]}
+  ]
+}
+```
+
+Database paths resolve relative to the registry. Start
+`shared-broker-serve --projects projects.json` with the same TLS or
+loopback proxy flags as a dedicated server. Configuration takes effect at
+startup. An invalid entry prevents the entire listener from starting.
+Each database must already contain the matching project identity. Keep the
+registry writable only by operators. A listed member needs a credential
+issued by that project's database. Revocation takes effect immediately;
+expiring memberships use the server clock and are checked during long polls.
+
+For CLI and MCP clients set the endpoint to the full address, for example
+`https://broker.example.org/v1/projects/red`, and set `--project red`.
+The bare HTTPS origin remains the client address for a dedicated database.
+Projects have independent credentials, cursors, wait slots and event budgets.
+Per-project `max_waits` defaults to 32 simultaneous waiting polls (maximum
+1024); excess waits return HTTP 429. `max_events` defaults to 100000 durable
+events. At capacity new writes return HTTP 507; reads and exact retries
+remain available. Raise the limit in the registry and restart after checking
+disk capacity. This counts events; size the underlying volume for SQLite
+indexes, journal files and operator activity as well.
+
 ## Host configuration templates
 
 [The deployment guide](../deploy/shared-broker/README.md) provides a static binary

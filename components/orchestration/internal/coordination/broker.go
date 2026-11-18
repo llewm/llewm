@@ -61,7 +61,11 @@ func openBroker(path string, create bool, project, machine, scope string) (*Stor
 		_, err = s.db.Exec("INSERT INTO broker VALUES(?,?,?)", randomID(), project, machine)
 	}
 	if err == nil {
-		_, err = s.brokerIdentity(context.Background())
+		var identity BrokerIdentity
+		identity, err = s.brokerIdentity(context.Background())
+		if err == nil && !create && project != "" && project != identity.Project {
+			err = errors.New("configured project differs from database project")
+		}
 	}
 	if err != nil {
 		s.Close()
@@ -75,7 +79,7 @@ func (s *Store) brokerIdentity(ctx context.Context) (BrokerIdentity, error) {
 	return b, err
 }
 func (s *Store) BrokerInfo(ctx context.Context, token string) (BrokerIdentity, error) {
-	if _, err := authenticate(ctx, s.db, token); err != nil {
+	if _, err := s.brokerMember(ctx, s.db, token); err != nil {
 		return BrokerIdentity{}, err
 	}
 	return s.brokerIdentity(ctx)
@@ -258,7 +262,7 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 		return empty, err
 	}
 	defer tx.Rollback()
-	m, err := authenticate(ctx, tx, token)
+	m, err := s.brokerMember(ctx, tx, token)
 	if err != nil {
 		return empty, err
 	}
@@ -277,6 +281,15 @@ func (s *Store) BrokerExecute(ctx context.Context, token string, c BrokerCommand
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return empty, err
+	}
+	if s.maxEvents > 0 {
+		var high int64
+		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence),0) FROM messages").Scan(&high); err != nil {
+			return empty, err
+		}
+		if high >= s.maxEvents {
+			return empty, ErrProjectFull
+		}
 	}
 	previous, err := loadSession(ctx, tx, c.SessionID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
@@ -386,6 +399,8 @@ func (s *Store) BrokerPull(ctx context.Context, token string, q BrokerQuery) (Br
 			return BrokerFeed{}, errors.New("invalid query identifier")
 		}
 	}
+	// Acquire a wait slot only after the caller has authenticated and a wait is needed.
+	waiting := false
 	until := time.Now().Add(time.Duration(q.WaitSeconds) * time.Second)
 	for {
 		out, err := s.brokerSnapshot(ctx, token, q)
@@ -421,6 +436,15 @@ func (s *Store) BrokerPull(ctx context.Context, token string, q BrokerQuery) (Br
 		// Advance only across events excluded by this exact query.
 		q.After = out.NextAfter
 		q.BrokerID = out.Broker.ID
+		if s.waitSlots != nil && !waiting {
+			select {
+			case s.waitSlots <- struct{}{}:
+				waiting = true
+				defer func() { <-s.waitSlots }()
+			default:
+				return BrokerFeed{}, ErrProjectBusy
+			}
+		}
 		timer := time.NewTimer(min(200*time.Millisecond, time.Until(until)))
 		select {
 		case <-ctx.Done():
@@ -442,7 +466,7 @@ func (s *Store) brokerSnapshot(ctx context.Context, token string, q BrokerQuery)
 		return out, err
 	}
 	defer tx.Rollback()
-	m, err := authenticate(ctx, tx, token)
+	m, err := s.brokerMember(ctx, tx, token)
 	if err != nil {
 		return out, err
 	}
