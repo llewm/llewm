@@ -147,7 +147,7 @@ rollouts; the example's `stable-alpine` tag is a configurable starting point.
 ## Proxmox: unprivileged LXC
 
 Use a fresh Debian system-container template already downloaded on the selected
-Proxmox node. This path runs the static broker and nginx natively: no Docker,
+Proxmox node. This path runs the static broker natively with direct TLS or guest nginx: no Docker,
 nesting or privileged container is requested. Copy/edit `proxmox/lxc.env.example`
 outside the bundle, selecting a free CTID, template volume ID, storage, network,
 hostname, project and TLS directory. Configuration is reviewed shell code.
@@ -168,10 +168,30 @@ config=/absolute/path/to/lxc.env
 "$bundle/deploy/proxmox/deploy.sh" "$config" status --apply
 ```
 
+Select `BROKER_TLS_MODE=direct` in the node's config for a TCP port forward
+straight to the guest. The broker terminates TLS on guest TCP 9469 using the
+full chain and key from `TLS_DIR`. For a matching external port, the URL is
+`https://YOUR_DNS_NAME:9469`. Reserve a stable guest address, allow 9469
+through the router and guest/PVE firewall, and provide a certificate valid for
+the external DNS name. Allow only the service account's group to read the
+guest key. After replacing the certificate/key, preserve ownership and modes
+and restart the broker to load them. Direct mode starts only the broker.
+
+Later, a reverse proxy on another host can serve a second hostname and use
+verified HTTPS to the same guest IP and port. Use the remote upstream example,
+set the upstream TLS name to the direct certificate name, and configure the
+proxy's front-end certificate for the second hostname. Keep the original
+database and compare the broker ID across both origins. Export a new profile
+for the proxy origin. A DNS record alone does not configure TLS or routing.
+
+The optional third enrollment argument is an RFC3339 expiration, for example
+`enroll windows /private/windows.token "$expires_at" --apply`. Use separate
+credentials for each platform. [Cross-platform qualification](qualification.md)
+
 Apply runs as root on the selected node. Existing CTIDs are never destroyed or
 replaced. Installation verifies the bundle and requires a running, unprivileged
-guest with the configured hostname and no prior broker binary/database. It
-installs nginx packages, a dedicated service account, private state/TLS files,
+guest with the configured hostname and no prior broker binary/database. In the default
+`BROKER_TLS_MODE=nginx` mode it installs nginx packages, a dedicated service account, private state/TLS files,
 the broker systemd unit and nginx site, initializes the database, and starts both
 services. nginx is masked during package installation so its default HTTP site
 is not briefly exposed. The guest needs package-repository access. No passwords,
@@ -191,7 +211,7 @@ Use `shared-broker-info` with the external HTTPS origin, expected project, token
 file and public CA as needed. Register two clients and test targeted messages,
 reply/ack, cursor continuation and a bounded wait. Verify missing/revoked tokens
 and forged forwarded identity headers cannot authenticate. Check restart/reboot
-and confirm the backend port is not reachable from another host.
+and confirm each listener is reachable only from the networks selected for its mode.
 
 Before an image/binary update or restore, stop all broker/database writers and
 make a protected backup of the complete state directory/volume, its compatible

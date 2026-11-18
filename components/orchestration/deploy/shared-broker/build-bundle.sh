@@ -14,11 +14,11 @@ out=$(cd -- "$out" && pwd)
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GOWORK=off go build -trimpath -buildvcs=true -o "$out/llewm-orchestrate" ./cmd/llewm-orchestrate
 )
 # Explicit public asset list: never copy operator .env files, TLS keys or tokens.
-for relative in build-bundle.sh README.md client.mcp.json.example \
+for relative in build-bundle.sh README.md qualification.md client.mcp.json.example \
   llewm-shared-broker.service shared-broker.env.example \
   docker/Dockerfile docker/compose.yaml docker/deploy.sh docker/docker.env.example docker/smoke-test.py \
   nginx/docker.conf nginx/native.conf nginx/proxy-options.conf nginx/remote-upstream.conf.example \
-  proxmox/deploy.sh proxmox/lxc.env.example proxmox/llewm-shared-broker.service; do
+  proxmox/deploy.sh proxmox/lxc.env.example proxmox/llewm-shared-broker.service proxmox/llewm-shared-broker-direct.service; do
   install -D -m 0644 -- "$here/$relative" "$out/deploy/$relative"
 done
 find "$out/deploy" -type d -exec chmod 0755 {} +

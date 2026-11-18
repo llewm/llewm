@@ -11,6 +11,13 @@ source "$config" # Reviewed local shell configuration; never accept remote input
 : "${CTID:?}" "${CT_HOSTNAME:?}" "${PROJECT_ID:?}" "${MACHINE_LABEL:?}"
 [[ "$CTID" =~ ^[1-9][0-9]{2,8}$ ]] || { echo 'Invalid CTID' >&2; exit 2; }
 [[ "$CT_HOSTNAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || { echo 'Invalid hostname' >&2; exit 2; }
+mode=${BROKER_TLS_MODE:-nginx}
+services=(llewm-shared-broker.service)
+case "$mode" in
+  direct) unit=llewm-shared-broker-direct.service ;;
+  nginx) unit=llewm-shared-broker.service; services+=(nginx.service) ;;
+  *) echo 'BROKER_TLS_MODE must be direct or nginx' >&2; exit 2 ;;
+esac
 if (( apply )); then
   (( EUID == 0 )) || { echo 'Run --apply as root on the selected Proxmox node' >&2; exit 2; }
   command -v pct >/dev/null
@@ -47,45 +54,57 @@ case "$action" in
       pct exec "$CTID" -- test ! -e /opt/llewm/bin/llewm-orchestrate || { echo 'Existing install: back up and use a reviewed upgrade procedure' >&2; exit 2; }
       pct exec "$CTID" -- test ! -e /var/lib/llewm-shared-broker/messages.db || { echo 'Existing database; refusing initial install' >&2; exit 2; }
     fi
-    # Do not expose nginx's default HTTP site during package installation.
-    run pct exec "$CTID" -- systemctl mask nginx.service
-    run pct exec "$CTID" -- env DEBIAN_FRONTEND=noninteractive apt-get update
-    run pct exec "$CTID" -- env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx ca-certificates
+    if [[ $mode == nginx ]]; then
+      # Do not expose nginx's default HTTP site during package installation.
+      run pct exec "$CTID" -- systemctl mask nginx.service
+      run pct exec "$CTID" -- env DEBIAN_FRONTEND=noninteractive apt-get update
+      run pct exec "$CTID" -- env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx ca-certificates
+    fi
     run pct exec "$CTID" -- useradd --system --user-group --home-dir /nonexistent --shell /usr/sbin/nologin llewm
     run pct exec "$CTID" -- install -d -m 0755 /opt/llewm/bin /etc/llewm
     run pct exec "$CTID" -- install -d -m 0700 /etc/llewm/tls
     run pct exec "$CTID" -- install -d -m 0700 -o llewm -g llewm /var/lib/llewm-shared-broker
     run pct push "$CTID" "$bundle/llewm-orchestrate" /opt/llewm/bin/llewm-orchestrate --perms 0755
-    run pct push "$CTID" "$bundle/deploy/proxmox/llewm-shared-broker.service" /etc/systemd/system/llewm-shared-broker.service --perms 0644
-    run pct push "$CTID" "$bundle/deploy/nginx/native.conf" /etc/nginx/sites-available/llewm-shared-broker --perms 0644
-    run pct push "$CTID" "$bundle/deploy/nginx/proxy-options.conf" /etc/nginx/llewm-proxy-options.conf --perms 0644
+    run pct push "$CTID" "$bundle/deploy/proxmox/$unit" /etc/systemd/system/llewm-shared-broker.service --perms 0644
     run pct push "$CTID" "$TLS_DIR/fullchain.pem" /etc/llewm/tls/fullchain.pem --perms 0644
     run pct push "$CTID" "$TLS_DIR/privkey.pem" /etc/llewm/tls/privkey.pem --perms 0600
-    run pct exec "$CTID" -- rm -f /etc/nginx/sites-enabled/default
-    run pct exec "$CTID" -- ln -s /etc/nginx/sites-available/llewm-shared-broker /etc/nginx/sites-enabled/llewm-shared-broker
+    if [[ $mode == direct ]]; then
+      run pct exec "$CTID" -- chgrp llewm /etc/llewm/tls /etc/llewm/tls/privkey.pem
+      run pct exec "$CTID" -- chmod 0750 /etc/llewm/tls
+      run pct exec "$CTID" -- chmod 0640 /etc/llewm/tls/privkey.pem
+    else
+      run pct push "$CTID" "$bundle/deploy/nginx/native.conf" /etc/nginx/sites-available/llewm-shared-broker --perms 0644
+      run pct push "$CTID" "$bundle/deploy/nginx/proxy-options.conf" /etc/nginx/llewm-proxy-options.conf --perms 0644
+      run pct exec "$CTID" -- rm -f /etc/nginx/sites-enabled/default
+      run pct exec "$CTID" -- ln -s /etc/nginx/sites-available/llewm-shared-broker /etc/nginx/sites-enabled/llewm-shared-broker
+    fi
     run pct exec "$CTID" -- runuser -u llewm -- /opt/llewm/bin/llewm-orchestrate shared-broker-init \
       --db /var/lib/llewm-shared-broker/messages.db --project "$PROJECT_ID" --machine "$MACHINE_LABEL"
-    run pct exec "$CTID" -- nginx -t
+    if [[ $mode == nginx ]]; then
+      run pct exec "$CTID" -- nginx -t
+      run pct exec "$CTID" -- systemctl unmask nginx.service
+    fi
     run pct exec "$CTID" -- systemctl daemon-reload
-    run pct exec "$CTID" -- systemctl unmask nginx.service
-    run pct exec "$CTID" -- systemctl enable --now llewm-shared-broker.service nginx.service
-    run pct exec "$CTID" -- systemctl is-active llewm-shared-broker.service nginx.service
+    run pct exec "$CTID" -- systemctl enable --now "${services[@]}"
+    run pct exec "$CTID" -- systemctl is-active "${services[@]}"
     ;;
   enroll)
     engineer=${1:?Provide engineer ID}; destination=${2:?Provide a new private output token path}
     [[ "$engineer" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'Invalid engineer ID' >&2; exit 2; }
     [[ ! -e "$destination" && ! -L "$destination" ]] || { echo 'Token destination already exists' >&2; exit 2; }
     require_guest
+    expiry=()
+    if [[ -n ${3:-} ]]; then expiry=(--expires-at "$3"); fi
     token="/var/lib/llewm-shared-broker/$engineer-$(date +%s)-$RANDOM.token"
     run pct exec "$CTID" -- runuser -u llewm -- /opt/llewm/bin/llewm-orchestrate shared-broker-member \
-      --db /var/lib/llewm-shared-broker/messages.db --id "$engineer" --permissions work --token-file "$token"
+      --db /var/lib/llewm-shared-broker/messages.db --id "$engineer" --permissions work --token-file "$token" "${expiry[@]}"
     if (( apply )); then (set -o noclobber; : > "$destination"); fi
     run pct pull "$CTID" "$token" "$destination" --perms 0600
     ;;
   status)
     require_guest
     run pct status "$CTID"
-    run pct exec "$CTID" -- systemctl is-active llewm-shared-broker.service nginx.service
+    run pct exec "$CTID" -- systemctl is-active "${services[@]}"
     ;;
   *) echo 'Unknown action' >&2; exit 2 ;;
 esac
