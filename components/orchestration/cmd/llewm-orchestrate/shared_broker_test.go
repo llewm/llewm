@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/llewm/llewm/components/orchestration/internal/connectionprofile"
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
 )
@@ -146,13 +147,13 @@ func TestSharedBrokerProfiles(t *testing.T) {
 	if err := run([]string{"shared-broker-info", "--profile", profile}, &out, &out); err != nil {
 		t.Fatal(err)
 	}
-	p, err := readBrokerProfile(profile)
+	p, err := connectionprofile.Read(profile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p.Authority = strings.Repeat("0", 48)
 	wrong := filepath.Join(dir, "wrong.json")
-	if err := writeBrokerProfile(wrong, p); err != nil {
+	if err := connectionprofile.Write(wrong, p); err != nil {
 		t.Fatal(err)
 	}
 	if err := run([]string{"shared-broker-info", "--profile", wrong, "--token-file", token}, &out, &out); err == nil {

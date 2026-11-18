@@ -1,4 +1,4 @@
-package main
+package connectionprofile
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 )
 
 // Profiles can be shared. Never follow filesystem references supplied by a profile.
-type brokerProfile struct {
+type Profile struct {
 	Version        int    `json:"version"`
 	Endpoint       string `json:"endpoint"`
 	Project        string `json:"project"`
@@ -23,7 +23,7 @@ type brokerProfile struct {
 	CACertificates string `json:"ca_certificates,omitempty"`
 }
 
-func (p *brokerProfile) validate() error {
+func (p *Profile) Validate() error {
 	if p.Version != 1 || !coordination.ValidBrokerID(p.Project) || len(p.Authority) != 48 {
 		return errors.New("invalid broker profile version, project or authority")
 	}
@@ -55,8 +55,8 @@ func (p *brokerProfile) validate() error {
 	return nil
 }
 
-func readBrokerProfile(path string) (brokerProfile, error) {
-	var p brokerProfile
+func Read(path string) (Profile, error) {
+	var p Profile
 	f, err := os.Open(path)
 	if err != nil {
 		return p, err
@@ -73,11 +73,12 @@ func readBrokerProfile(path string) (brokerProfile, error) {
 	if err := transport.Decode(bytes.NewReader(data), &p); err != nil {
 		return p, err
 	}
-	return p, p.validate()
+	err = p.Validate()
+	return p, err
 }
 
-func writeBrokerProfile(path string, p brokerProfile) error {
-	if err := p.validate(); err != nil {
+func Write(path string, p Profile) error {
+	if err := p.Validate(); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)

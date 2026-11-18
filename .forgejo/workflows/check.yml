@@ -33,3 +33,21 @@ jobs:
       - run: GOWORK=off go build ./...
       - if: matrix.component == 'components/continuity'
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p '*_test.py'
+
+  peerdrop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        if: hashFiles('components/orchestration/providers/peerdrop/go.mod') != ''
+        with:
+          go-version-file: components/orchestration/providers/peerdrop/go.mod
+      - name: Verify optional PeerDrop helper
+        if: hashFiles('components/orchestration/providers/peerdrop/go.mod') != ''
+        working-directory: components/orchestration/providers/peerdrop
+        env:
+          GOWORK: 'off'
+        run: |
+          go test -race ./...
+          go vet ./...
+          test -z "$(gofmt -l .)"

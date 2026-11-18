@@ -235,3 +235,8 @@ Alternatively pass an explicit private `--token-file` path. The same
 `--profile` works with shared-broker-request, shared-broker-pull and
 shared-broker-mcp. Profiles check the authority before sending message content.
 A new tunnel URL requires an updated profile from the host.
+
+For an integrated credential transfer, both developers can use the optional
+[PeerDrop onboarding helper](../providers/peerdrop/README.md). It uses an
+independently compared code and explicit approval. Core broker builds and
+manual profile handoffs work without the helper.

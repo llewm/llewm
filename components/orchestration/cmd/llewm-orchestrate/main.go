@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/llewm/llewm/components/orchestration/internal/connectionprofile"
 	"github.com/llewm/llewm/components/orchestration/internal/coordination"
 	"github.com/llewm/llewm/components/orchestration/internal/transport"
 	"github.com/llewm/llewm/components/orchestration/internal/worker"
@@ -160,7 +161,7 @@ func run(args []string, out, stderr io.Writer) error {
 		if !sharedBroker || (cmd != "broker-info" && cmd != "broker-request" && cmd != "broker-pull" && cmd != "broker-mcp") || *endpoint != "" || *project != "" || *caFile != "" {
 			return errors.New("--profile selects endpoint, project and CA for shared broker clients")
 		}
-		p, err := readBrokerProfile(*profile)
+		p, err := connectionprofile.Read(*profile)
 		if err != nil {
 			return err
 		}
@@ -467,8 +468,8 @@ func run(args []string, out, stderr io.Writer) error {
 			if err := json.Unmarshal(data, &identity); err != nil {
 				return err
 			}
-			p := brokerProfile{Version: 1, Endpoint: *endpoint, Project: *project, Authority: identity.ID, CACertificates: string(caPEM)}
-			if err := writeBrokerProfile(*saveProfile, p); err != nil {
+			p := connectionprofile.Profile{Version: 1, Endpoint: *endpoint, Project: *project, Authority: identity.ID, CACertificates: string(caPEM)}
+			if err := connectionprofile.Write(*saveProfile, p); err != nil {
 				return err
 			}
 		}
