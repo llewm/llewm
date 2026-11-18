@@ -64,6 +64,26 @@ Also rerun both supported clients before enabling or changing any recommended
 threshold profile. Routine offline CI must not silently claim live conformance when
 credentials, network access, cost approval, or an interactive client are unavailable.
 
+## Idle plugin in an unrelated project
+
+Run `python scripts/qualify-idle-hooks.py --binary PATH_TO_LLEWM` from the
+component checkout on the target OS. Use a temporary directory outside any
+checkout. This exercises every registered Codex and Claude Code hook command
+in a plain folder, a fresh Git repo, its subdirectory and a folder holding
+multiple repos. It checks exit status, output bytes and file inventory and
+reports elapsed process time including startup. The plugin still incurs a
+client dispatch and a short-lived executable invocation per scheduled hook.
+
+On Windows, repeat with the installed plugin and CLI, starting with Claude
+Code. Record the exact CLI, executable and plugin versions, trust state and
+execution mode. In a disposable unconfigured repo, launch and resume a session,
+submit a prompt, run a harmless tool, and exit. Check for visible idle banners,
+recovery text, hook failures, console flashes and new project state. Record any
+client-owned hook indicators separately from Llewm output. Repeat against an
+initialized test project and confirm SessionStart delivers its bootstrap and
+a normal tool event is recorded. Run Codex as a separate coverage cell. Direct
+process checks alone cannot qualify either client's rendering or scheduling.
+
 ## Live matrix
 
 Run each case in a disposable Git project with raw payload retention disabled. Use an

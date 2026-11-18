@@ -1045,7 +1045,7 @@ func globalCommand() *cobra.Command {
 	return parent
 }
 
-func projectRoot(cmd *cobra.Command) (string, error) {
+func projectStart(cmd *cobra.Command) (string, error) {
 	start, err := cmd.Root().PersistentFlags().GetString("project-root")
 	if err != nil {
 		return "", err
@@ -1057,6 +1057,14 @@ func projectRoot(cmd *cobra.Command) (string, error) {
 		}
 	} else if _, err := os.Stat(start); err != nil {
 		return "", fmt.Errorf("project root: %w", err)
+	}
+	return start, nil
+}
+
+func projectRoot(cmd *cobra.Command) (string, error) {
+	start, err := projectStart(cmd)
+	if err != nil {
+		return "", err
 	}
 	checkout, err := project.Resolve(start)
 	if err != nil {
@@ -1497,6 +1505,31 @@ func hookCommand() *cobra.Command {
 		Short: "Ingest a client lifecycle event from JSON on stdin",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			switch strings.ToLower(args[0]) {
+			case "codex", "claude", "claude-code":
+			default:
+				return fmt.Errorf("unsupported client %q", args[0])
+			}
+			start, err := projectStart(cmd)
+			if err != nil {
+				return err
+			}
+			checkout, err := project.ResolveForHook(start)
+			if err != nil || checkout.Root == "" {
+				return err
+			}
+			root := checkout.Root
+			enabled, err := config.HasHookState(root)
+			if err != nil || !enabled {
+				return err
+			}
+			phase, err := adoption.Load(config.StateDir(root))
+			if err != nil {
+				return err
+			}
+			if phase.Phase() == "exited" {
+				return nil
+			}
 			const maxHookBytes = 2 << 20
 			body, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), maxHookBytes+1))
 			if err != nil {
@@ -1510,22 +1543,6 @@ func hookCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-			}
-			root, err := projectRoot(cmd)
-			if err != nil {
-				return err
-			}
-			phase, err := adoption.Load(config.StateDir(root))
-			if err != nil {
-				return err
-			}
-			if phase.Phase() == "exited" {
-				return nil
-			}
-			switch strings.ToLower(args[0]) {
-			case "codex", "claude", "claude-code":
-			default:
-				return fmt.Errorf("unsupported client %q", args[0])
 			}
 			if _, err := clients.Decode("", args[0], body, false); err != nil {
 				return err

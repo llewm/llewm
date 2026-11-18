@@ -8,8 +8,7 @@
           {
             "type": "command",
             "command": "llewm hook claude-code",
-            "timeout": 15,
-            "statusMessage": "Restoring project continuity"
+            "timeout": 15
           }
         ]
       }

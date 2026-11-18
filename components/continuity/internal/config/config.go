@@ -240,6 +240,24 @@ func StateDir(root string) string {
 	return filepath.Join(root, ".llewm", "continuity")
 }
 
+// HasHookState distinguishes a passive plugin installation from a configured
+// project. A config alone still opts in, so a missing database is diagnosable.
+func HasHookState(root string) (bool, error) {
+	dir := StateDir(root)
+	paths := []string{filepath.Join(dir, FileName), filepath.Join(dir, "continuity.db")}
+	if os.Getenv("CONTINUITY_HOME") == "" {
+		paths = append(paths, filepath.Join(root, ".continuity"), filepath.Join(root, ".llewm", "layout.lock"))
+	}
+	for _, path := range paths {
+		if _, err := os.Lstat(path); err == nil {
+			return true, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
 func Load(root string) (Config, error) {
 	if os.Getenv("CONTINUITY_HOME") == "" {
 		if _, err := os.Lstat(filepath.Join(root, ".continuity")); err == nil {

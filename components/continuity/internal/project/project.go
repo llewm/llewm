@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 )
 
+var errNoGitRoot = errors.New("no Git project root found")
+
 func FindRoot(start string) (string, error) {
 	abs, err := filepath.Abs(start)
 	if err != nil {
@@ -18,7 +20,7 @@ func FindRoot(start string) (string, error) {
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return "", errors.New("no Git project root found")
+			return "", errNoGitRoot
 		}
 		current = parent
 	}

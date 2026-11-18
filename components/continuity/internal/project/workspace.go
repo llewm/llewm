@@ -162,6 +162,14 @@ func findWorkspace(start string) (*Workspace, error) {
 // its folder and every listed member checkout (including their worktrees and
 // submodules); otherwise the Git checkout rules of ResolveCheckout apply.
 func Resolve(start string) (Checkout, error) {
+	return resolve(start, false)
+}
+
+// ResolveForHook omits interactive onboarding suggestions and returns an empty
+// checkout when this location has no owning project. It never inventories children.
+func ResolveForHook(start string) (Checkout, error) { return resolve(start, true) }
+
+func resolve(start string, hook bool) (Checkout, error) {
 	abs, err := filepath.Abs(start)
 	if err != nil {
 		return Checkout{}, err
@@ -174,18 +182,24 @@ func Resolve(start string) (Checkout, error) {
 	if workspace != nil && (gitErr != nil || within(workspace.Root, gitRoot)) {
 		// start is in the workspace folder but not inside any member checkout.
 		if workspace.Mode != ModeUnified {
+			if hook {
+				return Checkout{}, nil
+			}
 			return Checkout{}, fmt.Errorf("%s is a federated workspace; each member keeps its own project, so run this inside a member", workspace.Root)
 		}
 		return Checkout{Root: workspace.Root, Path: workspace.Root, Kind: KindWorkspace, Workspace: workspace.Root}, nil
 	}
 	// A folder that is not itself a checkout but holds several is a workspace
 	// waiting for a manifest, even when some enclosing directory is a repository.
-	if gitErr != nil || gitRoot != abs {
+	if !hook && (gitErr != nil || gitRoot != abs) {
 		if repositories, _ := DiscoverRepositories(abs); len(repositories) > 1 {
 			return Checkout{}, fmt.Errorf("%s holds %d Git repositories but no workspace manifest; run `llewm workspace init` to group them, or run inside one repository", abs, len(repositories))
 		}
 	}
 	if gitErr != nil {
+		if hook && errors.Is(gitErr, errNoGitRoot) {
+			return Checkout{}, nil
+		}
 		return Checkout{}, gitErr
 	}
 	checkout, err := ResolveCheckout(abs)

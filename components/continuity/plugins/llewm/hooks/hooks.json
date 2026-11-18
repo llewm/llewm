@@ -9,7 +9,6 @@
             "type": "command",
             "command": "llewm hook codex",
             "timeout": 15,
-            "statusMessage": "Restoring project continuity",
             "additionalContextLimit": 4000
           }
         ]

@@ -25,6 +25,7 @@ import (
 
 	"github.com/llewm/llewm/components/continuity/internal/app"
 	"github.com/llewm/llewm/components/continuity/internal/checkpoint"
+	"github.com/llewm/llewm/components/continuity/internal/config"
 	"github.com/llewm/llewm/components/continuity/internal/roadmap"
 )
 
@@ -1149,7 +1150,14 @@ func TestCoverageCLIRecordsAndReadsMatrix(t *testing.T) {
 }
 
 func TestHookRejectsInvalidInput(t *testing.T) {
-	testProject(t)
+	root := testProject(t)
+	state := config.StateDir(root)
+	if err := os.MkdirAll(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, config.FileName), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
 	for _, input := range []string{"null", "[]", "{", `{}` + strings.Repeat(" ", 2<<20)} {
 		cmd := newRootCommand("llewm")
 		cmd.SetArgs([]string{"hook", "codex", "SessionStart"})
@@ -1158,7 +1166,7 @@ func TestHookRejectsInvalidInput(t *testing.T) {
 			t.Fatalf("accepted invalid input of length %d", len(input))
 		}
 	}
-	if _, err := os.Stat(".llewm/continuity"); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(state, "continuity.db")); !os.IsNotExist(err) {
 		t.Fatalf("invalid input created state: %v", err)
 	}
 }

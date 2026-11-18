@@ -33,6 +33,12 @@ jobs:
           REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: python -B components/continuity/scripts/verify-upstream.py --output "$RECEIPT" --repository "$REPOSITORY" --run-url "$RUN_URL"
+      - name: Qualify idle plugin hook processes on the native OS
+        working-directory: components/continuity
+        shell: bash
+        run: |
+          go build -o "$RUNNER_TEMP/idle-qual-llewm$(go env GOEXE)" ./cmd/llewm
+          python -B scripts/qualify-idle-hooks.py --binary "$RUNNER_TEMP/idle-qual-llewm$(go env GOEXE)"
       - name: Retain evidence even when checks fail
         if: always()
         uses: actions/upload-artifact@v4
