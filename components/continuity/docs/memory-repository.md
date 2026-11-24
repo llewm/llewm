@@ -1350,6 +1350,6 @@ bootstrap. Each attempt has a 45-second polling budget plus the final status
 command timeout. The receipt records the build identity, native platform, stage,
 counts and export digest. Command output and environment values are excluded.
 
-Forgejo runs the Linux job. The GitHub workflow targets native Windows and macOS.
+The GitHub workflow targets Linux, Windows and macOS. Forgejo also defines a Linux job.
 Each platform needs its own passing receipt. Authenticated network and long-lived
 host behavior require the separate private-host qualification.
