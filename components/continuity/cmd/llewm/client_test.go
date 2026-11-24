@@ -79,7 +79,8 @@ func TestClientPermissionsPrintWriteAndDoctor(t *testing.T) {
 	if again, err := runGrantCLI("", "client", "permissions", "--write", "--scope", "user"); err != nil || !strings.Contains(again, "already has every rule; nothing changed") {
 		t.Fatalf("second write: %v\n%s", err, again)
 	}
-	if doctor := runCLI(t, "", "doctor"); !strings.Contains(doctor, "client rules ok       Claude Code: "+settings) {
+	doctor, doctorErr := runGrantCLI("", "doctor")
+	if doctorErr == nil || !strings.Contains(doctor, "client rules ok       Claude Code: "+settings) || !strings.Contains(doctor, "Project plugin (claude-code):") {
 		t.Fatalf("doctor with rules:\n%s", doctor)
 	}
 	if output, err := runGrantCLI("no\n", "client", "permissions", "--write", "--client", "codex"); err != nil || !strings.Contains(output, "Cancelled") {

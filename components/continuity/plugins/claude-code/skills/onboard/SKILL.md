@@ -204,6 +204,9 @@ From the chosen project, or with `llewm --project-root PATH` before each command
   `llewm client permissions --client claude-code`. Explain the actual proposed
   read/write approvals. The user runs `--write` at a terminal and reviews them;
   never simulate confirmation, create grants, or remove sandbox restrictions.
+- Before handing off to restart, require the installer preview's project plugin
+  state to be enabled for this checkout. Resolve missing or disabled registration
+  through the current marketplace owner. Prefer the shared user-scope install.
 - Restart the client and parent IDE when necessary. Compare MCP
   `continuity_info` with the installed binary's version receipt; record unknown
   plugin identity as unknown. `doctor` alone does not prove live hook delivery.
@@ -221,7 +224,7 @@ needed. Dry-run, save, and read it back through the available supported surface.
 
 Have the user open a fresh session and request continuation. Verify that it
 recovers the exact checkpoint, objective and next action, and that SessionStart
-was observed. Distinguish prepared setup, installed configuration, current MCP
+was observed. Run `llewm doctor --client CLIENT` in the adopted checkout. Distinguish prepared setup, installed configuration, current MCP
 identity, and observed recovery. If a client is unavailable, leave its live
 verification pending rather than claiming success. An unexpired presence record
 from a prior session does not prove another writer; honor the user's report of

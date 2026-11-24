@@ -365,3 +365,23 @@ func tempDir(t *testing.T) string {
 	}
 	return dir
 }
+
+func TestProjectPluginRequiresEnabledRegistrationForCheckout(t *testing.T) {
+	s := Service{Client: "claude-code", ProjectPath: t.TempDir()}
+	foreign := installedPlugin{Scope: "local", ProjectPath: t.TempDir(), Enabled: true}
+	local := installedPlugin{Scope: "project", ProjectPath: s.ProjectPath, Enabled: true}
+	for _, tc := range []struct {
+		items []installedPlugin
+		want  string
+	}{
+		{[]installedPlugin{foreign}, "unavailable"},
+		{[]installedPlugin{foreign, local}, "enabled"},
+		{[]installedPlugin{{Scope: "local", ProjectPath: s.ProjectPath}}, "disabled"},
+		{[]installedPlugin{{Scope: "local", Enabled: true}}, "unknown"},
+		{[]installedPlugin{{Scope: "user", Enabled: true}}, "enabled"},
+	} {
+		if got := s.projectPlugin(tc.items); got != tc.want {
+			t.Errorf("%+v: got %s, want %s", tc.items, got, tc.want)
+		}
+	}
+}

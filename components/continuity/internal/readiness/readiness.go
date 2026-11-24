@@ -69,6 +69,9 @@ type Runtime struct {
 }
 
 type Report struct {
+	BootstrapDelivery     string               `json:"bootstrap_delivery,omitempty"`
+	PluginClient          string               `json:"plugin_client,omitempty"`
+	ProjectPlugin         string               `json:"project_plugin,omitempty"`
 	GitProtection         gitprotection.Report `json:"git_protection"`
 	ProjectState          adoption.Status      `json:"project_state"`
 	SchemaVersion         int                  `json:"schema_version"`

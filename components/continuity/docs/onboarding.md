@@ -243,6 +243,8 @@ explicit choice. Neither path requires maintaining duplicate operational plans.
    Plugin installation, hook trust, tool approvals, and filesystem/network
    sandbox permissions are separate. Preview generated permission rules; apply
    them yourself at a terminal as described in [client permissions](installation.md#client-permissions).
+   Check that the preview reports the plugin enabled for this checkout. A local
+   registration in another project cannot complete this step.
 5. **Verify the running client.** Restart the parent IDE and client when required.
    Compare MCP `continuity_info` with the installed version. A successful shell
    invocation or doctor check does not prove that hooks ran in the client.
@@ -272,6 +274,11 @@ second writer.
 Run `llewm doctor` for hook mode, recorded trial/adoption state, effective hooks
 and session-recovery behavior, alongside normal health checks. Use
 `llewm doctor --output json` for project state and readiness as JSON.
+Select `--client claude-code` or `--client codex` to check the native registration
+from the target checkout. With session recovery enabled, this check also requires
+a retained bootstrap delivery for that client in the project store. Doctor can
+infer Claude Code from project-specific permission rules, or from user rules
+inside Claude Code or when it is the only detected client. An unchecked client still needs explicit selection.
 `not_recorded` means no trial/adoption receipt; it does not prove reviewed adoption.
 A disposable demo has the same state as any other trial. Audit mode and adoption
 state are independent: an adopted project may temporarily collect only usage.

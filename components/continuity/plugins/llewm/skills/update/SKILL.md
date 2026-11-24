@@ -14,6 +14,12 @@ Preserve explicit component pins and package ownership. Installing a binary does
 not enable a broker or authorize credential, listener, trust, or permission changes.
 Continuity-only and audit-only setups do not require orchestration.
 
+When asked to qualify and install a change made in the Llewm development
+repository, use that project's contributor checks and pinned install procedures.
+A routine update of the installed runtime follows this skill even when launched
+from the development checkout. Each client can share one installer-managed
+user-scope plugin across projects with separate stores.
+
 Honor the requested scope: a check returns observations without installing.
 An authorized update prepares and verifies a concrete candidate, preserves current
 knowledge/configuration, applies required migrations explicitly and verifies the

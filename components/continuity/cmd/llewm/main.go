@@ -1353,7 +1353,7 @@ func creationStatus(existed bool) string {
 
 func doctorCommand() *cobra.Command {
 	var readinessReport, checkIntegrity bool
-	var output string
+	var output, requestedClient string
 	var probes, sourceVerifications []string
 	command := &cobra.Command{
 		Use:   "doctor",
@@ -1375,7 +1375,11 @@ observations. Nothing is changed either way.`,
 			if err != nil {
 				return err
 			}
-			root, err := projectRoot(cmd)
+			if requestedClient != "" && requestedClient != "claude-code" && requestedClient != "codex" {
+				return fmt.Errorf("--client must be claude-code or codex")
+			}
+			checkout, err := currentCheckout(cmd)
+			root := checkout.Root
 			if err != nil {
 				return err
 			}
@@ -1389,7 +1393,7 @@ observations. Nothing is changed either way.`,
 			}
 			jsonReport := format == "json" || readinessReport || checkIntegrity || len(probes) > 0 || len(sourceVerifications) > 0
 			if !jsonReport {
-				fmt.Fprintf(cmd.OutOrStdout(), "Hook mode: %s\nAdoption state: %s\nEffective hooks: %s\nSession recovery: %s\nLive client: %s\n", state.HookMode, state.AdoptionState, state.EffectiveHooks, state.SessionRecovery, state.LiveClient)
+				fmt.Fprintf(cmd.OutOrStdout(), "Hook mode: %s\nAdoption state: %s\nEffective hooks: %s\nSession recovery: %s (configuration)\nLive client: %s\n", state.HookMode, state.AdoptionState, state.EffectiveHooks, state.SessionRecovery, state.LiveClient)
 			}
 			if !jsonReport {
 				for _, warning := range gitprotection.Inspect(cmd.Context(), root).Warnings() {
@@ -1400,6 +1404,19 @@ observations. Nothing is changed either way.`,
 			err = withReadOnlyApp(cmd, func(application *app.App) error {
 				opened = true
 				warnings := []string{}
+				var pluginErr error
+				var pluginState, deliveryState string
+				client := doctorClient(requestedClient, checkout.Path)
+				if client != "" {
+					pluginState, deliveryState, pluginErr = checkDoctorPlugin(cmd.Context(), application, client, checkout.Path, state.SessionRecovery == "enabled")
+					if !jsonReport {
+						fmt.Fprintf(cmd.OutOrStdout(), "Project plugin (%s): %s\nProject bootstrap delivery (%s): %s\n", client, pluginState, client, deliveryState)
+					}
+				}
+
+				if client == "" && state.SessionRecovery == "enabled" && !jsonReport {
+					fmt.Fprintln(cmd.OutOrStdout(), "Project plugin: unchecked (select --client claude-code or --client codex)")
+				}
 				if _, budgetErr := application.Bootstrap.Build(cmd.Context(), application.ProjectID, application.Root, application.Config.Project.Name); budgetErr != nil {
 					warnings = append(warnings, diagnostic.Bounded(budgetErr.Error()))
 				}
@@ -1417,8 +1434,22 @@ observations. Nothing is changed either way.`,
 						return err
 					}
 					report.Warnings = append(report.Warnings, warnings...)
+					report.ProjectPlugin = "unchecked"
+					if client != "" {
+						report.PluginClient, report.ProjectPlugin, report.BootstrapDelivery = client, pluginState, deliveryState
+					}
+					if pluginErr != nil {
+						if report.Stage == "operationally_verified" {
+							report.Stage = "plugin_verification_pending"
+						}
+						report.UnmetGates = append(report.UnmetGates, diagnostic.Bounded(pluginErr.Error()))
+						report.RecommendedNextAction = diagnostic.Bounded(pluginErr.Error())
+					}
 					reported = true
-					return writeJSON(cmd.OutOrStdout(), report)
+					if err := writeJSON(cmd.OutOrStdout(), report); err != nil {
+						return err
+					}
+					return pluginErr
 				}
 				for _, warning := range warnings {
 					fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-8s %s\n", "configuration", "warning", warning)
@@ -1477,6 +1508,9 @@ observations. Nothing is changed either way.`,
 						fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-8s %s\n", "coverage", status, detail)
 					}
 				}
+				if pluginErr != nil {
+					return pluginErr
+				}
 				if failed {
 					return errors.New("one or more checks need attention")
 				}
@@ -1490,6 +1524,7 @@ observations. Nothing is changed either way.`,
 			return err
 		},
 	}
+	command.Flags().StringVar(&requestedClient, "client", "", "verify the plugin for this checkout and retained bootstrap delivery for claude-code or codex")
 	command.Flags().StringVar(&output, "output", "text", "text or json; JSON includes readiness and project state")
 	command.Flags().BoolVar(&readinessReport, "readiness", false, "print the operational-readiness report as JSON")
 	command.Flags().StringSliceVar(&probes, "probe", nil, "readiness: named live probe; supported form is narrative:<id>")

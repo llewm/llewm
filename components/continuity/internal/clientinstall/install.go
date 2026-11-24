@@ -24,10 +24,15 @@ type Runner func(context.Context, ...string) ([]byte, error)
 // NativeRunner can invoke only a resolved client executable. It never invokes a
 // shell, passes an arbitrary recipe, or retains the client's configuration dump.
 func NativeRunner(executable string) Runner {
+	return NativeRunnerAt(executable, "")
+}
+
+func NativeRunnerAt(executable, directory string) Runner {
 	return func(ctx context.Context, args ...string) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
 		command := exec.CommandContext(ctx, executable, args...)
+		command.Dir = directory
 		var out, stderr limitedBuffer
 		command.Stdout, command.Stderr = &out, &stderr
 		if err := command.Run(); err != nil {
@@ -61,6 +66,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 type Receipt struct {
+	ProjectPlugin    string                  `json:"project_plugin,omitempty"`
 	MarketplaceOwner string                  `json:"marketplace_owner,omitempty"`
 	InstalledState   string                  `json:"installed_state"`
 	Installations    []Installation          `json:"installations"`
@@ -86,18 +92,20 @@ type Receipt struct {
 }
 
 type Installation struct {
-	Scope   string                  `json:"scope"`
-	Version string                  `json:"version"`
-	Enabled bool                    `json:"enabled"`
-	Cache   pluginidentity.Snapshot `json:"cache"`
-	Refresh []string                `json:"refresh_argv"`
+	ProjectPath string                  `json:"project_path,omitempty"`
+	Scope       string                  `json:"scope"`
+	Version     string                  `json:"version"`
+	Enabled     bool                    `json:"enabled"`
+	Cache       pluginidentity.Snapshot `json:"cache"`
+	Refresh     []string                `json:"refresh_argv"`
 }
 
 type Service struct {
-	Client  string
-	Root    string
-	Package Package
-	Run     Runner
+	ProjectPath string
+	Client      string
+	Root        string
+	Package     Package
+	Run         Runner
 }
 
 type marketplace struct {
@@ -106,6 +114,7 @@ type marketplace struct {
 	Path string `json:"path"`
 }
 type installedPlugin struct {
+	ProjectPath    string `json:"projectPath"`
 	InstallPath    string `json:"installPath"`
 	ReadFromFolder string `json:"readFromFolder"`
 	ID             string `json:"id"`
@@ -182,6 +191,44 @@ func (s Service) installed(ctx context.Context) (*installedPlugin, error) {
 	return &items[0], nil
 }
 
+// projectPlugin evaluates the native inventory in the target checkout's context.
+func (s Service) projectPlugin(items []installedPlugin) string {
+	if s.ProjectPath == "" {
+		return "unknown"
+	}
+	state := "unavailable"
+	for _, item := range items {
+		if s.Client == "claude-code" && item.Scope != "user" {
+			if item.Scope != "project" && item.Scope != "local" || item.ProjectPath == "" {
+				if state == "unavailable" {
+					state = "unknown"
+				}
+				continue
+			}
+			if filepath.Clean(item.ProjectPath) != filepath.Clean(s.ProjectPath) {
+				left, le := os.Stat(item.ProjectPath)
+				right, re := os.Stat(s.ProjectPath)
+				if le != nil || re != nil || !os.SameFile(left, right) {
+					continue
+				}
+			}
+		}
+		if item.Enabled {
+			return "enabled"
+		}
+		state = "disabled"
+	}
+	return state
+}
+
+func (s Service) ProjectPlugin(ctx context.Context) (string, error) {
+	items, err := s.installedPlugins(ctx)
+	if err != nil {
+		return "unknown", err
+	}
+	return s.projectPlugin(items), nil
+}
+
 // Observe inventories native client registrations and caches without modifying
 // ownership, staging a package, or requiring installer-owned source folders.
 func (s Service) Observe(ctx context.Context) (Receipt, error) {
@@ -201,15 +248,29 @@ func (s Service) Observe(ctx context.Context) (Receipt, error) {
 	}
 	r.InstalledState = "observed"
 	r.PluginInstalled = len(items) > 0
+	r.ProjectPlugin = s.projectPlugin(items)
+	var sourcePayload map[string][]byte
+	if r.MarketplaceOwner != "" && s.Root != "" && filepath.Clean(r.MarketplaceOwner) != filepath.Clean(s.Root) {
+		sourcePayload, err = pluginidentity.Expected(s.Client)
+		if err != nil {
+			return r, err
+		}
+	}
 	for _, item := range items {
 		refresh := []string{"plugin", "add", Selector, "--json"}
 		if s.Client == "claude-code" {
 			refresh = []string{"plugin", "update", Selector, "--scope", item.Scope, "--json"}
 		}
-		r.Installations = append(r.Installations, Installation{Scope: item.Scope, Version: item.Version, Enabled: item.Enabled, Cache: s.cache(&item), Refresh: refresh})
+		r.Installations = append(r.Installations, Installation{ProjectPath: item.ProjectPath, Scope: item.Scope, Version: item.Version, Enabled: item.Enabled, Cache: s.cacheAgainst(&item, sourcePayload), Refresh: refresh})
 	}
-	if len(r.Installations) > 0 {
-		r.PluginCache = r.Installations[0].Cache
+	for i := range items {
+		if i == 0 {
+			r.PluginCache = r.Installations[i].Cache
+		}
+		if s.projectPlugin(items[i:i+1]) == "enabled" {
+			r.PluginCache = r.Installations[i].Cache
+			break
+		}
 	}
 	return r, marketErr
 }
@@ -217,17 +278,23 @@ func (s Service) Observe(ctx context.Context) (Receipt, error) {
 // cache inspects the registered cache, not just the marketplace source. Claude
 // may load a local source folder directly, so verify that folder separately too.
 func (s Service) cache(item *installedPlugin) pluginidentity.Snapshot {
+	return s.cacheAgainst(item, nil)
+}
+
+func (s Service) cacheAgainst(item *installedPlugin, expected map[string][]byte) pluginidentity.Snapshot {
 	root := item.InstallPath
 	basis := "client_registration"
 	if root == "" && s.Client == "codex" {
 		root = pluginidentity.CodexCacheRoot(item.Version)
 		basis = "codex_version_cache_layout"
 	}
-	expected := map[string][]byte{}
-	prefix := "plugins/" + s.Client + "/"
-	for name, body := range s.Package.Files {
-		if strings.HasPrefix(name, prefix) {
-			expected[strings.TrimPrefix(name, prefix)] = body
+	if expected == nil {
+		expected = map[string][]byte{}
+		prefix := "plugins/" + s.Client + "/"
+		for name, body := range s.Package.Files {
+			if strings.HasPrefix(name, prefix) {
+				expected[strings.TrimPrefix(name, prefix)] = body
+			}
 		}
 	}
 	observed := pluginidentity.Inspect(s.Client, root, expected)
@@ -298,6 +365,7 @@ func (s Service) Inspect(ctx context.Context) (Receipt, error) {
 	}
 	observed, observeErr := s.Observe(ctx)
 	r.MarketplaceOwner, r.InstalledState, r.Installations, r.PluginInstalled, r.PluginCache = observed.MarketplaceOwner, observed.InstalledState, observed.Installations, observed.PluginInstalled, observed.PluginCache
+	r.ProjectPlugin = observed.ProjectPlugin
 	if observeErr != nil {
 		return r, observeErr
 	}
@@ -403,6 +471,7 @@ func (s Service) Apply(ctx context.Context) (Receipt, error) {
 		r.Problem = err.Error()
 		return r, err
 	}
+	r.ProjectPlugin = s.projectPlugin([]installedPlugin{*item})
 	r.PluginCache = s.cache(item)
 	if r.PluginCache.Status != "current" {
 		err = fmt.Errorf("plugin registration succeeded but cached files did not verify: %s; review the exact plugin cache and rerun its native update", r.PluginCache.Reason)
@@ -416,7 +485,7 @@ func (s Service) Apply(ctx context.Context) (Receipt, error) {
 // WriteText prints only selected receipt fields, never raw client JSON/settings.
 func WriteText(out io.Writer, r Receipt) {
 	fmt.Fprintf(out, "Client: %s (%s scope)\nClient version: %s\nPlugin: %s\nPackage: %s\nState: %s\nPlugin installed: %t\nPermissions: %s\nHook trust: %s\nRestart required: %t\nLive verified: %t\n", r.Client, r.Scope, r.ClientVersion, r.PluginVersion, r.Directory, r.State, r.PluginInstalled, r.Permissions, r.HookTrust, r.RestartRequired, r.LiveVerified)
-	fmt.Fprintf(out, "Plugin cache: %s (%s)\n", r.PluginCache.Status, r.PluginCache.Root)
+	fmt.Fprintf(out, "Project plugin: %s\nPlugin cache: %s (%s)\n", r.ProjectPlugin, r.PluginCache.Status, r.PluginCache.Root)
 	if r.Backup != "" {
 		fmt.Fprintln(out, "Previous package retained:", r.Backup)
 	}

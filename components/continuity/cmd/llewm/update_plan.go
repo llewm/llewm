@@ -185,7 +185,7 @@ func updatePlanCommand() *cobra.Command {
 			executable, e := exec.LookPath(program)
 			if e == nil && pkgErr == nil {
 				bounded, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
-				observation, e = (clientinstall.Service{Client: client, Package: pkg, Run: clientinstall.NativeRunner(executable)}).Observe(bounded)
+				observation, e = (clientinstall.Service{Client: client, Root: filepath.Join(global, "plugins", "installer", "marketplace"), Package: pkg, Run: clientinstall.NativeRunner(executable)}).Observe(bounded)
 				cancel()
 			}
 			if pkgErr != nil {
@@ -221,7 +221,7 @@ func updatePlanCommand() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), plugin.Problem)
 			}
 			for _, installation := range plugin.Installations {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Scope: %s; version: %s; cache: %s; SHA256: %s; expected SHA256: %s\n  Native refresh argv: %q\n", installation.Scope, installation.Version, installation.Cache.Status, installation.Cache.SHA256, installation.Cache.ExpectedSHA256, installation.Refresh)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Scope: %s; project: %s; version: %s; cache: %s; SHA256: %s; expected SHA256: %s\n  Native refresh argv: %q\n", installation.Scope, installation.ProjectPath, installation.Version, installation.Cache.Status, installation.Cache.SHA256, installation.Cache.ExpectedSHA256, installation.Refresh)
 			}
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), report.PluginComparisonBasis)

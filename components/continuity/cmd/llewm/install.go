@@ -61,7 +61,18 @@ func installCommand() *cobra.Command {
 			var executable string
 			executable, err = exec.LookPath(program)
 			if err == nil {
-				service := clientinstall.Service{Client: client, Root: r.Directory, Package: pkg, Run: clientinstall.NativeRunner(executable)}
+				directory, dirErr := projectStart(cmd)
+				if dirErr != nil {
+					return dirErr
+				}
+				if checkout, e := currentCheckout(cmd); e == nil {
+					directory = checkout.Path
+				}
+				directory, err = filepath.Abs(directory)
+				if err != nil {
+					return err
+				}
+				service := clientinstall.Service{ProjectPath: directory, Client: client, Root: r.Directory, Package: pkg, Run: clientinstall.NativeRunnerAt(executable, directory)}
 				if dryRun {
 					r, err = service.Inspect(cmd.Context())
 				} else {
