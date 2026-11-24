@@ -1330,3 +1330,26 @@ private record archive kept separately. Explicit per-destination relaying permit
 hybrid Git/folder setups. Never place a managed Git memory clone itself in a
 file-sync folder. The Git ownership/authentication rules above still apply to
 the Git endpoint; folder publication does not establish provider delivery.
+
+## Qualifying automatic sync
+
+From the source checkout, run `python3 -B components/continuity/scripts/qualify-sync.py`.
+Use `--output PATH` to save its JSON receipt. It requires Go, Git and Python 3.
+
+The runner builds the current candidate and runs six existing Go tests covering
+Git peer convergence, offline publication, fork preservation, cross-machine
+leases, invalidation and recovery of the unchanged-sync proof, and CLI trigger
+selection. It checks that each named test actually passed.
+
+The process smoke uses two temporary projects with isolated homes and a local
+bare remote. Creating a checkpoint on A starts publication. A session-start hook
+on B starts import. Each wait requires a new completed sync receipt. B must
+recover the same checkpoint export bytes, and another startup must transfer zero
+records, preserve the remote head, and select the original checkpoint in a fresh
+bootstrap. Each attempt has a 45-second polling budget plus the final status
+command timeout. The receipt records the build identity, native platform, stage,
+counts and export digest. Command output and environment values are excluded.
+
+Forgejo runs the Linux job. The GitHub workflow targets native Windows and macOS.
+Each platform needs its own passing receipt. Authenticated network and long-lived
+host behavior require the separate private-host qualification.

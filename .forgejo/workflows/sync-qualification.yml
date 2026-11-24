@@ -1,0 +1,41 @@
+name: Sync qualification
+
+on:
+  push:
+    paths:
+      - 'components/continuity/**'
+      - 'go.work*'
+      - '.forgejo/workflows/sync-qualification.yml'
+    branches: ['**']
+    tags: ['*']
+  pull_request:
+    paths:
+      - 'components/continuity/**'
+      - 'go.work*'
+      - '.forgejo/workflows/sync-qualification.yml'
+  workflow_dispatch:
+
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: components/continuity/go.mod
+          cache-dependency-path: components/continuity/go.sum
+      - name: Run deterministic and detached-process qualification
+        shell: bash
+        run: python3 -B components/continuity/scripts/qualify-sync.py --output sync-qualification.json
+      - name: Retain redacted qualification receipt
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: sync-qualification-${{ matrix.os }}
+          path: sync-qualification.json
+          if-no-files-found: error
