@@ -144,8 +144,10 @@ llewm track-plan record parser-plan --creator REVIEWER --status active
 Use `llewm roadmap node` to record reviewed node status, preserving its source
 reference and other fields. Review is not invented by the importer. Existing
 delegation applies only within the configured policy; onboarding never grants
-itself planning authority. Relevant facts can be captured through ordinary
-narrative/resource tools. Historical prose is not a new user decision or proof
+itself planning authority. For existing evidence tables, cite the source file,
+revision and section by default. When a decision or verification needs an
+individual row, capture it through the narrative tools with its source and
+original observation date where known. Historical prose is not a new user decision or proof
 of verified work. Once current work is grounded, save a first checkpoint and
 verify fresh-session recovery during both trial and adoption.
 

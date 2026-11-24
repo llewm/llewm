@@ -415,8 +415,11 @@ func TestDirectAndEstablishedAdoptionReview(t *testing.T) {
 		t.Run(entry, func(t *testing.T) {
 			root := testProject(t)
 			runCLI(t, "", "init")
-			if out := runCLI(t, "", "adopt"); !strings.Contains(out, "AGENTS.md") {
-				t.Fatal(out)
+			preview := runCLI(t, "", "adopt")
+			for _, want := range []string{"AGENTS.md", "for engineer review", "evidence as it is observed", "existing evidence", "llewm checkpoint create"} {
+				if !strings.Contains(preview, want) {
+					t.Fatalf("adoption preview missing %q: %s", want, preview)
+				}
 			}
 			dir := config.StateDir(root)
 			if s, err := adoption.Load(dir); err != nil || s != nil {

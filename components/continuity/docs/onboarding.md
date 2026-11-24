@@ -262,9 +262,16 @@ explicit choice. Neither path requires maintaining duplicate operational plans.
    Add `--existing` for established use without a prior receipt. An active
    trial converts with its original baseline. Confirmation records today's date.
    Show each conflict with its file, section, consequence and proposed edit.
-   For example, decide whether a milestone report in Git contains full test
-   results or links to observations in Llewm. Keep the engineer's chosen split
-   and CLI fallback in an instruction file the client loads without the plugin.
+   Propose Continuity as the authoritative record for current tasks, slice
+   plans, decisions, checkpoints and evidence as it is observed. Keep durable
+   design, roadmaps, evidence write-ups and host details in repository docs.
+   For example, record a test result with its commit and host in Continuity,
+   then cite it in the milestone report. Link existing evidence by file,
+   revision and section. Import selected observations when a decision or
+   verification needs them, preserving their original date and source.
+   Record the engineer's chosen workflow in an instruction file the client
+   loads without the plugin. Include the CLI fallback (`llewm checkpoint create`,
+   `llewm decision`, `llewm brief`) with the same review and readback steps.
    Use a personal client-loaded file for personal adoption. Then record
    `llewm adopt --reviewed --guidance AGENTS.md --workflow "Reviewed summary"`
    with the actual paths and wording. Repeat the guidance flag for additional

@@ -216,8 +216,16 @@ instruction sources. Read the applicable root, override, component and client
 instructions, including referenced roadmaps and evidence requirements. Show
 each material overlap to the engineer: path and section, current destination,
 proposed destination, what would be duplicated or lost, and the proposed edit.
-Honor existing decisions. Ask only about unresolved choices. Preserve repository
-deliverables, test evidence and host records the engineer wants maintained.
+Offer this starting point for engineer review. Honor existing decisions and ask
+about unresolved choices.
+
+- Keep the current task, slice plans, decisions and checkpoints in Continuity.
+  Record evidence there as it is observed, including the source and conditions.
+- Use repository docs for durable design, roadmaps, evidence write-ups and host
+  or environment details. A report can cite the observation it explains.
+- Cite existing evidence by path, revision and section. Import individual
+  observations when needed for a decision or verification, retaining their
+  original date and source where known.
 
 Record an explicit full-adoption request in this session with `llewm adopt
 --reviewed` (add `--existing` when confirming established use). For an active
@@ -226,7 +234,7 @@ Show the engineer the effective hook mode, adoption entry, guidance and client
 checks from doctor. For shared adoption put the approved workflow in the
 project's loaded instructions; for personal adoption use a client-loaded local
 instruction file and avoid changing shared policy. Include the CLI fallback
-for decisions and checkpoints when MCP is unavailable, preserving the normal
+(`llewm checkpoint create`, `llewm decision`, `llewm brief`) when MCP is unavailable, preserving the normal
 review, scope and readback rules. Prefer a reference over copying the same
 verification into two places. Apply the agreed edit, then run `llewm adopt
 --reviewed --guidance PATH --workflow "APPROVED ONE-LINE SUMMARY"`; repeat

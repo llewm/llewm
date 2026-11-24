@@ -51,6 +51,13 @@ func adoptCommand(trialOnly bool) *cobra.Command {
 			for _, section := range sections {
 				fmt.Fprintf(cmd.OutOrStdout(), "  %s — %s\n", filepath.Base(section.Source), section.HeadingPath)
 			}
+			fmt.Fprint(cmd.OutOrStdout(), `
+Suggested workflow for engineer review
+Use Continuity for current tasks, slice plans, decisions, checkpoints and evidence as it is observed.
+Use repository docs for durable design, roadmaps, evidence write-ups and host or environment details.
+For existing evidence, cite the file, revision and section. Import individual observations when needed for a decision or verification, preserving their original date and source.
+When MCP is unavailable, use the CLI (llewm checkpoint create, llewm decision, llewm brief) with the same review and readback steps.
+`)
 			fmt.Fprintln(cmd.OutOrStdout(), "Compare roadmap, handoff and evidence instructions with the intended Llewm workflow. Show the engineer the source section, competing destinations, effect and proposed edit. Review client-specific, nested and referenced instructions that apply. Record the approved split in instructions the client loads even without hooks. Use --reviewed to confirm adoption, --existing for established use, and --guidance PATH --workflow TEXT to attest the guidance review.")
 			return nil
 		}
