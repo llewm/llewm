@@ -38,7 +38,8 @@ Use `n`/`p` for pages in Timeline, Decisions, History and Checkpoints, `[ ]` for
 plan revisions, `f` for track/work-item filters, and `k` for timeline/history kinds.
 PgUp/PgDn scroll the detail pane; `z` or Enter expands it. Escape first collapses
 expanded detail. `r` refreshes saved data while staying in the current view or
-navigation stack. The top-level Tracks overview also refreshes after five idle seconds following each read,
+navigation stack. Each tab loads its own data when opened. The top-level Tracks
+overview reads in the background at startup and again five seconds after each read,
 preserving the selected task or track and detail scroll. Automatic refresh pauses
 while reading expanded details, help, search input or a drilled-in record, and in
 other views. The Tracks filter bar shows when its saved snapshot was updated;

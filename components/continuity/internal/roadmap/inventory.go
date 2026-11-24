@@ -133,14 +133,16 @@ func taskBindingHash(value TaskBinding) (string, error) {
 }
 
 type inventoryTaskState struct {
-	ID        string
-	Title     string
-	Managed   bool
-	Lifecycle string
-	Latest    *TrackCheckpoint
-	Count     int
-	Roots     int
-	Tips      int
+	ID          string
+	Title       string
+	Managed     bool
+	Lifecycle   string
+	Latest      *TrackCheckpoint
+	Count       int
+	Roots       int
+	Tips        int
+	Actions     []TrackActionRef
+	ActionCount int
 }
 
 // TrackInventory returns a deterministic, bounded join. It is deliberately a
@@ -201,6 +203,9 @@ func (service Service) TrackInventory(ctx context.Context, projectID string, opt
 	}
 	tasks, err := service.inventoryTasks(ctx, projectID)
 	if err != nil {
+		return TrackInventory{}, err
+	}
+	if err := service.inventoryActions(ctx, projectID, tasks, options.RefLimit); err != nil {
 		return TrackInventory{}, err
 	}
 	bindings, err := service.currentTaskBindings(ctx, projectID)
@@ -531,6 +536,38 @@ func (service Service) inventoryTasks(ctx context.Context, projectID string) (ma
 	return result, nil
 }
 
+// Read unresolved actions once for the project, retaining only bounded references per task.
+func (service Service) inventoryActions(ctx context.Context, projectID string, tasks map[string]inventoryTaskState, refLimit int) error {
+	rows, err := service.DB.QueryContext(ctx, `SELECT c.task_id,a.id,a.source_checkpoint_id,t.status
+		FROM checkpoint_actions a JOIN checkpoints c ON c.id=a.source_checkpoint_id
+		JOIN checkpoint_action_transitions t ON t.id=(
+			SELECT latest.id FROM checkpoint_action_transitions latest WHERE latest.action_id=a.id
+			ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+		WHERE a.project_id=? AND c.task_id IS NOT NULL AND t.status IN ('open','carried_forward')
+		ORDER BY a.created_at,a.id`, projectID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var ref TrackActionRef
+		if err := rows.Scan(&id, &ref.ID, &ref.SourceCheckpointID, &ref.Status); err != nil {
+			return err
+		}
+		state, found := tasks[id]
+		if !found {
+			continue
+		}
+		state.ActionCount++
+		if len(state.Actions) < refLimit {
+			state.Actions = append(state.Actions, ref)
+		}
+		tasks[id] = state
+	}
+	return rows.Err()
+}
+
 func (service Service) enrichInventoryItem(ctx context.Context, projectID string, item *TrackInventoryItem, state inventoryTaskState, refLimit int) error {
 	item.LatestCheckpoint = state.Latest
 	if state.Latest == nil {
@@ -548,34 +585,9 @@ func (service Service) enrichInventoryItem(ctx context.Context, projectID string
 	if state.Managed && ((state.Latest != nil && state.Latest.Status == "completed" && state.Lifecycle == "active") || (state.Lifecycle != "active" && state.Latest != nil)) {
 		item.Anomalies = appendUniqueString(item.Anomalies, "terminal_selection")
 	}
-	rows, err := service.DB.QueryContext(ctx, `WITH latest AS (
-		SELECT t.action_id,t.status,ROW_NUMBER() OVER(PARTITION BY t.action_id ORDER BY t.created_at DESC,t.id DESC) n
-		FROM checkpoint_action_transitions t JOIN checkpoint_actions a ON a.id=t.action_id WHERE a.project_id=?
-	) SELECT a.id,a.source_checkpoint_id,l.status FROM checkpoint_actions a JOIN latest l ON l.action_id=a.id AND l.n=1 JOIN checkpoints c ON c.id=a.source_checkpoint_id
-	WHERE a.project_id=? AND c.task_id=? AND l.status IN ('open','carried_forward') ORDER BY a.created_at,a.id`, projectID, projectID, state.ID)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var ref TrackActionRef
-		if err := rows.Scan(&ref.ID, &ref.SourceCheckpointID, &ref.Status); err != nil {
-			rows.Close()
-			return err
-		}
-		item.UnresolvedActionCount++
-		if len(item.Actions) < refLimit {
-			item.Actions = append(item.Actions, ref)
-		} else {
-			item.ActionsTruncated = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
+	item.UnresolvedActionCount = state.ActionCount
+	item.Actions = append(item.Actions, state.Actions...)
+	item.ActionsTruncated = state.ActionCount > len(state.Actions)
 	nodeID := ""
 	if item.Node != nil {
 		nodeID = item.Node.ID

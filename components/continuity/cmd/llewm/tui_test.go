@@ -25,6 +25,7 @@ import (
 )
 
 type fakeTerminalSource struct {
+	timelineReads      int
 	showError          string
 	workError          string
 	currentError       string
@@ -121,6 +122,7 @@ func (f *fakeTerminalSource) Work(context.Context, string) (workstate.List, erro
 }
 
 func (f *fakeTerminalSource) Timeline(context.Context, string, string) (timeline.Page, error) {
+	f.timelineReads++
 	return f.timeline, nil
 }
 
@@ -1165,5 +1167,68 @@ func TestTUILoadsNoncurrentTaskTitleFromItsExactCheckpoint(t *testing.T) {
 	}
 	if !v.loadedAt.Equal(at) {
 		t.Fatalf("refresh timestamp not advanced: %v", v.loadedAt)
+	}
+}
+
+func TestTUITracksDoesNotReadHiddenTimeline(t *testing.T) {
+	v, source := newFakeTerminal(t)
+	if err := v.autoRefresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if source.timelineReads != 0 {
+		t.Fatalf("Tracks read Timeline %d times", source.timelineReads)
+	}
+	if err := press(t, v, '2'); err != nil {
+		t.Fatal(err)
+	}
+	if source.timelineReads != 1 {
+		t.Fatalf("Opening Timeline made %d reads", source.timelineReads)
+	}
+}
+
+type blockingTracksSource struct {
+	*fakeTerminalSource
+	calls   int
+	blockAt int
+	started chan struct{}
+}
+
+func (s *blockingTracksSource) Work(ctx context.Context, filter string) (workstate.List, error) {
+	s.calls++
+	if s.calls == s.blockAt {
+		close(s.started)
+		<-ctx.Done()
+		return workstate.List{}, ctx.Err()
+	}
+	return s.fakeTerminalSource.Work(ctx, filter)
+}
+
+func TestTUIQuitDuringTracksRead(t *testing.T) {
+	for _, blockAt := range []int{1, 2} {
+		t.Run(fmt.Sprintf("read-%d", blockAt), func(t *testing.T) {
+			_, fake := newFakeTerminal(t)
+			source := &blockingTracksSource{fakeTerminalSource: fake, blockAt: blockAt, started: make(chan struct{})}
+			screen := simulationScreen(t, 80, 24)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- runTerminal(ctx, screen, newTerminalView(source), time.Millisecond) }()
+			select {
+			case <-source.started:
+			case <-ctx.Done():
+				t.Fatal("Tracks read did not start")
+			}
+			if err := screen.PostEvent(tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("quit blocked behind Tracks read")
+			}
+		})
 	}
 }

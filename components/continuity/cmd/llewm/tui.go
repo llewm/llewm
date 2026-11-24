@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -193,40 +194,107 @@ func tuiCommand() *cobra.Command {
 			}
 			defer screen.Fini()
 			state := newTerminalView(appTerminalSource{app: application, checkout: checkout})
-			if err := state.load(cmd.Context()); err != nil {
-				return err
-			}
-			// Schedule the next refresh after handling the previous one. A fixed
-			// ticker can queue repeated reads when this project's load is slow.
-			refreshTimer := time.AfterFunc(5*time.Second, func() {
-				_ = screen.PostEvent(tcell.NewEventInterrupt(nil))
-			})
-			defer refreshTimer.Stop()
-			for {
-				state.draw(screen)
-				event := screen.PollEvent()
-				if event == nil {
-					return nil
-				}
-				switch e := event.(type) {
-				case *tcell.EventInterrupt:
-					_ = state.autoRefresh(cmd.Context())
-					refreshTimer.Reset(5 * time.Second)
-				case *tcell.EventResize:
-					screen.Sync()
-				case *tcell.EventKey:
-					err := state.key(cmd.Context(), e)
-					if errors.Is(err, errTerminalQuit) {
-						return nil
-					}
-					if err != nil {
-						state.status = err.Error()
-					}
-				}
-			}
+			return runTerminal(cmd.Context(), screen, state, 5*time.Second)
 		})
 	}}
 	return command
+}
+
+// Only the event loop owns the displayed view. Slow Tracks reads build a
+// separate snapshot, and a key press cancels it before changing the selection.
+func runTerminal(ctx context.Context, screen tcell.Screen, state *terminalView, interval time.Duration) error {
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
+	events := make(chan tcell.Event)
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		screen.ChannelEvents(events, ctx.Done())
+	}()
+	ready := make(chan *terminalView, 1)
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	var stopRead context.CancelFunc
+	var readCtx context.Context
+	state.console.loaded = map[string]bool{"tracks": true}
+	for {
+		state.draw(screen)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			if !state.canAutoRefresh() {
+				timer.Reset(interval)
+				continue
+			}
+			readCtx, stopRead = state.startTracksRead(ctx, ready, &workers)
+		case next := <-ready:
+			if readCtx.Err() == nil {
+				state.work, state.current, state.currentTrack = next.work, next.current, next.currentTrack
+				state.taskTitles, state.progress, state.workIndex = next.taskTitles, next.progress, next.workIndex
+				state.details, state.detailScroll = next.details, next.detailScroll
+				state.loadedAt, state.refreshError = next.loadedAt, next.refreshError
+				// Other tabs will read current data when next opened.
+				state.console.loaded = next.console.loaded
+				state.console.errors = next.console.errors
+			}
+			stopRead()
+			stopRead = nil
+			if state.loadedAt.IsZero() && state.canAutoRefresh() {
+				timer.Reset(0)
+			} else {
+				timer.Reset(interval)
+			}
+		case event, ok := <-events:
+			if !ok {
+				return nil
+			}
+			switch e := event.(type) {
+			case *tcell.EventResize:
+				screen.Sync()
+			case *tcell.EventKey:
+				if stopRead != nil {
+					stopRead()
+				}
+				err := state.key(ctx, e)
+				if errors.Is(err, errTerminalQuit) {
+					return nil
+				}
+				if err != nil {
+					state.status = err.Error()
+				}
+				if stopRead == nil && state.loadedAt.IsZero() && state.canAutoRefresh() {
+					timer.Reset(0)
+				}
+			}
+		}
+	}
+}
+
+// The caller cancels the read on input or after receiving the result.
+func (v *terminalView) startTracksRead(ctx context.Context, ready chan<- *terminalView, workers *sync.WaitGroup) (context.Context, context.CancelFunc) {
+	next := newTerminalView(v.source)
+	next.filter, next.now = v.filter, v.now
+	next.work, next.workIndex, next.detailScroll = v.work, v.workIndex, v.detailScroll
+	initial := v.loadedAt.IsZero()
+	readCtx, stopRead := context.WithCancel(ctx)
+	workers.Add(1)
+	go func(readCtx context.Context) {
+		defer workers.Done()
+		if initial {
+			if err := next.load(readCtx); err != nil {
+				next.refreshError = "Refresh failed: " + err.Error()
+			}
+		} else {
+			_ = next.autoRefresh(readCtx)
+		}
+		ready <- next
+	}(readCtx)
+	return readCtx, stopRead
 }
 
 func newTerminalView(source terminalSource) *terminalView {
@@ -234,46 +302,10 @@ func newTerminalView(source terminalSource) *terminalView {
 }
 
 func (v *terminalView) load(ctx context.Context) error {
-	v.console.errors = map[string]string{}
-	v.console.loaded = map[string]bool{}
-	v.current, v.currentTrack = nil, -1
-	// Failure in one saved-data family must not hide the rest of the console.
-	for _, view := range terminalTopViews[:5] {
-		var err error
-		switch view {
-		case "tracks":
-			v.work, err = v.source.Work(ctx, v.filter)
-			if err == nil {
-				v.current, err = v.source.Current(ctx)
-				if err == nil {
-					v.loadTaskTitles(ctx)
-				}
-			}
-			if err == nil {
-				err = v.loadProgress(ctx)
-			}
-			if err == nil {
-				v.placeCurrent()
-			}
-		case "timeline":
-			v.timeline, err = v.source.Timeline(ctx, v.kind, "")
-		case "decisions":
-			v.decisions, err = v.source.Decisions(ctx, 0)
-		case "ideas":
-			v.ideas, err = v.source.Ideas(ctx, v.ideaFilter)
-		case "history":
-			v.topics, err = v.source.Topics(ctx)
-		}
-		if err != nil {
-			v.console.errors[view] = err.Error()
-		}
-	}
+	v.console.loaded = nil
+	v.console.errors = nil
 	v.workIndex, v.eventIndex, v.decisionIndex, v.decisionOffset, v.ideaIndex, v.topicIndex = 0, 0, 0, 0, 0, 0
-	if v.currentTrack >= 0 {
-		v.workIndex = v.currentTrack
-	}
 	v.timelineCursors, v.stack = nil, nil
-	v.loadedAt = v.now()
 	return v.detail(ctx)
 }
 
@@ -382,8 +414,12 @@ func (v *terminalView) currentLine() string {
 }
 
 // Refresh only the overview; do not interrupt a record, search or expanded reading.
+func (v *terminalView) canAutoRefresh() bool {
+	return v.view == "tracks" && v.level() == nil && !v.help && !v.inputActive && !v.expanded
+}
+
 func (v *terminalView) autoRefresh(ctx context.Context) error {
-	if v.view != "tracks" || v.level() != nil || v.help || v.inputActive || v.expanded {
+	if !v.canAutoRefresh() {
 		return nil
 	}
 	err := v.refresh(ctx)
@@ -1303,7 +1339,11 @@ func (v *terminalView) draw(s tcell.Screen) {
 		put(s, 0, i+2, width, runewidth.FillRight(rows[start+i], width), style)
 	}
 	if listRows > 0 && len(rows) == 0 {
-		put(s, 0, 2, width, "No records in this view.", tcell.StyleDefault.Dim(true))
+		message := "No records in this view."
+		if onTracks && v.loadedAt.IsZero() {
+			message = "Loading tracks…"
+		}
+		put(s, 0, 2, width, message, tcell.StyleDefault.Dim(true))
 	}
 
 	details := wrapLines(v.details, width)

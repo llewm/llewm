@@ -48,6 +48,33 @@ func (v *terminalView) ensureConsole(ctx context.Context) error {
 	}
 	var err error
 	switch v.view {
+	case "tracks":
+		v.current, v.currentTrack = nil, -1
+		v.work, err = v.source.Work(ctx, v.filter)
+		if err == nil {
+			v.current, err = v.source.Current(ctx)
+		}
+		if err == nil {
+			v.loadTaskTitles(ctx)
+			err = v.loadProgress(ctx)
+		}
+		if err == nil {
+			v.placeCurrent()
+			if v.currentTrack >= 0 {
+				v.workIndex = v.currentTrack
+			}
+		}
+		v.loadedAt = v.now()
+	case "timeline":
+		v.timeline, err = v.source.Timeline(ctx, v.kind, "")
+		v.timelineCursors = nil
+	case "decisions":
+		v.decisions, err = v.source.Decisions(ctx, 0)
+		v.decisionOffset = 0
+	case "ideas":
+		v.ideas, err = v.source.Ideas(ctx, v.ideaFilter)
+	case "history":
+		v.topics, err = v.source.Topics(ctx)
 	case "project":
 		v.console.project, err = v.source.Project(ctx)
 	case "checkpoints":
@@ -117,10 +144,8 @@ func (v *terminalView) consoleDetail(ctx context.Context) (bool, error) {
 			return true, nil
 		}
 	}
-	if v.isConsoleView() {
-		if err := v.ensureConsole(ctx); err != nil {
-			return true, err
-		}
+	if err := v.ensureConsole(ctx); err != nil {
+		return true, err
 	}
 	if message := v.console.errors[v.view]; message != "" && v.level() == nil {
 		v.details = []string{"Unable to load " + terminalViewTitles[v.view] + ".", message, "Press r to retry, or Tab to browse another view."}
@@ -563,11 +588,12 @@ func (v *terminalView) refresh(ctx context.Context) error {
 		selected = terminalTrackKey(item)
 	}
 	scroll := v.detailScroll
-	view, wi, ei, di, ii, ti := v.view, v.workIndex, v.eventIndex, v.decisionIndex, v.ideaIndex, v.topicIndex
-	if err := v.load(ctx); err != nil {
+	wi := v.workIndex
+	delete(v.console.loaded, v.view)
+	if err := v.ensureConsole(ctx); err != nil {
 		return err
 	}
-	v.view, v.workIndex, v.eventIndex, v.decisionIndex, v.ideaIndex, v.topicIndex = view, wi, ei, di, ii, ti
+	v.workIndex = wi
 	if selected != "" {
 		for i, item := range v.work.Items {
 			if terminalTrackKey(item) == selected {
