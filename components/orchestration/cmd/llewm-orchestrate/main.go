@@ -44,6 +44,7 @@ Operator commands (local coordinator database):
 Engineer commands (authenticate with a private token file):
   broker-info --endpoint URL --token-file PATH
   broker-request --endpoint URL --token-file PATH --file COMMAND.json
+  broker-inbox SESSION_ID    read the local Codex inbox from the project root
   broker-pull --endpoint URL --token-file PATH --file QUERY.json
   broker-mcp --endpoint URL --token-file PATH (--session ID | --session-env VAR) --agent LABEL [--task ID]
   broker-hook --endpoint URL --token-file PATH --agent LABEL (--cursor-file PATH | --cursor-dir DIR) [--task ID]
@@ -85,6 +86,12 @@ func run(args []string, out, stderr io.Writer) error {
 		return nil
 	}
 	cmd := args[0]
+	if cmd == "broker-inbox" {
+		if len(args) != 2 || args[1] == "" || args[1] != os.Getenv("CODEX_THREAD_ID") {
+			return errors.New("broker-inbox requires exactly the current CODEX_THREAD_ID as its only argument")
+		}
+		return brokerInbox(context.Background(), localBrokerDir, localBrokerEndpoint, args[1], out)
+	}
 	sharedBroker := strings.HasPrefix(cmd, "shared-broker-")
 	if sharedBroker {
 		switch cmd {

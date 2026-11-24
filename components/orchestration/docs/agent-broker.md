@@ -88,6 +88,21 @@ it when replies must remain discoverable after that session ends. When changing
 task bindings, update any task-configured adapter or hook and use a separate agent
 inbox cursor.
 
+For the standard local Codex hook, run `llewm-orchestrate broker-inbox SESSION_ID`
+from the project root, using the literal thread ID from the hint. The command
+checks it against `CODEX_THREAD_ID`, uses loopback port 9468 and
+`.llewm/orchestration/local/engineer.token`, and reads the effective task from
+the project-scoped hook cursor under `hook-cursors/codex`. It prints incoming
+messages and acknowledgments as JSON lines. Empty output means caught up.
+It saves its own position under `inbox-cursors/codex` after each delivered page.
+An interrupted page can be replayed. Reading sends no acknowledgments.
+Custom hook layouts can continue to use `broker-pull`.
+
+When the sandbox requires approval, request a remembered prefix consisting of
+the installed executable, `broker-inbox`, and the **literal session ID**. Reuse
+that invocation for subsequent reads. A new thread has a different ID and
+needs its own approval. A resumed thread can reuse its existing rule.
+
 **Task binding.** A hook without `--task` sends `keep_task: true`, preserving
 an explicit session task and its announced scope. The state receipt returns the
 effective `task_id`; the hook uses that task for its inbox pull. When the effective

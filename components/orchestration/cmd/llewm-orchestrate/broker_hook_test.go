@@ -78,6 +78,26 @@ func TestBrokerCLIAndHookCycle(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatal("notification cursor repeated")
 	}
+	// The notification has been consumed, but the agent inbox still has the message.
+	if err = brokerHook(context.Background(), h.URL, tokenPath, "codex", "", "active", "", filepath.Join(dir, "hook-cursors", "codex"), strings.NewReader(envelope), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err = brokerInbox(context.Background(), dir, h.URL, "session", failingWriter{}); err == nil {
+		t.Fatal("inbox ignored output failure")
+	}
+	if err = brokerInbox(context.Background(), dir, h.URL, "session", &out); err != nil || !strings.Contains(out.String(), "Verify checkpoint") || strings.Contains(out.String(), "heartbeat") {
+		t.Fatalf("inbox retry: %v %q", err, out.String())
+	}
+	out.Reset()
+	if err = brokerInbox(context.Background(), dir, h.URL, "session", &out); err != nil || out.Len() != 0 {
+		t.Fatalf("inbox repeated delivered messages: %v %q", err, out.String())
+	}
+	t.Setenv("CODEX_THREAD_ID", "session")
+	for _, args := range [][]string{{"broker-inbox", "other"}, {"broker-inbox", "session", "--endpoint", h.URL}} {
+		if err = run(args, &out, io.Discard); err == nil {
+			t.Fatalf("accepted arguments %q", args)
+		}
+	}
 	// Another session's heartbeat alone is not worth a hint.
 	_, err = store.BrokerExecute(context.Background(), token, coordination.BrokerCommand{SchemaVersion: 1, RequestID: "other-beat", Action: "state", SessionID: "other", Agent: "claude", State: "active", TTLSeconds: 60})
 	if err != nil {

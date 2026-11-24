@@ -87,19 +87,8 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 	}
 	defer lockFile.Close()
 	cursor := hookCursor{Endpoint: endpoint, SessionID: event.SessionID, TaskID: task}
-	if f, e := privatestorage.Open(cursorPath); e == nil {
-		if err = privatestorage.CheckFile(f); err == nil {
-			err = transport.Decode(io.LimitReader(f, 4097), &cursor)
-		}
-		f.Close()
-		if err != nil {
-			return errors.New("invalid hook cursor")
-		}
-		if cursor.Endpoint != endpoint || cursor.SessionID != event.SessionID || cursor.TaskID != task {
-			return errors.New("cursor belongs to a different endpoint/session/task")
-		}
-	} else if !errors.Is(e, os.ErrNotExist) {
-		return e
+	if err = loadBrokerCursor(cursorPath, &cursor); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	request := func(path string, v, reply any) error {
 		b, e := json.Marshal(v)
@@ -152,6 +141,11 @@ func brokerHook(ctx context.Context, endpoint, tokenPath, agent, task, state, cu
 			sessionLabel += fmt.Sprintf(" (task %s)", receipt.TaskID)
 		}
 		hint := fmt.Sprintf("Local agent broker has %d new messages or acknowledgments for session %s. Call broker_pull (or llewm-orchestrate broker-pull) using your own saved inbox cursor; hook notifications do not acknowledge messages. Broker %s.", count, sessionLabel, feed.Broker.ID)
+		if agent == "codex" && task == "" && endpoint == localBrokerEndpoint &&
+			samePath(cursorDir, filepath.Join(localBrokerDir, "hook-cursors", "codex")) &&
+			samePath(tokenPath, filepath.Join(localBrokerDir, "engineer.token")) {
+			hint = fmt.Sprintf("Local broker inbox for Codex session %s has new messages or acknowledgments. From the project root run llewm-orchestrate broker-inbox %s with a command approval prefix including this session ID. Reading does not acknowledge messages.", event.SessionID, event.SessionID)
+		}
 		if err = json.NewEncoder(out).Encode(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": event.Name, "additionalContext": hint}}); err != nil {
 			return err
 		}
@@ -206,4 +200,10 @@ func saveHookCursor(path string, cursor hookCursor) error {
 		return err
 	}
 	return os.Rename(name, path)
+}
+
+func samePath(a, b string) bool {
+	left, err := filepath.Abs(a)
+	right, otherErr := filepath.Abs(b)
+	return err == nil && otherErr == nil && left == right
 }
