@@ -39,6 +39,14 @@ type machineUpdate struct {
 	RestartGuidance       string                  `json:"restart_guidance"`
 }
 
+func migrationHint(root, backupDir, from, to string) (string, error) {
+	backup, err := database.NextBackupPath(backupDir, time.Now())
+	if err != nil {
+		return "", err
+	}
+	return commandHint("--project-root", root, "database", "migrate", "--from", from, "--to", to, "--backup", backup), nil
+}
+
 func storeUpdates(ctx context.Context, entries []project.RegistryEntry, target updatecheck.Report) []storeUpdate {
 	result := []storeUpdate{}
 	indices := map[string]int{}
@@ -117,11 +125,11 @@ func storeUpdates(ctx context.Context, entries []project.RegistryEntry, target u
 			if !match {
 				continue
 			}
-			backup, e := database.NextBackupPath(cfg.Backups.Dir, time.Now())
+			hint, e := migrationHint(root, cfg.Backups.Dir, status.AppliedMigration, target.TargetMigration)
 			if e != nil {
 				continue
 			}
-			r.MigrationCommand = commandHint("--project-root", root, "database", "migrate", "--from", status.AppliedMigration, "--to", target.TargetMigration, "--backup", backup)
+			r.MigrationCommand = hint
 			break
 		}
 		if r.MigrationCommand == "" {

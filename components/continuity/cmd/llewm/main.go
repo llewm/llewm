@@ -1459,47 +1459,8 @@ observations. Nothing is changed either way.`,
 				if err != nil {
 					return err
 				}
-				runtimeHealth := buildinfo.CaptureRuntime().CheckInstalled()
-				identity := runtimeHealth.Runtime.Build
-				checks := []struct {
-					name     string
-					ok       bool
-					detail   string
-					optional bool
-				}{
-					{"project root", true, application.Root, false},
-					{"database", application.DB.PingContext(cmd.Context()) == nil, application.Config.Storage.Database, false},
-					{"binary", true, identity.ApplicationVersion + " " + identity.GitCommit, false},
-					{"runtime", runtimeHealth.Status == "current", runtimeHealth.Status, false},
-					{"DB schema", true, migration, false},
-					{"instructions", fileExists(filepath.Join(application.Root, "AGENTS.md")) || fileExists(filepath.Join(application.Root, "CLAUDE.md")), "AGENTS.md or CLAUDE.md project instruction source", false},
-					{"CLAUDE.md", fileExists(filepath.Join(application.Root, "CLAUDE.md")), "optional project instruction source", true},
-				}
-				failed := false
-				for _, check := range checks {
-					status := "ok"
-					if !check.ok {
-						if check.optional {
-							status = "absent"
-						} else {
-							status = "missing"
-							failed = true
-						}
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-8s %s\n", check.name, status, check.detail)
-				}
-				// Missing client rules are a warning, not a failure: the
-				// person may prefer prompts. Only installed clients are checked.
-				if homes, err := clientperm.DefaultHomes(); err == nil {
-					tools, _ := mcpserver.ToolNames(cmd.Context(), application)
-					for _, client := range clientperm.Detect(homes, application.Root, tools) {
-						status, detail := "ok", client.Name()+": "+strings.Join(client.Configured, ", ")
-						if !client.OK() {
-							status, detail = "warning", client.Warning()
-						}
-						fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-8s %s\n", "client rules", status, detail)
-					}
-				}
+				checks := doctorChecks(cmd.Context(), application, application.Root, application.Config.Storage.Database, application.DB.PingContext(cmd.Context()) == nil, "ok", migration)
+				failed := printDoctorChecks(cmd.OutOrStdout(), checks)
 				if homes, err := clientperm.DefaultHomes(); err == nil && fileExists(filepath.Join(application.Root, coverage.DefaultRequirementsPath)) {
 					for _, client := range clientperm.Detect(homes, application.Root, nil) {
 						status, detail, err := coverageDoctorLine(cmd.Context(), application, string(client.Client))
@@ -1517,10 +1478,36 @@ observations. Nothing is changed either way.`,
 				}
 				return nil
 			})
-			if err != nil && !opened && jsonReport {
-				reported = true
-				status, _ := database.Inspect(cmd.Context(), cfg.Storage.Database)
-				_ = writeJSON(cmd.OutOrStdout(), map[string]any{"schema_version": 1, "state": "unavailable", "database": status, "diagnostic": diagnostic.From(err), "project_state": state, "health_error": diagnostic.Bounded(err.Error()), "git_protection": gitprotection.Inspect(cmd.Context(), root)})
+			if err != nil && !opened {
+				var pending *database.MigrationRequiredError
+				var recovery string
+				var checks []doctorCheck
+				if errors.As(err, &pending) {
+					status := pending.Status
+					command, hintErr := migrationHint(root, cfg.Backups.Dir, status.AppliedMigration, status.CompiledMigration)
+					recovery = command
+					if hintErr != nil {
+						err = errors.Join(err, fmt.Errorf("select migration backup: %w", hintErr))
+					}
+					checks = doctorChecks(cmd.Context(), nil, root, status.Path, true, "pending", strings.TrimSpace(status.AppliedMigration+" -> "+status.CompiledMigration+" "+recovery))
+					if !jsonReport {
+						printDoctorChecks(cmd.OutOrStdout(), checks)
+					}
+				}
+				if jsonReport {
+					reported = true
+					status, _ := database.Inspect(cmd.Context(), cfg.Storage.Database)
+					report := map[string]any{"schema_version": 1, "state": "unavailable", "database": status, "diagnostic": diagnostic.From(err), "project_state": state, "health_error": diagnostic.Bounded(err.Error()), "git_protection": gitprotection.Inspect(cmd.Context(), root)}
+					if checks != nil {
+						report["checks"] = checks
+					}
+					if recovery != "" {
+						report["migration_command"] = recovery
+					}
+					if writeErr := writeJSON(cmd.OutOrStdout(), report); writeErr != nil {
+						return errors.Join(err, writeErr)
+					}
+				}
 			}
 			return err
 		},
@@ -1532,6 +1519,62 @@ observations. Nothing is changed either way.`,
 	command.Flags().StringSliceVar(&sourceVerifications, "source-verification", nil, "readiness: caller-reported source verification reference")
 	command.Flags().BoolVar(&checkIntegrity, "check-integrity", false, "readiness: run SQLite PRAGMA integrity_check and report it separately")
 	return command
+}
+
+type doctorCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
+
+func printDoctorChecks(out io.Writer, checks []doctorCheck) (failed bool) {
+	for _, check := range checks {
+		fmt.Fprintf(out, "%-12s %-8s %s\n", check.Name, check.Status, check.Detail)
+		if check.Status == "missing" || check.Status == "pending" {
+			failed = true
+		}
+	}
+	return failed
+}
+
+func doctorChecks(ctx context.Context, application *app.App, root, path string, reachable bool, schemaState, schemaDetail string) []doctorCheck {
+	runtimeHealth := buildinfo.CaptureRuntime().CheckInstalled()
+	identity := runtimeHealth.Runtime.Build
+	var checks []doctorCheck
+	required := func(ok bool) string {
+		if !ok {
+			return "missing"
+		}
+		return "ok"
+	}
+	row := func(name, status, detail string) {
+		checks = append(checks, doctorCheck{name, status, detail})
+	}
+	row("project root", "ok", root)
+	row("database", required(reachable), path)
+	row("binary", "ok", identity.ApplicationVersion+" "+identity.GitCommit)
+	row("runtime", required(runtimeHealth.Status == "current"), runtimeHealth.Status)
+	row("DB schema", schemaState, schemaDetail)
+	claude := fileExists(filepath.Join(root, "CLAUDE.md"))
+	row("instructions", required(claude || fileExists(filepath.Join(root, "AGENTS.md"))), "AGENTS.md or CLAUDE.md project instruction source")
+	claudeStatus := "absent"
+	if claude {
+		claudeStatus = "ok"
+	}
+	row("CLAUDE.md", claudeStatus, "optional project instruction source")
+	// Missing client rules are a warning, not a failure: the
+	// person may prefer prompts. Only installed clients are checked.
+	if homes, err := clientperm.DefaultHomes(); err == nil {
+		tools, _ := mcpserver.ToolNames(ctx, application)
+		for _, client := range clientperm.Detect(homes, root, tools) {
+			status, detail := "ok", client.Name()+": "+strings.Join(client.Configured, ", ")
+			if !client.OK() {
+				status, detail = "warning", client.Warning()
+			}
+			row("client rules", status, detail)
+		}
+	}
+	return checks
 }
 
 func hookCommand() *cobra.Command {

@@ -424,7 +424,11 @@ Passing migration tests on a temporary database does not mean an existing projec
 database has been upgraded.
 
 `llewm doctor --output json` emits a structured diagnosis even when project
-opening fails, with a nonzero exit status for the failed check. Either root
+opening fails, with a nonzero exit status for the failed check. For a pending
+migration, text output shows the applied and required schema alongside checks
+that can run against the checkout. JSON includes those rows in `checks` and
+the suggested backup-gated command in `migration_command` when a backup path
+can be selected. Running `doctor` leaves the migration for explicit review. Either root
 `AGENTS.md` or `CLAUDE.md` satisfies its project instruction check. Configuration
 and bootstrap budget warnings identify the responsible sources.
 

@@ -1229,6 +1229,25 @@ func TestHookRefusesPendingMigrationWithoutWriting(t *testing.T) {
 	if err := command.Execute(); err == nil || !json.Valid(doctor.Bytes()) || !strings.Contains(doctor.String(), "migration_required") {
 		t.Fatalf("doctor diagnosis: %v %s", err, doctor.String())
 	}
+	var pendingReport struct {
+		Checks           []doctorCheck `json:"checks"`
+		MigrationCommand string        `json:"migration_command"`
+	}
+	if err := json.Unmarshal(doctor.Bytes(), &pendingReport); err != nil || len(pendingReport.Checks) == 0 || !strings.Contains(pendingReport.MigrationCommand, "--backup") || !strings.Contains(pendingReport.MigrationCommand, latestSchema) {
+		t.Fatalf("missing concrete migration command: %v %s", err, doctor.String())
+	}
+	doctor.Reset()
+	command = newRootCommand("llewm")
+	command.SetOut(&doctor)
+	command.SetArgs([]string{"doctor"})
+	if err := command.Execute(); err == nil {
+		t.Fatal("pending migration must require attention")
+	}
+	for _, want := range []string{"DB schema    pending", "database     ok", "project root", "binary", "runtime", "instructions ok", "'database' 'migrate' '--from'", "--backup", latestSchema} {
+		if !strings.Contains(doctor.String(), want) {
+			t.Fatalf("doctor missing %q: %s", want, doctor.String())
+		}
+	}
 	db, err = sql.Open("sqlite", "file:"+filepath.ToSlash(databasePath)+"?mode=ro")
 	if err != nil {
 		t.Fatal(err)
