@@ -136,7 +136,7 @@ func (s Service) Report(ctx context.Context, input Input) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	state, err := adoption.Inspect(config.StateDir(s.Root), cfg.Mode)
+	state, err := adoption.Inspect(s.Root, config.StateDir(s.Root), cfg.Mode)
 	if err != nil {
 		return Report{}, err
 	}

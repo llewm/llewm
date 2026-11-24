@@ -87,7 +87,7 @@ func newRootCommand(name string) *cobra.Command {
 	root.PersistentFlags().String("project-root", "", "explicit Git project root or path within it")
 	root.AddCommand(pmCommand(), logCommand())
 	root.AddCommand(versionCommand(), initCommand(), databaseCommand(), projectCommand(), workspaceCommand(), syncCommand(), globalCommand(), doctorCommand(), clientCommand(), briefCommand(), workCommand(), presenceCommand(), tuiCommand(), consoleCommand(), hookCommand(), coverageCommand(), usageCommand(), statsCommand(), checkpointCommand(), procedureCommand(), resourceCommand(), pinCommand(), leaseCommand(), standingGrantCommand(), forkCommand(), contractCommand(), bootstrapCommand(), activityCommand(), roadmapCommand(), releaseCommand(), trackPlanCommand(), decisionCommand(), historyCommand(), topicCommand(), narrativeCommand(), itemCommand(), memoryCommand(), mcpCommand())
-	root.AddCommand(modeCommand(), trialCommand(), proseImportCommand())
+	root.AddCommand(modeCommand(), trialCommand(), adoptCommand(false), proseImportCommand())
 	root.AddCommand(installCommand(), updateCommand(), portfolioCommand(), registryCommand())
 	return root
 }
@@ -1387,13 +1387,14 @@ observations. Nothing is changed either way.`,
 			if err != nil {
 				return err
 			}
-			state, err := adoption.Inspect(config.StateDir(root), cfg.Mode)
+			state, err := adoption.Inspect(root, config.StateDir(root), cfg.Mode)
 			if err != nil {
 				return err
 			}
 			jsonReport := format == "json" || readinessReport || checkIntegrity || len(probes) > 0 || len(sourceVerifications) > 0
 			if !jsonReport {
-				fmt.Fprintf(cmd.OutOrStdout(), "Hook mode: %s\nAdoption state: %s\nEffective hooks: %s\nSession recovery: %s (configuration)\nLive client: %s\n", state.HookMode, state.AdoptionState, state.EffectiveHooks, state.SessionRecovery, state.LiveClient)
+				fmt.Fprintf(cmd.OutOrStdout(), "Hook mode: %s\nAdoption state: %s\nEffective hooks: %s\nSession recovery: %s (configuration)\nLive client: %s\n", state.HookMode, state.DisplayState(), state.EffectiveHooks, state.SessionRecovery, state.LiveClient)
+				fmt.Fprintln(cmd.OutOrStdout(), "Recordkeeping guidance:", state.GuidanceNotice)
 			}
 			if !jsonReport {
 				for _, warning := range gitprotection.Inspect(cmd.Context(), root).Warnings() {

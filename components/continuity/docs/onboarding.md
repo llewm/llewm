@@ -256,11 +256,24 @@ explicit choice. Neither path requires maintaining duplicate operational plans.
    Interpretations stay proposed unless review/delegation
    permits otherwise. Review uncertainties and the intended current work once;
    do not manufacture approvals or reconstruct all historical commits.
-7. **Save a first checkpoint.** Name the current objective, authoritative
+7. **Record explicit full adoption and review writing destinations.** After
+   initialization, `llewm adopt` previews the project's instruction sections.
+   Confirm the engineer's full-adoption choice with `llewm adopt --reviewed`.
+   Add `--existing` for established use without a prior receipt. An active
+   trial converts with its original baseline. Confirmation records today's date.
+   Show each conflict with its file, section, consequence and proposed edit.
+   For example, decide whether a milestone report in Git contains full test
+   results or links to observations in Llewm. Keep the engineer's chosen split
+   and CLI fallback in an instruction file the client loads without the plugin.
+   Use a personal client-loaded file for personal adoption. Then record
+   `llewm adopt --reviewed --guidance AGENTS.md --workflow "Reviewed summary"`
+   with the actual paths and wording. Repeat the guidance flag for additional
+   relevant files. Doctor compares their current hashes with the review.
+8. **Save a first checkpoint.** Name the current objective, authoritative
    project instructions, observed checks, and remaining limits. Use the checkpoint
    skill's dry-run/save/readback flow. Adopt existing history progressively; do
    not manufacture knowledge from every old commit. Retain an existing lineage.
-8. **Recover in a fresh session.** Ask to continue. Confirm the exact checkpoint,
+9. **Recover in a fresh session.** Ask to continue. Confirm the exact checkpoint,
    objective and next action, plus the observed SessionStart event. Record the
    client/plugin versions and OS/architecture that passed.
 

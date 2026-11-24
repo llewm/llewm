@@ -28,7 +28,13 @@ type File struct {
 	// Text is redacted and is evidence only, never a byte-for-byte restore source.
 	Text string `json:"redacted_text,omitempty"`
 }
+type Guidance struct {
+	Sources  []File `json:"sources"`
+	Workflow string `json:"workflow"`
+}
 type Transition struct {
+	Entry          string    `json:"entry,omitempty"`
+	Guidance       *Guidance `json:"guidance,omitempty"`
 	State          string    `json:"state"`
 	At             time.Time `json:"at"`
 	Review         string    `json:"review,omitempty"`
@@ -184,8 +190,10 @@ func Save(dir string, s State) error {
 		return err
 	}
 	if previous == nil {
-		if len(s.History) != 1 || s.Phase() != "trial" {
-			return errors.New("first transition must start a trial")
+		first := len(s.History) == 1
+		reviewed := first && s.Phase() == "adopted" && (s.History[0].Entry == "direct" || s.History[0].Entry == "existing")
+		if !first || (s.Phase() != "trial" && !reviewed) {
+			return errors.New("first transition must start a trial or record explicit full adoption")
 		}
 	} else {
 		if len(s.History) != len(previous.History)+1 || !reflect.DeepEqual(s.History[:len(previous.History)], previous.History) || !reflect.DeepEqual(s.Baseline, previous.Baseline) || !s.ReviewAfter.Equal(previous.ReviewAfter) {

@@ -74,29 +74,9 @@ func trialCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return writeJSON(cmd.OutOrStdout(), map[string]any{"state": s, "phase": s.Phase(), "current": current, "review_due": time.Now().After(s.ReviewAfter), "shared_client_configuration": "not owned by the project trial; inspect plugin, hook, MCP, permission and global guidance changes separately"})
+		return writeJSON(cmd.OutOrStdout(), map[string]any{"state": s, "phase": s.Phase(), "current": current, "review_due": s.Phase() == "trial" && !s.ReviewAfter.IsZero() && time.Now().After(s.ReviewAfter), "shared_client_configuration": "not owned by the project trial; inspect plugin, hook, MCP, permission and global guidance changes separately"})
 	}})
-	var adoptReviewed bool
-	adopt := &cobra.Command{Use: "adopt", Short: "Confirm ongoing use after a full local trial; preserve prose and data", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		root, s, err := trialState(cmd)
-		if err != nil {
-			return err
-		}
-		if s.Phase() != "trial" {
-			return errors.New("adoption requires an active trial")
-		}
-		if !adoptReviewed {
-			return errors.New("review project control and use --reviewed to adopt; sync and shared setup remain separate")
-		}
-		s.History = append(s.History, adoption.Transition{State: "adopted", At: time.Now().UTC(), Verification: "user reviewed adoption"})
-		if err = adoption.Save(config.StateDir(root), *s); err != nil {
-			return err
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), "Adopted for ongoing use. The local continuity workflow remains enabled. Project instruction prose retains its instruction authority. History sync remains a separate choice. The original prose baseline is retained for handback.")
-		return nil
-	}}
-	adopt.Flags().BoolVar(&adoptReviewed, "reviewed", false, "confirm explicit adoption after reviewing project control")
-	parent.AddCommand(adopt)
+	parent.AddCommand(adoptCommand(true))
 	var out string
 	prepare := &cobra.Command{Use: "prepare", Short: "Write a new read-only review bundle with original/current prose and all curated records", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		root, s, err := trialState(cmd)
@@ -234,7 +214,7 @@ func trialState(cmd *cobra.Command) (string, *adoption.State, error) {
 		return "", nil, err
 	}
 	if s == nil {
-		return "", nil, errors.New("no trial receipt; start a trial before adoption, or use the documented manual handback for an existing project")
+		return "", nil, errors.New("no adoption receipt; use llewm adopt to review direct adoption or confirmation of existing use")
 	}
 	return root, s, nil
 }

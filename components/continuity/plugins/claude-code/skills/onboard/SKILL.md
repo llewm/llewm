@@ -211,6 +211,29 @@ From the chosen project, or with `llewm --project-root PATH` before each command
   `continuity_info` with the installed binary's version receipt; record unknown
   plugin identity as unknown. `doctor` alone does not prove live hook delivery.
 
+For explicit full adoption, after initialization run `llewm adopt` to preview
+instruction sources. Read the applicable root, override, component and client
+instructions, including referenced roadmaps and evidence requirements. Show
+each material overlap to the engineer: path and section, current destination,
+proposed destination, what would be duplicated or lost, and the proposed edit.
+Honor existing decisions. Ask only about unresolved choices. Preserve repository
+deliverables, test evidence and host records the engineer wants maintained.
+
+Record an explicit full-adoption request in this session with `llewm adopt
+--reviewed` (add `--existing` when confirming established use). For an active
+trial this converts its existing receipt. Guidance review can follow separately.
+Show the engineer the effective hook mode, adoption entry, guidance and client
+checks from doctor. For shared adoption put the approved workflow in the
+project's loaded instructions; for personal adoption use a client-loaded local
+instruction file and avoid changing shared policy. Include the CLI fallback
+for decisions and checkpoints when MCP is unavailable, preserving the normal
+review, scope and readback rules. Prefer a reference over copying the same
+verification into two places. Apply the agreed edit, then run `llewm adopt
+--reviewed --guidance PATH --workflow "APPROVED ONE-LINE SUMMARY"`; repeat
+`--guidance` for other relevant instruction files. Verify the guidance in
+doctor and fresh recovery. On older installations that lack the command,
+report the missing receipt capability and use their supported update workflow.
+
 Adopt an existing project progressively. Do not reconstruct semantic history
 from all commits. Reuse an existing Continuity lineage when appropriate; do not
 configure history sync, usage ingestion, or personal global guidance unless requested.

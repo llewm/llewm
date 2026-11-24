@@ -739,9 +739,9 @@ make Llewm a permanent requirement.
 
 Preserve any knowledge you still need in ordinary project docs, remove instructions
 that require Llewm, then disable integrations as described below and verify work
-in a fresh session. For trial and adopted trial projects, the
+in a fresh session. For projects with trial or adoption receipts, the
 [reviewed prose handback](trials.md#prepare-a-handback) helps preserve accumulated
-knowledge and records the disconnection. Without a trial receipt, follow those
+knowledge and records the disconnection. Without a receipt, follow those
 review and fresh-session verification steps manually. Disabling integrations
 does not require deleting state or completing a trial exit command.
 

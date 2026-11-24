@@ -16,11 +16,12 @@ import (
 )
 
 type Packet struct {
-	Trial         bool                   `json:"trial,omitempty"`
-	SchemaVersion int                    `json:"schema_version"`
-	Project       string                 `json:"project"`
-	Global        []instructions.Section `json:"global,omitempty"`
-	Rules         []instructions.Section `json:"rules"`
+	AdoptionGuidance string                 `json:"adoption_guidance,omitempty"`
+	Trial            bool                   `json:"trial,omitempty"`
+	SchemaVersion    int                    `json:"schema_version"`
+	Project          string                 `json:"project"`
+	Global           []instructions.Section `json:"global,omitempty"`
+	Rules            []instructions.Section `json:"rules"`
 	// CoreRules are Continuity's built-in rules after configuration;
 	// CoreRulesDisabled names those configuration turned off.
 	CoreRules         []CoreRule             `json:"core_rules,omitempty"`
@@ -297,6 +298,9 @@ func (c Compiler) PreflightWithReconciliation(ctx context.Context, projectID, ro
 		return Readiness{}, err
 	}
 	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, RegistryWarning: c.RegistryWarning, Checkpoint: &prepared, UnresolvedActions: unresolved, Pins: pins, PinsOmitted: omitted}
+	if phase.Phase() == "adopted" {
+		_, packet.AdoptionGuidance = phase.GuidanceStatus(root)
+	}
 	c.addNotices(ctx, projectID, &packet)
 	var automaticChoice *Choice
 	if c.Choose != nil {
@@ -467,6 +471,9 @@ func (c Compiler) BuildForSession(ctx context.Context, projectID, root, name str
 		return Packet{}, err
 	}
 	packet := Packet{Trial: phase.Phase() == "trial", SchemaVersion: 3, Project: name, Global: global, Rules: rules, CoreRules: c.coreRules(), CoreRulesDisabled: c.CoreRulesDisabled, CoreRulesWarning: c.CoreRulesWarning, RegistryWarning: c.RegistryWarning, Checkpoint: latest, UnresolvedActions: unresolved, Fallback: fallback, Pins: pins, PinsOmitted: omitted}
+	if phase.Phase() == "adopted" {
+		_, packet.AdoptionGuidance = phase.GuidanceStatus(root)
+	}
 	c.addNotices(ctx, projectID, &packet)
 	if latest != nil || ambiguous {
 		packet.Choice = choice
@@ -653,6 +660,9 @@ func globalOverrides(global, rules []instructions.Section) map[string]instructio
 func Markdown(packet Packet) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Continuity bootstrap\n\nProject: %s\n\n", packet.Project)
+	if packet.AdoptionGuidance != "" {
+		fmt.Fprintf(&out, "Project recordkeeping: %s\n\n", packet.AdoptionGuidance)
+	}
 	if packet.Trial {
 		out.WriteString("Trial: full local continuity is enabled. Preserve original project docs for review and handback; History sync remains disabled. Do not maintain duplicate operational plans by default.\n\n")
 	}

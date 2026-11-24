@@ -15,9 +15,8 @@ docs. Keep useful standalone instructions in both paths.
 To stop using Llewm, disable its client integrations, stop its processes, remove
 instructions that require Llewm, and start a fresh session. If useful knowledge
 has accumulated in Llewm, first reconcile it into project docs using the
-[handback workflow below](#prepare-a-handback). The same workflow supports both
-trial and adopted trial projects; existing setups without a trial receipt use a
-manual review. See [removal and retained data](installation.md#remove-or-disable-an-installation).
+[handback workflow below](#prepare-a-handback). It supports projects with a trial or full-adoption receipt. Projects without a
+receipt can use a manual review. See [removal and retained data](installation.md#remove-or-disable-an-installation).
 
 A trial is not an execution sandbox or an automatic rollback of agent edits.
 Keep ordinary Git and database backups. Trial/exit never deletes project
@@ -105,14 +104,15 @@ and qualify exact checkpoint recovery in a fresh session. Keep prose sufficient
 for recovery while deciding what ongoing responsibilities belong in Continuity.
 The baseline remains available after adoption.
 
-Existing installations without a trial receipt retain their behavior. Their
-presence is not retroactive evidence of a reviewed adoption. To hand them back,
-follow the same review/verification principles manually; do not invent an old
-baseline or delete their store to manufacture a trial.
+For direct full adoption after init, run `llewm adopt` to preview the instruction
+sources, then `llewm adopt --reviewed`. For an established project, use
+`llewm adopt --existing --reviewed`. Its baseline begins at confirmation.
+The [onboarding workflow](onboarding.md) explains how to reconcile existing
+instructions and record the agreed guidance for doctor and fresh sessions.
 
 ## Prepare a handback
 
-From a trial or an adopted trial project:
+From a project with a trial or adoption receipt:
 
 ```sh
 llewm trial prepare --out docs/handback-review-1

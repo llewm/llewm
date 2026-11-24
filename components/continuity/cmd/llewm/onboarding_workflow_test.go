@@ -409,3 +409,42 @@ func TestGitProtectionInitDoctorAndTrial(t *testing.T) {
 	}
 	runCLI(t, "", "trial", "start", "--prose", "AGENTS.md")
 }
+
+func TestDirectAndEstablishedAdoptionReview(t *testing.T) {
+	for _, entry := range []string{"direct", "existing"} {
+		t.Run(entry, func(t *testing.T) {
+			root := testProject(t)
+			runCLI(t, "", "init")
+			if out := runCLI(t, "", "adopt"); !strings.Contains(out, "AGENTS.md") {
+				t.Fatal(out)
+			}
+			dir := config.StateDir(root)
+			if s, err := adoption.Load(dir); err != nil || s != nil {
+				t.Fatal("preview wrote receipt", s, err)
+			}
+			args := []string{"adopt", "--reviewed"}
+			if entry == "existing" {
+				args = append(args, "--existing")
+			}
+			runCLI(t, "", args...)
+			args = append(args, "--guidance", "AGENTS.md", "--workflow", "Keep decisions in Llewm and milestone evidence in Git.")
+			runCLI(t, "", args...)
+			runCLI(t, "", args...)
+			s, err := adoption.Load(dir)
+			if err != nil || len(s.History) != 2 || s.History[0].Entry != entry {
+				t.Fatal(s, err)
+			}
+			for _, command := range [][]string{{"doctor"}, {"bootstrap"}} {
+				if out := runCLI(t, "", command...); !strings.Contains(out, "Keep decisions in Llewm") {
+					t.Fatal(out)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# Updated instructions\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if out := runCLI(t, "", "bootstrap"); !strings.Contains(out, "review changes to AGENTS.md") || strings.Contains(out, "Keep decisions in Llewm") {
+				t.Fatal(out)
+			}
+		})
+	}
+}
