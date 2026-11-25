@@ -33,22 +33,10 @@ dated source observations and claim-level evidence links preserve their context.
 Automatic web capture and truth verification are not provided.
 See [research memory and qualification](components/continuity/docs/research-memory.md).
 
-**Coordinate work across agents.** Explicit task bindings, presence observations,
-overlap visibility, and scoped leases support coordination today. Required lease
-fencing can protect selected record writes; presence alone does not lock files or
-assign work. The separate [orchestration component](components/orchestration/README.md)
-now provides a manual shared work pool, reviewed assignments and context-preserving
-reassignment. Automatic agent launching and approved execution remain future
-directions. See [parallel tracks](docs/parallel-tracks.md).
-
-For messages between already-running agents on one machine, choose the
-[local broker](components/orchestration/docs/agent-broker.md) or the
-[manual Markdown mailbox](components/orchestration/docs/file-mailbox.md), which
-needs no Llewm install. These local channels are separate from cross-machine
-leases and History sync; no cross-machine message bridge is implemented.
-The separate [shared messaging service](components/orchestration/docs/shared-agent-broker.md)
-supports direct TLS connections between agents on different machines, with
-explicit host/client configuration and no automatic forwarding of local history.
+**Assign or pick up work across agents and platforms.** Start with the
+[assignment and pickup guide](docs/parallel-tracks.md). It gives the first lookup
+for brokerless async jobs, coordinator claims, live messages, session handoffs and
+native CI checks, with a Windows/macOS pickup example.
 
 **Continuity is Llewm’s current MVP, not its full scope.** It preserves attributable
 project guidance, tasks, plans, decisions, research, and verification across

@@ -1,5 +1,8 @@
 # Shared agent work
 
+Choosing between a tagged async task, a coordinator claim and a broker message?
+Start with the [assignment and pickup guide](../../docs/parallel-tracks.md).
+
 For executable/PATH setup and upgrades, follow the
 [installation runbook](docs/installation.md). Root builds include orchestration;
 installation and service configuration remain separate steps.

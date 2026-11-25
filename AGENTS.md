@@ -68,6 +68,9 @@ and hosts from resources. Use `docs/vision.md` and `docs/architecture.md` for
 project-wide scope decisions. Continuity-specific product
 context is in `components/continuity/docs/product-context.md`.
 
+For job assignment or pickup across agents or platforms, start with
+[the assignment and pickup guide](docs/parallel-tracks.md).
+
 ## Branch and worktree lifecycle
 
 For sequential single-session work, including new tasks, use the current checkout
