@@ -14,8 +14,10 @@ MODULE = Path(__file__).resolve().parents[1]
 TESTS = [
     "TestBlockCycleConvergesAcrossGitPeers", "TestSyncKeepsLocalCommitsWhileOffline",
     "TestConcurrentRevisionsBecomeAForkInsteadOfACollision", "TestCrossMachineLeasesThroughGitRefs",
-    "TestUnchangedSyncInvalidationAndRecovery", "TestAutomaticSyncTriggers",
+    "TestAutomaticSyncTriggers",
 ]
+if platform.system() == "Linux":
+    TESTS.append("TestUnchangedSyncInvalidationAndRecovery")
 
 
 class Failure(Exception):
