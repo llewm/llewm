@@ -17,7 +17,10 @@ func mcpTestCommand(ctx context.Context) *exec.Cmd {
 
 // TestMain keeps hook tests from starting real detached processes: the test
 // binary is os.Executable, and a session start would launch it again.
+// It also clears CLAUDECODE, which doctor reads to select the invoking
+// client: tests run from a Claude Code session must match other runners.
 func TestMain(m *testing.M) {
 	startBackgroundUsage = func(string, string) error { return nil }
+	os.Unsetenv("CLAUDECODE")
 	os.Exit(testguard.Run(m))
 }
